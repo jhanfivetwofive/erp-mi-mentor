@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programas - Mi Mentor</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- DataTables Core CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+
+    <!-- DataTables Buttons CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+    <!-- DataTables Core JS -->
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+
+    <!-- DataTables Buttons + Dependencias -->
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+
+</head>
+<body class="bg-light">
+
+    <!-- Barra de navegación -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-success">
+        <div class="container mt-4">
+            <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/">Inicio</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/alumnos">Alumnos</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/catalogo/programas">Programas</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/logout">Cerrar sesión</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+<div class="container mt-4">
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0"><i class="bi bi-boxes me-2"></i>Programas - Mi Mentor de Inversión</h4>
+        </div>
+    </div>
+
+    <div class="table-responsive" id="tablaProgramas"></div>
+</div>
+
+<script>
+const headersAmigables = {
+    "ID_PROGRAMA": "ID Programa",
+    "NOMBRE_PROGRAMA": "Nombre Programa",
+    "NOMENCLATURA": "Nomenclatura",
+    "DESCRIPCION": "Descripción",
+    "SKU_PRODUCTO": "SKU Producto",
+    "EMBUDO": "Embudo"
+};
+</script>
+
+<script>
+function cargarProgramas() {
+    $('#tablaProgramas').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando programas...</div>');
+
+    $.ajax({
+        url: "/api/catalogo/programas", // Asegúrate que esta URL sea la correcta
+        method: "GET",
+        success: function(data) {
+            if (data.error) {
+                $('#tablaProgramas').html('<div class="alert alert-danger">Error: ' + data.error + '</div>');
+                return;
+            }
+
+            // Aquí va la lógica para generar la tabla si los datos son correctos
+            let columnas = ["ID_PROGRAMA", "NOMBRE_PROGRAMA", "NOMENCLATURA", "DESCRIPCION", "SKU_PRODUCTO", "EMBUDO"];
+            let thead = '<thead><tr>';
+            columnas.forEach(col => thead += `<th>${headersAmigables[col] || col}</th>`);
+            thead += '</tr></thead>';
+
+            let tbody = '<tbody>';
+            data.forEach(row => {
+                tbody += '<tr>';
+                columnas.forEach(col => {
+                    let valor = row[col] ?? '';
+                    tbody += `<td>${valor}</td>`;
+                });
+                tbody += '</tr>';
+            });
+            tbody += '</tbody>';
+
+            // Arma la tabla completa
+            const tableHTML = `
+                <table id="programasTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">
+                    ${thead}
+                    ${tbody}
+                </table>`;
+
+            // Reinicializa DataTable si ya existe
+            if ($.fn.DataTable.isDataTable('#programasTable')) {
+                $('#programasTable').DataTable().clear().destroy();
+            }
+
+            $('#tablaProgramas').html(tableHTML);
+
+            // Inicializa DataTable con opciones
+            $('#programasTable').DataTable({
+                scrollX: true,
+                scrollY: '400px',
+                scrollCollapse: true,
+                pageLength: 50,
+                lengthMenu: [[25, 50, 100], [25, 50, 100]],
+                autoWidth: false,
+                responsive: false,
+                dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>',
+                order: [[0, 'asc']],
+                buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
+                language: {
+                    search: "Buscar:",
+                    lengthMenu: "Mostrar _MENU_ registros por página",
+                    zeroRecords: "No se encontraron resultados",
+                    info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
+                    infoEmpty: "Mostrando 0 a 0 de 0 registros",
+                    infoFiltered: "(filtrado de _MAX_ registros totales)",
+                    paginate: {
+                        first: "Primero",
+                        last: "Último",
+                        next: "Siguiente",
+                        previous: "Anterior"
+                    }
+                },
+                initComplete: function () {
+                    this.api().columns.adjust();
+                }
+            });
+        },
+        error: function(err) {
+            $('#tablaProgramas').html('<div class="alert alert-danger">Error al cargar datos.</div>');
+            console.error("Error al cargar programas:", err);
+        }
+    });
+}
+
+$(document).ready(function() {
+    cargarProgramas();
+});
+</script>
+
+</body>
+</html>
