@@ -1,0 +1,52 @@
+#alumnosTable {
+    font-size: 0.85rem;
+    background-color: #fff;
+    border: 1px solid #8eb015ff;
+}
+
+#alumnosTable thead {
+    background-color: #8eb015ff;
+    color: white;
+}
+
+#alumnosTable th, #alumnosTable td {
+    padding: 0.5rem;
+    vertical-align: middle;
+}
+table.dataTable th,
+table.dataTable td {
+    font-size: 13px;
+    padding: 6px 10px;
+    vertical-align: middle;
+}
+
+table.dataTable thead {
+    background-color: #8eb015ff;
+    font-weight: bold;
+}
+
+.dt-buttons .btn {
+    font-size: 13px;
+    margin-right: 5px;
+}
+
+table.dataTable {
+  width: 100% !important;
+}
+
+/* Establece un máximo ancho para la página y le da márgenes a los lados */
+body {
+    margin-left: 20px; /* Espacio a la izquierda */
+    margin-right: 20px; /* Espacio a la derecha */
+}
+
+/* Si quieres que el contenedor de la tabla no ocupe toda la pantalla */
+.container {
+    max-width: 1200px; /* Ancho máximo para el contenedor */
+    margin-left: auto; /* Centra el contenedor */
+    margin-right: auto; /* Centra el contenedor */
+}
+
+.custom-navbar {
+    background-color: #8eb015ff; /* Color azul (puedes cambiar el código HEX) */
+}

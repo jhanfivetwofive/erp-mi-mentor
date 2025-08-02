@@ -1,0 +1,9 @@
+Flask==2.3.3
+pandas
+google-cloud-bigquery
+gunicorn
+db-dtypes
+google-auth
+google-cloud-secret-manager
+Flask-Session  # Añadir esta línea para usar sesiones
+authlib
