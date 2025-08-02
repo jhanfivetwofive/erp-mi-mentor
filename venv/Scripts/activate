@@ -35,7 +35,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\Users\seres\Documents\Codigo_Python_Jonathan\ERP_MI_MENTOR_DE_INVERSION\venv"
+VIRTUAL_ENV="C:\Users\seres\Documents\Codigo_Python_Jonathan\ERP_MI_MENTOR_DE_INVERSION\erp-mi-mentor\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
