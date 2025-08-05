@@ -1,7 +1,0 @@
-steps:
-- name: 'gcr.io/cloud-builders/gcloud'
-  args: ['run', 'deploy', 'mi-app-dev',
-         '--source=.',
-         '--region=us-central1',
-         '--allow-unauthenticated']
-timeout: 900s

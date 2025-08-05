@@ -1,110 +1,39 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alumnos - Mi Mentor</title>
+{% extends "base.html" %}
+{% block title %}Alumnos - Mi Mentor de Inversión
 
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<!-- Botón flotante para agregar alumno -->
+<a href="/alumnos/nuevo" class="btn btn-success rounded-circle shadow-lg position-fixed"
+   style="bottom: 30px; right: 30px; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; z-index: 1000;"
+   title="Agregar nuevo alumno">
+    <i class="bi bi-person-plus fs-4 text-white"></i>
+</a>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% endblock %}
 
-    <!-- DataTables Core CSS -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-
-    <!-- DataTables Buttons CSS (exportar CSV, Excel, PDF, Print) -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
-
-    <!-- jQuery (siempre antes de DataTables JS) -->
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-
-    <!-- DataTables Core JS -->
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-
-    <!-- Tu estilo personalizado -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-
-    <!-- DataTables FixedHeader CSS -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/fixedheader/3.4.0/css/fixedHeader.dataTables.min.css">
-
-    <!-- DataTables FixedHeader JS -->
-    <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
-
-    <!-- DataTables Buttons + Dependencias -->
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
-
-</head>
-
-
-<body class="bg-light">
-
-    <!-- Barra de navegación -->
-    <nav class="navbar navbar-expand-lg navbar-light bg-success">
-        <div class="container mt-4">
-            <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="/">Inicio</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="/alumnos">Alumnos</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="/catalogo/programas">Programas</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="/logout">Cerrar sesión</a>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </nav>
-
-<!-- 🟩 Encabezado en barra verde -->
-<div class="container mt-4">
-    <div class="card shadow-sm mb-4">
-        <div class="card-header bg-success text-white">
-            <h4 class="mb-0"><i class="bi bi-boxes me-2"></i>Alumnos - Mi Mentor de Inversión</h4>
-        </div>
+{% block content %}
+<!-- Encabezado -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-success text-white">
+        <h4 class="mb-0"><i class="bi bi-boxes me-2"></i>Alumnos - Mi Mentor de Inversión</h4>
     </div>
+</div>
 
-<!-- Formulario de búsqueda con estilo profesional -->
-    <div class="card shadow-sm mb-4">
+<!-- Formulario de filtros -->
+<div class="card shadow-sm mb-4">
     <div class="card-body">
         <form id="filterForm" class="row align-items-end">
-
-            <!-- Filtro por Generación -->
             <div class="col-md-4">
                 <label for="generacion" class="form-label">Generación</label>
                 <select class="form-select" name="generacion" id="generacion">
                     <option value="">Todas</option>
-                    <!-- Las opciones se llenan por JS -->
                 </select>
             </div>
 
-
-            <!-- Filtro por Correo -->
             <div class="col-md-4">
                 <label for="correo" class="form-label">Correo</label>
                 <input type="email" class="form-control" name="correo" id="correo" placeholder="Ej. jonathan@fivetwofive.mx">
             </div>
 
-            <!-- Botones de acción -->
             <div class="col-md-4 d-flex gap-2 mt-3 mt-md-0">
                 <button type="submit" class="btn btn-primary flex-fill">
                     <i class="bi bi-search"></i> Buscar
@@ -115,21 +44,20 @@
             </div>
         </form>
     </div>
-    </div>
-
-
-    <!-- Tabla de resultados -->
-    <div class="table-responsive" style="overflow-x:auto; min-width: 100%;" id="tablaAlumnos"></div>
-        <!-- Aquí se cargará la tabla por AJAX -->
-    </div>
 </div>
 
- <!-- Bootstrap JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<div class="d-flex justify-content-end mb-3">
+    <button id="exportExcelBtn" class="btn btn-outline-success">
+        <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
+    </button>
+</div>
 
-<!-- DataTables JS -->
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 
+<!-- Tabla de resultados -->
+<div class="table-responsive" style="overflow-x:auto; min-width: 100%;" id="tablaAlumnos"></div>
+{% endblock %}
+
+{% block scripts %}
 <script>
 const headersAmigables = {
     "ID_INSCRIPCION": "ID Inscripción",
@@ -143,12 +71,9 @@ const headersAmigables = {
     "FECHA_COMPRA": "Fecha de Compra",
     "FUENTE": "Fuente"
 };
-</script>
 
-<script>
 function cargarAlumnos(filtros = {}) {
     $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando alumnos...</div>');
-
 
     $.ajax({
         url: "/api/alumnos",
@@ -159,22 +84,11 @@ function cargarAlumnos(filtros = {}) {
                 $('#tablaAlumnos').html('<div class="alert alert-warning">No se encontraron alumnos.</div>');
                 return;
             }
-            
-            let columnas = ["ID_INSCRIPCION"
-                            , "FECHA_INSCRIPCION"
-                            , "ID_ALUMNO"
-                            , "NOMBRE_ALUMNO"
-                            , "CORREO"
-                            , "TELEFONO"
-                            , "PROGRAMA"
-                            , "GENERACION_PROGRAMA"
-                            , "FECHA_COMPRA"
-                            , "FUENTE"];
 
-            //let columnas = Object.keys(data[0]);
-            
+            let columnas = Object.keys(headersAmigables);
+
             let thead = '<thead><tr>';
-            columnas.forEach(col => thead += `<th>${headersAmigables[col] || col}</th>`);
+            columnas.forEach(col => thead += `<th>${headersAmigables[col]}</th>`);
             thead += '</tr></thead>';
 
             let tbody = '<tbody>';
@@ -186,106 +100,37 @@ function cargarAlumnos(filtros = {}) {
                         try {
                             let fecha = new Date(valor);
                             if (!isNaN(fecha)) {
-                                valor = fecha.toISOString().split('T')[0]; // Formato: YYYY-MM-DD
+                                valor = fecha.toISOString().split('T')[0];
                             }
-                        } catch (e) {
-                            // Si falla, deja el valor como está
-                        }
+                        } catch (e) {}
                     }
                     tbody += `<td>${valor}</td>`;
                 });
-
                 tbody += '</tr>';
             });
             tbody += '</tbody>';
 
-            // Arma la tabla completa
-            const tableHTML = `
-                <table id="alumnosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">
-                    ${thead}
-                    ${tbody}
-                </table>`;
-            
-            // Reinicializa DataTable si ya existe
+            const tableHTML = `<table id="alumnosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">${thead}${tbody}</table>`;
+
             if ($.fn.DataTable.isDataTable('#alumnosTable')) {
                 $('#alumnosTable').DataTable().clear().destroy();
             }
 
+            // Conecta el botón externo con el botón de Excel interno
+            $('#exportExcelBtn').on('click', function() {
+                const table = $('#alumnosTable').DataTable();
+                table.button('.buttons-excel').trigger();
+            });
+
+
             $('#tablaAlumnos').html(tableHTML);
 
-            // Inicializa DataTable con opciones
             $('#alumnosTable').DataTable({
                 scrollX: true,
                 scrollY: '400px',
                 scrollCollapse: true,
                 pageLength: 50,
                 lengthMenu: [ [25, 50, 100], [25, 50, 100] ],
-                autoWidth: false,   // <- importante
+                autoWidth: false,
                 responsive: false,
-                dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>',
-                order: [[0, 'asc']],
-                buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
-                language: {
-                    search: "Buscar:",
-                    lengthMenu: "Mostrar _MENU_ registros por página",
-                    zeroRecords: "No se encontraron resultados",
-                    info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-                    infoEmpty: "Mostrando 0 a 0 de 0 registros",
-                    infoFiltered: "(filtrado de _MAX_ registros totales)",
-                    paginate: {
-                        first: "Primero",
-                        last: "Último",
-                        next: "Siguiente",
-                        previous: "Anterior"
-                    }
-                },
-                initComplete: function () {
-                    // 🔧 Forza el ajuste de columnas luego de cargar datos
-                    this.api().columns.adjust();
-                }
-            });
-
-        },
-        error: function(err) {
-            $('#tablaAlumnos').html('<div class="alert alert-danger">Error al cargar datos.</div>');
-            console.error("Error al cargar alumnos:", err);
-        }
-    });
-}
-
-$(document).ready(function() {
-    cargarAlumnos(); // carga inicial
-
-    $('#filterForm').on('submit', function(e) {
-        e.preventDefault();
-        const filtros = {
-            generacion: $('#generacion').val(),
-            correo: $('input[name="correo"]').val()
-        };
-        cargarAlumnos(filtros);
-    });
-
-    // ✅ Evento para limpiar filtros y recargar sin condiciones
-    $('#limpiarFiltros').on('click', function() {
-        $('#filterForm')[0].reset(); // limpia los campos
-        cargarAlumnos(); // recarga sin filtros
-    });
-
-    // Cargar generaciones en el <select>
-    $.ajax({
-        url: '/api/generaciones',
-        method: 'GET',
-        success: function(data) {
-            data.forEach(function(gen) {
-                $('#generacion').append(`<option value="${gen.trim()}">${gen}</option>`);
-            });
-        },
-        error: function(err) {
-            console.error("Error al cargar generaciones:", err);
-        }
-    });
-});
-</script>
-
-</body>
-</html>
+                dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>
