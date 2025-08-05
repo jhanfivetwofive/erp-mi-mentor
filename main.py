@@ -368,9 +368,11 @@ def get_alumno_info(correo):
                 'COMPLETED_AT': row['COMPLETED_AT']
             })
 
+        print("Renderizando plantilla panel_alumnos.html...")
         return render_template('panel_alumnos.html',
-                               alumno_info=alumno_info,
-                               cursos_info=cursos_info)
+                            alumno_info=alumno_info,
+                            cursos_info=cursos_info)
+
 
     except Exception as e:
         import traceback
