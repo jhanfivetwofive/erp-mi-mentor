@@ -115,7 +115,8 @@
 
                 $('#tablaAlumnos').html(tableHTML);
 
-                const table = $('#alumnosTable').DataTable({
+                // Inicializa DataTable con opciones (✅ ya incluye el buscador)
+                $('#alumnosTable').DataTable({
                     scrollX: true,
                     scrollY: '400px',
                     scrollCollapse: true,
@@ -123,15 +124,28 @@
                     lengthMenu: [[25, 50, 100], [25, 50, 100]],
                     autoWidth: false,
                     responsive: false,
-                    dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>',
-                    buttons: [
-                        {
-                            extend: 'excel',
-                            text: 'Exportar a Excel',
-                            className: 'btn btn-outline-success d-none',
+                    dom: '<"row mb-2"<"col-sm-6"l><"col-sm-6 text-end"f>>Brt<"row mt-2"<"col-sm-6"i><"col-sm-6 text-end"p>>',
+                    order: [[0, 'asc']],
+                    buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
+                    language: {
+                        search: "Buscar:",
+                        lengthMenu: "Mostrar _MENU_ registros por página",
+                        zeroRecords: "No se encontraron resultados",
+                        info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
+                        infoEmpty: "Mostrando 0 a 0 de 0 registros",
+                        infoFiltered: "(filtrado de _MAX_ registros totales)",
+                        paginate: {
+                            first: "Primero",
+                            last: "Último",
+                            next: "Siguiente",
+                            previous: "Anterior"
                         }
-                    ]
+                    },
+                    initComplete: function () {
+                        this.api().columns.adjust();
+                    }
                 });
+
 
                 // Exportar Excel desde botón externo
                 $('#exportExcelBtn').off('click').on('click', function () {
