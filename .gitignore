@@ -1,12 +1,33 @@
-# Ignorar entornos virtuales
+# 🚫 Entorno virtual de Python
 venv/
 
-# Ignorar archivos temporales
+# 🚫 Archivos compilados de Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 
-# Archivos de entorno
+# 🚫 Archivos de entorno (claves, tokens)
 .env
+.env.*
 
-# Archivos de VSCode
+# 🚫 Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# 🚫 Archivos de logs
+*.log
+
+# 🚫 Archivos temporales
+*.swp
+*.bak
+*.tmp
+
+# 🚫 Configuración de VSCode
 .vscode/
+
+# 🚫 Archivos generados de GCP
+*.json
+
+# 🚫 Archivos de dependencias locales (si los tienes)
+pip-wheel-metadata/
+python-dotenv/
