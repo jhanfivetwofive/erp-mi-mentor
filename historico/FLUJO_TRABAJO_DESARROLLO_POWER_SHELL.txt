@@ -1,0 +1,18 @@
+$env:FLASK_SECRET_KEY = "f9b3dd7a758a83c10b4ae43db3a472a887f50595c31c9e2dbe6be3426fd9d0f3"
+$env:GCP_PROJECT_ID = "fivetwofive-20"
+
+🧪 Flujo típico de trabajo
+1. Desarrollo
+
+git checkout dev
+# Haces cambios...
+git add .
+git commit -m "Cambios en panel de alumnos"
+git push origin dev
+➡️ Esto activa el despliegue automático a mi-app-dev.
+
+2. Paso a producción
+
+git checkout main
+git merge dev
+git push origin main

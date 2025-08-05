@@ -1,8 +1,33 @@
-﻿__pycache__/
-*.pyc
+# 🚫 Entorno virtual de Python
+venv/
+
+# 🚫 Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🚫 Archivos de entorno (claves, tokens)
 .env
-*.db
-credentials.json
-.vscode/
+.env.*
+
+# 🚫 Archivos del sistema operativo
 .DS_Store
 Thumbs.db
+
+# 🚫 Archivos de logs
+*.log
+
+# 🚫 Archivos temporales
+*.swp
+*.bak
+*.tmp
+
+# 🚫 Configuración de VSCode
+.vscode/
+
+# 🚫 Archivos generados de GCP
+*.json
+
+# 🚫 Archivos de dependencias locales (si los tienes)
+pip-wheel-metadata/
+python-dotenv/

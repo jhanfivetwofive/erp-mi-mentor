@@ -7,3 +7,4 @@ google-auth
 google-cloud-secret-manager
 Flask-Session  # Añadir esta línea para usar sesiones
 authlib
+python-dotenv
