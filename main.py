@@ -7,11 +7,15 @@ import time
 from functools import wraps  # Asegúrate de importar wraps
 from flask_session import Session
 from dotenv import load_dotenv
-
-app = Flask(__name__)
+from werkzeug.security import check_password_hash
+from werkzeug.security import generate_password_hash  # opcional, si generarás hashes también  
 
 load_dotenv()
 
+# Crear la app antes de usarla
+app = Flask(__name__)  # ✅ Esto debe ir antes de usar app
+
+# Configuración secreta y de entorno
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
 project_id = os.getenv("GCP_PROJECT_ID")
 
