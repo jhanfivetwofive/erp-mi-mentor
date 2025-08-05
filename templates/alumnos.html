@@ -73,7 +73,8 @@ function cargarAlumnos(filtros = {}) {
             }
 
             let columnas = Object.keys(headersAmigables);
-            let thead = '<thead><tr>' + columnas.map(col => `<th>${headersAmigables[col]}</th>`).join('') + '</tr></thead>';
+            let thead = '<thead><tr>' + columnas.map(col => `<th>${headersAmigables[col]}</th>`).join('') + '<th>Acción</th></tr></thead>';
+
 
             let tbody = '<tbody>';
             data.forEach(row => {
@@ -88,6 +89,7 @@ function cargarAlumnos(filtros = {}) {
                     }
                     tbody += `<td>${valor}</td>`;
                 });
+                tbody += `<td><a href="/alumno/${row.CORREO}" class="btn btn-info btn-sm"><i class="bi bi-person-lines-fill"></i> Ver Panel</a></td>`;
                 tbody += '</tr>';
             });
             tbody += '</tbody>';

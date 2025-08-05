@@ -321,3 +321,57 @@ def nuevo_alumno():
         return redirect(url_for("alumnos_page"))
 
     return render_template("nuevo_alumno.html")
+
+@app.route('/alumno/<correo>', methods=['GET'])
+def get_alumno_info(correo):
+    try:
+        # Consulta para la información del alumno
+        query_alumno = """
+            SELECT ID_ALUMNO, NOMBRE_ALUMNO, CORREO, TELEFONO,
+                   FECHA_INSCRIPCION, PROGRAMA, GENERACION_PROGRAMA
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+        )
+        result_alumno = client.query(query_alumno, job_config=job_config).result()
+
+        alumno_info = None
+        for row in result_alumno:
+            alumno_info = {
+                'ID_ALUMNO': row['ID_ALUMNO'],
+                'NOMBRE_ALUMNO': row['NOMBRE_ALUMNO'],
+                'CORREO': row['CORREO'],
+                'TELEFONO': row['TELEFONO'],
+                'FECHA_INSCRIPCION': row['FECHA_INSCRIPCION'],
+                'PROGRAMA': row['PROGRAMA'],
+                'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA']
+            }
+
+        # Consulta para cursos
+        query_cursos = """
+            SELECT COURSE_NAME, PERCENTAGE_COMPLETED,
+                   STARTED_AT, UPDATED_AT, COMPLETED_AT
+            FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
+            WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+        """
+        result_cursos = client.query(query_cursos, job_config=job_config).result()
+
+        cursos_info = []
+        for row in result_cursos:
+            cursos_info.append({
+                'COURSE_NAME': row['COURSE_NAME'],
+                'PERCENTAGE_COMPLETED': row['PERCENTAGE_COMPLETED'],
+                'STARTED_AT': row['STARTED_AT'],
+                'UPDATED_AT': row['UPDATED_AT'],
+                'COMPLETED_AT': row['COMPLETED_AT']
+            })
+
+        return render_template('panel_alumnos.html',
+                               alumno_info=alumno_info,
+                               cursos_info=cursos_info)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
