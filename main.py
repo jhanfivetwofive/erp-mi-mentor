@@ -57,7 +57,7 @@ BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
 @app.route("/")
 def home():
-    return "Mini ERP de Alumnos - Mi Mentor de Inversión"
+    return redirect(url_for("login"))  # 👈 redirige directamente a /login
 
 
 @app.route('/login', methods=['GET', 'POST'])
