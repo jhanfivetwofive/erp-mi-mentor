@@ -36,7 +36,8 @@
 
 <body class="bg-light">
 
-<!-- Navegación -->
+<!-- ✅ Mostrar el menú solo si hay sesión activa -->
+{% if session.get('user') %}
 <nav class="navbar navbar-expand-lg navbar-light bg-success">
     <div class="container mt-4">
         <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
@@ -45,7 +46,6 @@
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto">
-                <li class="nav-item"><a class="nav-link text-white" href="/">Inicio</a></li>
                 <li class="nav-item"><a class="nav-link text-white" href="/alumnos">Alumnos</a></li>
                 <li class="nav-item"><a class="nav-link text-white" href="/catalogo/programas">Programas</a></li>
                 <li class="nav-item"><a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a></li>
@@ -54,6 +54,7 @@
         </div>
     </div>
 </nav>
+{% endif %}
 
 <!-- Contenido principal -->
 <div class="container mt-4">
