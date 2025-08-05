@@ -373,5 +373,8 @@ def get_alumno_info(correo):
                                cursos_info=cursos_info)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        traceback.print_exc()  # muestra el error en la consola de Cloud Run o local
+        return jsonify({"error": str(e)}), 500
+
 
