@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\seres\Documents\Codigo_Python_Jonathan\ERP_MI_MENTOR_DE_INVERSION\venv
+set VIRTUAL_ENV=C:\Users\seres\Documents\Codigo_Python_Jonathan\ERP_MI_MENTOR_DE_INVERSION\erp-mi-mentor\venv
 
 if not defined PROMPT set PROMPT=$P$G
 
