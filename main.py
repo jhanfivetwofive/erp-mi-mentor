@@ -8,7 +8,8 @@ from functools import wraps  # Asegúrate de importar wraps
 from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
-from werkzeug.security import generate_password_hash  # opcional, si generarás hashes también  
+# opcional, si generarás hashes también
+from werkzeug.security import generate_password_hash
 
 load_dotenv()
 

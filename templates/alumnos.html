@@ -1,176 +1,161 @@
 {% extends "base.html" %}
-{% block title %}Alumnos - Mi Mentor de Inversión
 
-<!-- Botón flotante para agregar alumno -->
-<a href="/alumnos/nuevo" class="btn btn-success rounded-circle shadow-lg position-fixed"
-    style="bottom: 30px; right: 30px; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; z-index: 1000;"
-    title="Agregar nuevo alumno">
-    <i class="bi bi-person-plus fs-4 text-white"></i>
-</a>
-
-{% endblock %}
+{% block title %}Alumnos - Mi Mentor de Inversión{% endblock %}
 
 {% block content %}
-<!-- Encabezado -->
+
+<!-- 🟩 Encabezado -->
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
         <h4 class="mb-0"><i class="bi bi-boxes me-2"></i>Alumnos - Mi Mentor de Inversión</h4>
     </div>
 </div>
 
-<!-- Formulario de filtros -->
+<!-- 🔍 Filtros -->
 <div class="card shadow-sm mb-4">
     <div class="card-body">
         <form id="filterForm" class="row align-items-end">
             <div class="col-md-4">
                 <label for="generacion" class="form-label">Generación</label>
-                <select class="form-select" name="generacion" id="generacion">
+                <select class="form-select" id="generacion">
                     <option value="">Todas</option>
                 </select>
             </div>
-
             <div class="col-md-4">
                 <label for="correo" class="form-label">Correo</label>
-                <input type="email" class="form-control" name="correo" id="correo"
-                    placeholder="Ej. jonathan@fivetwofive.mx">
+                <input type="email" class="form-control" id="correo" placeholder="Ej. jonathan@fivetwofive.mx">
             </div>
-
             <div class="col-md-4 d-flex gap-2 mt-3 mt-md-0">
-                <button type="submit" class="btn btn-primary flex-fill">
-                    <i class="bi bi-search"></i> Buscar
-                </button>
-                <button type="button" class="btn btn-secondary flex-fill" id="limpiarFiltros">
-                    <i class="bi bi-eraser"></i> Limpiar
-                </button>
+                <button type="submit" class="btn btn-primary flex-fill"><i class="bi bi-search"></i> Buscar</button>
+                <button type="button" class="btn btn-secondary flex-fill" id="limpiarFiltros"><i class="bi bi-eraser"></i> Limpiar</button>
             </div>
         </form>
     </div>
 </div>
 
+<!-- 🟢 Botón de exportación -->
 <div class="d-flex justify-content-end mb-3">
-    <button id="exportExcelBtn" class="btn btn-outline-success">
-        <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
-    </button>
+    <button id="exportExcelBtn" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Exportar a Excel</button>
 </div>
 
+<!-- 📋 Tabla AJAX -->
+<div class="table-responsive" id="tablaAlumnos" style="overflow-x:auto; min-width:100%;"></div>
 
-<!-- Tabla de resultados -->
-<div class="table-responsive" style="overflow-x:auto; min-width: 100%;" id="tablaAlumnos"></div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    const headersAmigables = {
-        "ID_INSCRIPCION": "ID Inscripción",
-        "FECHA_INSCRIPCION": "Fecha de Inscripción",
-        "ID_ALUMNO": "ID Alumno",
-        "NOMBRE_ALUMNO": "Nombre",
-        "CORREO": "Correo",
-        "TELEFONO": "Teléfono",
-        "PROGRAMA": "Programa",
-        "GENERACION_PROGRAMA": "Generación",
-        "FECHA_COMPRA": "Fecha de Compra",
-        "FUENTE": "Fuente"
-    };
+// Diccionario de encabezados amigables
+const headersAmigables = {
+    "ID_INSCRIPCION": "ID Inscripción",
+    "FECHA_INSCRIPCION": "Fecha de Inscripción",
+    "ID_ALUMNO": "ID Alumno",
+    "NOMBRE_ALUMNO": "Nombre",
+    "CORREO": "Correo",
+    "TELEFONO": "Teléfono",
+    "PROGRAMA": "Programa",
+    "GENERACION_PROGRAMA": "Generación",
+    "FECHA_COMPRA": "Fecha de Compra",
+    "FUENTE": "Fuente"
+};
 
-    function cargarAlumnos(filtros = {}) {
-        $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando alumnos...</div>');
+function cargarAlumnos(filtros = {}) {
+    $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando alumnos...</div>');
 
-        $.ajax({
-            url: "/api/alumnos",
-            method: "GET",
-            data: filtros,
-            success: function (data) {
-                if (!Array.isArray(data) || data.length === 0) {
-                    $('#tablaAlumnos').html('<div class="alert alert-warning">No se encontraron alumnos.</div>');
-                    return;
-                }
-
-                let columnas = Object.keys(headersAmigables);
-
-                let thead = '<thead><tr>';
-                columnas.forEach(col => thead += `<th>${headersAmigables[col]}</th>`);
-                thead += '</tr></thead>';
-
-                let tbody = '<tbody>';
-                data.forEach(row => {
-                    tbody += '<tr>';
-                    columnas.forEach(col => {
-                        let valor = row[col] ?? '';
-                        if (col.includes("FECHA") && valor) {
-                            try {
-                                let fecha = new Date(valor);
-                                if (!isNaN(fecha)) {
-                                    valor = fecha.toISOString().split('T')[0];
-                                }
-                            } catch (e) { }
-                        }
-                        tbody += `<td>${valor}</td>`;
-                    });
-                    tbody += '</tr>';
-                });
-                tbody += '</tbody>';
-
-                const tableHTML = `<table id="alumnosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">${thead}${tbody}</table>`;
-
-                $('#tablaAlumnos').html(tableHTML);
-
-                // Inicializa DataTable con opciones (✅ ya incluye el buscador)
-                $('#alumnosTable').DataTable({
-                    scrollX: true,
-                    scrollY: '400px',
-                    scrollCollapse: true,
-                    pageLength: 50,
-                    lengthMenu: [[25, 50, 100], [25, 50, 100]],
-                    autoWidth: false,
-                    responsive: false,
-                    dom: '<"row mb-2"<"col-sm-6"l><"col-sm-6 text-end"f>>Brt<"row mt-2"<"col-sm-6"i><"col-sm-6 text-end"p>>',
-                    order: [[0, 'asc']],
-                    buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
-                    language: {
-                        search: "Buscar:",
-                        lengthMenu: "Mostrar _MENU_ registros por página",
-                        zeroRecords: "No se encontraron resultados",
-                        info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-                        infoEmpty: "Mostrando 0 a 0 de 0 registros",
-                        infoFiltered: "(filtrado de _MAX_ registros totales)",
-                        paginate: {
-                            first: "Primero",
-                            last: "Último",
-                            next: "Siguiente",
-                            previous: "Anterior"
-                        }
-                    },
-                    initComplete: function () {
-                        this.api().columns.adjust();
-                    }
-                });
-
-
-                // Exportar Excel desde botón externo
-                $('#exportExcelBtn').off('click').on('click', function () {
-                    table.button('.buttons-excel').trigger();
-                });
+    $.ajax({
+        url: "/api/alumnos",
+        method: "GET",
+        data: filtros,
+        success: function (data) {
+            if (!Array.isArray(data) || data.length === 0) {
+                $('#tablaAlumnos').html('<div class="alert alert-warning">No se encontraron alumnos.</div>');
+                return;
             }
-        });
-    }
 
-    // Evento para filtros
+            let columnas = Object.keys(headersAmigables);
+            let thead = '<thead><tr>' + columnas.map(col => `<th>${headersAmigables[col]}</th>`).join('') + '</tr></thead>';
+
+            let tbody = '<tbody>';
+            data.forEach(row => {
+                tbody += '<tr>';
+                columnas.forEach(col => {
+                    let valor = row[col] ?? '';
+                    if (col.includes("FECHA") && valor) {
+                        let fecha = new Date(valor);
+                        if (!isNaN(fecha)) {
+                            valor = fecha.toISOString().split('T')[0];
+                        }
+                    }
+                    tbody += `<td>${valor}</td>`;
+                });
+                tbody += '</tr>';
+            });
+            tbody += '</tbody>';
+
+            const tableHTML = `<table id="alumnosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">${thead}${tbody}</table>`;
+            $('#tablaAlumnos').html(tableHTML);
+
+            $('#alumnosTable').DataTable({
+                scrollX: true,
+                scrollY: '400px',
+                scrollCollapse: true,
+                pageLength: 50,
+                lengthMenu: [[25, 50, 100], [25, 50, 100]],
+                autoWidth: false,
+                responsive: false,
+                dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>',
+                buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
+                order: [[0, 'asc']],
+                language: {
+                    search: "Buscar:",
+                    lengthMenu: "Mostrar _MENU_ registros",
+                    zeroRecords: "No se encontraron resultados",
+                    info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
+                    infoEmpty: "Mostrando 0 a 0 de 0 registros",
+                    infoFiltered: "(filtrado de _MAX_ registros totales)",
+                    paginate: {
+                        first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior"
+                    }
+                },
+                initComplete: function () {
+                    this.api().columns.adjust();
+                }
+            });
+
+            $('#exportExcelBtn').on('click', function () {
+                $('#alumnosTable').DataTable().button('.buttons-excel').trigger();
+            });
+        },
+        error: function (err) {
+            $('#tablaAlumnos').html('<div class="alert alert-danger">Error al cargar datos.</div>');
+            console.error("Error al cargar alumnos:", err);
+        }
+    });
+}
+
+$(document).ready(function () {
+    cargarAlumnos();
+
     $('#filterForm').on('submit', function (e) {
         e.preventDefault();
-        const filtros = {
+        cargarAlumnos({
             generacion: $('#generacion').val(),
             correo: $('#correo').val()
-        };
-        cargarAlumnos(filtros);
+        });
     });
 
     $('#limpiarFiltros').on('click', function () {
         $('#filterForm')[0].reset();
-        cargarAlumnos(); // Sin filtros
+        cargarAlumnos();
     });
 
-    // Inicial
-    cargarAlumnos();
+    $.ajax({
+        url: '/api/generaciones',
+        method: 'GET',
+        success: function (data) {
+            data.forEach(gen => $('#generacion').append(`<option value="${gen.trim()}">${gen}</option>`));
+        }
+    });
+});
 </script>
 {% endblock %}
