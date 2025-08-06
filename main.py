@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
 from werkzeug.security import generate_password_hash
+import firebase_admin
+from firebase_admin import credentials, auth
+
+# ✅ Inicializa Firebase Admin con credenciales
+cred = credentials.Certificate("firebase_key.json")  # archivo descargado de Firebase Console
+firebase_admin.initialize_app(cred)
 
 load_dotenv()
 
