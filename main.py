@@ -122,13 +122,6 @@ def login_firebase():
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
-
-@app.route("/register")
-def register():
-    # Ya lo configuraste en Secret Manager
-    firebase_api_key = get_secret("FIREBASE_API_KEY")
-    return render_template("register.html", firebase_api_key=firebase_api_key)
-
 @app.route("/register", methods=["GET"])
 def register():
     try:
