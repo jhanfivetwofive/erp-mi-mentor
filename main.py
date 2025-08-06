@@ -157,11 +157,14 @@ def register_firebase():
 
         # Insertar en BigQuery
         table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
+        uid = decoded_token.get("uid")
         rows_to_insert = [{
             "correo": email,
             "nombre": nombre,
-            "rol": "alumno"  # Puedes cambiarlo según tus necesidades
+            "rol": "alumno",
+            "firebase_uid": uid  # ✅ solo si agregas esta columna (ver paso 3)
         }]
+
         errors = client.insert_rows_json(table_id, rows_to_insert)
         if errors:
             return jsonify({"error": str(errors)}), 500
@@ -287,6 +290,9 @@ def catalogo_page(catalogo_id):
 
 @app.route("/catalogo/programas")
 def catalogo_programas():
+    if 'user' not in session:
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("cat_programas.html")
 
     # Ruta para visualizar todas las generaciones
@@ -294,6 +300,9 @@ def catalogo_programas():
 
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():
+    if 'user' not in session:
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("cat_generacion_programas.html")
 
     # API para obtener los datos de los programas
