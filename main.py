@@ -4,6 +4,7 @@ from google.cloud import bigquery
 import os
 import pandas as pd
 import time
+import json
 from functools import wraps  # Asegúrate de importar wraps
 from flask_session import Session
 from dotenv import load_dotenv
@@ -12,9 +13,18 @@ from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 import firebase_admin
 from firebase_admin import credentials, auth
+from google.cloud import secretmanager
 
-# ✅ Inicializa Firebase Admin con credenciales
-cred = credentials.Certificate("firebase_key.json")  # archivo descargado de Firebase Console
+
+def get_firebase_credentials():
+    client = secretmanager.SecretManagerServiceClient()
+    name = "projects/fivetwofive-20/secrets/firebase-key/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data
+
+
+cred = credentials.Certificate(json.loads(get_firebase_credentials()))
+
 firebase_admin.initialize_app(cred)
 
 load_dotenv()
@@ -63,7 +73,8 @@ BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
 @app.route("/")
 def home():
-    return redirect(url_for("login"))  # 👈 redirige directamente a /login
+    return redirect(url_for("login_firebase"))  # 👈 redirige directamente a /login_firebase
+
 
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
@@ -82,7 +93,8 @@ def login_firebase():
             WHERE correo = @correo
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", email)]
         )
         result = client.query(query, job_config=job_config).result()
 
@@ -107,7 +119,7 @@ def login_firebase():
 @app.route('/logout')
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
-    return redirect(url_for('login'))  # Redirige a la página de login
+    return redirect(url_for('login_firebase'))  # Redirige a la página de login
 
 
 def login_required(roles=["admin"]):
@@ -116,7 +128,7 @@ def login_required(roles=["admin"]):
         def decorated_function(*args, **kwargs):
             if "user" not in session:
                 # Redirige al login si no hay sesión
-                return redirect(url_for("login"))
+                return redirect(url_for("login_firebase"))
 
             user = session["user"]
             if user["rol"] not in roles:  # Asegurando que el rol es correcto
@@ -137,7 +149,8 @@ def admin_page():
 @app.route('/alumnos')
 def alumnos_page():
     if 'user' not in session:
-        return redirect(url_for('login'))  # Redirige si no hay sesión activa
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("alumnos.html")
 
     # Endpoint para obtener datos de alumnos
@@ -320,6 +333,7 @@ def nuevo_alumno():
 
     return render_template("nuevo_alumno.html")
 
+
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
@@ -331,9 +345,11 @@ def get_alumno_info(correo):
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo)]
         )
-        result_alumno = client.query(query_alumno, job_config=job_config).result()
+        result_alumno = client.query(
+            query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -354,7 +370,8 @@ def get_alumno_info(correo):
             FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
             WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
         """
-        result_cursos = client.query(query_cursos, job_config=job_config).result()
+        result_cursos = client.query(
+            query_cursos, job_config=job_config).result()
 
         cursos_info = []
         for row in result_cursos:
@@ -368,13 +385,10 @@ def get_alumno_info(correo):
 
         print("Renderizando plantilla panel_alumnos.html...")
         return render_template('panel_alumnos.html',
-                            alumno_info=alumno_info,
-                            cursos_info=cursos_info)
-
+                               alumno_info=alumno_info,
+                               cursos_info=cursos_info)
 
     except Exception as e:
         import traceback
         traceback.print_exc()  # muestra el error en la consola de Cloud Run o local
         return jsonify({"error": str(e)}), 500
-
-
