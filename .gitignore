@@ -31,3 +31,6 @@ Thumbs.db
 # 🚫 Archivos de dependencias locales (si los tienes)
 pip-wheel-metadata/
 python-dotenv/
+
+secrets/firebase_key.json
+

@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
 from werkzeug.security import generate_password_hash
+import firebase_admin
+from firebase_admin import auth as firebase_auth
+
+# Inicializar Firebase con credenciales de servicio
+cred = credentials.Certificate("firebase_key.json")
+firebase_admin.initialize_app(cred)
 
 load_dotenv()
 
@@ -104,6 +110,52 @@ def login():
             return "Usuario no encontrado", 401
 
     return render_template('login.html')
+
+def crear_usuario_firebase(correo, password):
+    user = firebase_auth.create_user(
+        email=correo,
+        password=password
+    )
+    print(f"Usuario creado: {user.uid}")
+
+@app.route("/login_firebase", methods=["POST"])
+def login_firebase():
+    try:
+        data = request.get_json()
+        id_token = data.get("idToken")
+
+        # Verifica el token con Firebase
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        email = decoded_token["email"]
+
+        # Busca al usuario en tu BigQuery
+        query = """
+            SELECT correo, nombre, rol
+            FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
+            WHERE correo = @correo
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
+        )
+        result = client.query(query, job_config=job_config).result()
+
+        user = None
+        for row in result:
+            user = {
+                "correo": row["correo"],
+                "nombre": row["nombre"],
+                "rol": row["rol"]
+            }
+
+        if not user:
+            return jsonify({"error": "Usuario no autorizado"}), 403
+
+        session["user"] = user
+        return jsonify({"message": "Login exitoso"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
+
 
 
 @app.route('/logout')

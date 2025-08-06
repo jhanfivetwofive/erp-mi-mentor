@@ -1,0 +1,39 @@
+Codigo de tiktok
+
+def obtener_datos_tiktok(account_id: str) -> pd.DataFrame:
+    logging.info(f'Obteniendo datos TikTok para cuenta {account_id}...')
+    connection_url = f'mysql+pymysql://{user}:{password}@{mysql_private_ip}/Escuela'
+    engine = sq.create_engine(connection_url)
+    query = "SELECT * FROM DB_TIKTOK_ADS;"
+    try:
+        df_tiktok = pd.read_sql(query, con=engine)
+        logging.info(f'Datos TikTok cargados para cuenta {account_id}.')
+    except Exception as e:
+        logging.error(f'Error al obtener datos TikTok: {e}')
+        df_tiktok = pd.DataFrame()
+    engine.dispose()
+    return df_tiktok
+
+
+def bigquery_upload_tiktok(account: dict, df_tiktok: pd.DataFrame) -> None:
+    logging.info('Subiendo datos TikTok a BigQuery...')
+    tiktok_table = "TIKTOK.DB_TIKTOK_ADS"
+    try:
+        bq_tiktok_df = read_gbq(f"SELECT * FROM {tiktok_table}", credentials=account['credentials'])
+    except Exception as e:
+        logging.warning(f"Error consulta TikTok BigQuery: {e}")
+        bq_tiktok_df = pd.DataFrame()
+
+    bq_tiktok_df = pd.concat([bq_tiktok_df, df_tiktok])
+    bq_tiktok_df = bq_tiktok_df.sort_values(by='impressions', ascending=False)
+    bq_tiktok_df = bq_tiktok_df.drop_duplicates(subset='id', keep='first')
+
+    to_gbq(bq_tiktok_df, tiktok_table, credentials=account['credentials'], if_exists='replace')
+    logging.info(f'Datos TikTok actualizados en BigQuery: {tiktok_table}')
+
+
+
+ # Carga TikTok
+        df_tiktok = obtener_datos_tiktok(account['account_id'])
+        if not df_tiktok.empty:
+            bigquery_upload_tiktok(account, df_tiktok)
