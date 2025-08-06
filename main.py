@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
 from werkzeug.security import generate_password_hash
-import firebase_admin
 from firebase_admin import credentials, auth
+import firebase_admin
 from google.cloud import secretmanager
 
 
@@ -23,9 +23,10 @@ def get_firebase_credentials():
     return response.payload.data
 
 
-cred = credentials.Certificate(json.loads(get_firebase_credentials()))
+if not firebase_admin._apps:
+    cred = credentials.Certificate(json.loads(get_firebase_credentials()))
+    firebase_admin.initialize_app(cred)
 
-firebase_admin.initialize_app(cred)
 
 load_dotenv()
 
@@ -86,7 +87,7 @@ def login_firebase():
         id_token = data.get("idToken")
 
         # Verifica el token con Firebase
-        decoded_token = firebase_auth.verify_id_token(id_token)
+        decoded_token = auth.verify_id_token(id_token)
         email = decoded_token["email"]
 
         # Busca al usuario en tu BigQuery
