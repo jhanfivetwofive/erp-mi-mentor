@@ -70,10 +70,13 @@ client = bigquery.Client()
 # Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
-
 @app.route("/")
 def home():
-    return redirect(url_for("login_firebase"))  # 👈 redirige directamente a /login_firebase
+    return redirect(url_for("login_firebase_page"))
+
+@app.route("/login_firebase", methods=["GET"])
+def login_firebase_page():
+    return render_template("login_firebase.html")
 
 
 @app.route("/login_firebase", methods=["POST"])
