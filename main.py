@@ -59,51 +59,43 @@ BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 def home():
     return redirect(url_for("login"))  # 👈 redirige directamente a /login
 
+@app.route("/login_firebase", methods=["POST"])
+def login_firebase():
+    try:
+        data = request.get_json()
+        id_token = data.get("idToken")
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
+        # Verifica el token con Firebase
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        email = decoded_token["email"]
 
-    if request.method == 'POST':
-        correo = request.form['correo']
-        password = request.form['password']  # 👈 obtenemos la contraseña
-
-        # Consulta segura en BigQuery usando parámetros
+        # Busca al usuario en tu BigQuery
         query = """
-            SELECT correo, nombre, rol, password
+            SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
             WHERE correo = @correo
-            """
-
+        """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
         )
         result = client.query(query, job_config=job_config).result()
 
         user = None
-
         for row in result:
             user = {
-                'correo': row['correo'],
-                'nombre': row['nombre'],
-                'rol': row['rol'],
-                'password': row['password']  # 👈 necesario para comparar
+                "correo": row["correo"],
+                "nombre": row["nombre"],
+                "rol": row["rol"]
             }
 
-        if user:
-            if user['password'] == password:
-                session['user'] = {
-                    'correo': user['correo'],
-                    'nombre': user['nombre'],
-                    'rol': user['rol']
-                }
-                return redirect(url_for('alumnos_page'))
-            else:
-                return "Contraseña incorrecta", 401
-        else:
-            return "Usuario no encontrado", 401
+        if not user:
+            return jsonify({"error": "Usuario no autorizado"}), 403
 
-    return render_template('login.html')
+        session["user"] = user
+        return jsonify({"message": "Login exitoso"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
 
 
 @app.route('/logout')
