@@ -73,7 +73,8 @@
         <a href="/register">¿No tienes cuenta? Regístrate</a>
     </div>
     <div class="forgot-password">
-        <a href="#">¿Olvidaste tu contraseña?</a>
+        <a href="#" id="forgotPasswordLink" onclick="event.preventDefault(); openForgotPasswordModal();">¿Olvidaste tu contraseña?</a>
+
     </div>
     <!-- Modal para recuperación de contraseña -->
     <div class="modal fade" id="forgotPasswordModal" tabindex="-1" aria-labelledby="forgotPasswordModalLabel" aria-hidden="true">
@@ -171,4 +172,24 @@
     }
   });
 </script>
+<script>
+  function openForgotPasswordModal() {
+    const modal = new bootstrap.Modal(document.getElementById("forgotPasswordModal"));
+    modal.show();
+  }
+
+  document.getElementById("forgotPasswordForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("forgotEmail").value;
+
+    try {
+      await firebase.auth().sendPasswordResetEmail(email);
+      alert("Se ha enviado un enlace de recuperación a tu correo.");
+      bootstrap.Modal.getInstance(document.getElementById("forgotPasswordModal")).hide();
+    } catch (error) {
+      alert("Error al enviar el correo: " + error.message);
+    }
+  });
+</script>
+
 {% endblock %}
