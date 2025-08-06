@@ -14,6 +14,7 @@ from werkzeug.security import generate_password_hash
 from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
+from firebase_admin import auth as firebase_auth
 
 
 def get_firebase_credentials():
@@ -71,9 +72,11 @@ client = bigquery.Client()
 # Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
+
 @app.route("/")
 def home():
     return redirect(url_for("login_firebase_page"))
+
 
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
@@ -118,6 +121,53 @@ def login_firebase():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
+
+
+@app.route("/register")
+def register():
+    # Ya lo configuraste en Secret Manager
+    firebase_api_key = get_secret("FIREBASE_API_KEY")
+    return render_template("register.html", firebase_api_key=firebase_api_key)
+
+
+@app.route("/register_firebase", methods=["POST"])
+def register_firebase():
+    try:
+        data = request.get_json()
+        id_token = data.get("idToken")
+        nombre = data.get("nombre")
+
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        email = decoded_token["email"]
+
+        # Validar si ya existe el usuario
+        query = """
+            SELECT COUNT(*) AS total FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
+            WHERE correo = @correo
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", email)]
+        )
+        result = client.query(query, job_config=job_config).result()
+        if list(result)[0]["total"] > 0:
+            return jsonify({"error": "El usuario ya está registrado"}), 400
+
+        # Insertar en BigQuery
+        table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
+        rows_to_insert = [{
+            "correo": email,
+            "nombre": nombre,
+            "rol": "alumno"  # Puedes cambiarlo según tus necesidades
+        }]
+        errors = client.insert_rows_json(table_id, rows_to_insert)
+        if errors:
+            return jsonify({"error": str(errors)}), 500
+
+        return jsonify({"message": "Usuario registrado correctamente"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route('/logout')
