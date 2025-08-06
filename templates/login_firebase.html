@@ -76,24 +76,22 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- Firebase SDKs -->
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js"></script>
+<!-- Firebase v9 (compatibilidad con API anterior) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 
-<!-- Inicialización de Firebase (debe ir después de los scripts anteriores) -->
 <script>
-  // ✅ Asegúrate de que firebase esté definido
-  document.addEventListener('DOMContentLoaded', function () {
-    const firebaseConfig = {
-      apiKey: "AIzaSyCVnGrLvUYx_BnhUn-MmNk9N97WA84r7QI",
-      authDomain: "mimentorerp.firebaseapp.com",
-      projectId: "mimentorerp",
-    };
-    firebase.initializeApp(firebaseConfig);
-  });
+  // Inicializar Firebase con compat
+  const firebaseConfig = {
+    apiKey: "AIzaSyCVnGrLvUYx_BnhUn-MmNk9N97WA84r7QI",
+    authDomain: "mimentorerp.firebaseapp.com",
+    projectId: "mimentorerp",
+  };
+
+  firebase.initializeApp(firebaseConfig);
 </script>
 
-<!-- Función de login con Firebase -->
+<!-- Función de login -->
 <script>
   async function loginWithFirebase(event) {
     event.preventDefault();
@@ -125,4 +123,3 @@
   }
 </script>
 {% endblock %}
-
