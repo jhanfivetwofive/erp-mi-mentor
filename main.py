@@ -129,6 +129,15 @@ def register():
     firebase_api_key = get_secret("FIREBASE_API_KEY")
     return render_template("register.html", firebase_api_key=firebase_api_key)
 
+@app.route("/register", methods=["GET"])
+def register():
+    try:
+        firebase_credentials = json.loads(get_firebase_credentials())
+        firebase_api_key = firebase_credentials.get("apiKey")
+
+        return render_template("register.html", firebase_api_key=firebase_api_key)
+    except Exception as e:
+        return f"Error al cargar Firebase config: {str(e)}", 500
 
 @app.route("/register_firebase", methods=["POST"])
 def register_firebase():
