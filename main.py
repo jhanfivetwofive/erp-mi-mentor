@@ -4,12 +4,30 @@ from google.cloud import bigquery
 import os
 import pandas as pd
 import time
+import json
 from functools import wraps  # Asegúrate de importar wraps
 from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
 from werkzeug.security import generate_password_hash
+from firebase_admin import credentials, auth
+import firebase_admin
+from google.cloud import secretmanager
+from firebase_admin import auth as firebase_auth
+
+
+def get_firebase_credentials():
+    client = secretmanager.SecretManagerServiceClient()
+    name = "projects/fivetwofive-20/secrets/firebase-key/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data
+
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate(json.loads(get_firebase_credentials()))
+    firebase_admin.initialize_app(cred)
+
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 
@@ -63,54 +81,48 @@ BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
 @app.route("/")
 def home():
-    return redirect(url_for("login"))  # 👈 redirige directamente a /login
+    return redirect(url_for("login_firebase_page"))
 
+@app.route("/login_firebase", methods=["GET"])
+def login_firebase_page():
+    return render_template("login_firebase.html")
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
+@app.route("/login_firebase", methods=["POST"])
+def login_firebase():
+    try:
+        data = request.get_json()
+        id_token = data.get("idToken")
 
-    if request.method == 'POST':
-        correo = request.form['correo']
-        password = request.form['password']  # 👈 obtenemos la contraseña
+        decoded_token = auth.verify_id_token(id_token)
+        email = decoded_token["email"]
 
-        # Consulta segura en BigQuery usando parámetros
+        # Buscar en BigQuery si el usuario existe
         query = """
-            SELECT correo, nombre, rol, password
+            SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
             WHERE correo = @correo
-            """
-
+        """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
         )
         result = client.query(query, job_config=job_config).result()
 
         user = None
-
         for row in result:
             user = {
-                'correo': row['correo'],
-                'nombre': row['nombre'],
-                'rol': row['rol'],
-                'password': row['password']  # 👈 necesario para comparar
+                "correo": row["correo"],
+                "nombre": row["nombre"],
+                "rol": row["rol"]
             }
 
-        if user:
-            if user['password'] == password:
-                session['user'] = {
-                    'correo': user['correo'],
-                    'nombre': user['nombre'],
-                    'rol': user['rol']
-                }
-                return redirect(url_for('alumnos_page'))
-            else:
-                return "Contraseña incorrecta", 401
-        else:
-            return "Usuario no encontrado", 401
+        if not user:
+            return jsonify({"error": "Usuario no autorizado"}), 403
 
-    return render_template('login.html')
+        session["user"] = user
+        return jsonify({"message": "Login exitoso"}), 200
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
 def crear_usuario_firebase(correo, password):
     user = firebase_auth.create_user(
         email=correo,
@@ -161,7 +173,7 @@ def login_firebase():
 @app.route('/logout')
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
-    return redirect(url_for('login'))  # Redirige a la página de login
+    return redirect(url_for('login_firebase'))  # Redirige a la página de login
 
 
 def login_required(roles=["admin"]):
@@ -170,7 +182,7 @@ def login_required(roles=["admin"]):
         def decorated_function(*args, **kwargs):
             if "user" not in session:
                 # Redirige al login si no hay sesión
-                return redirect(url_for("login"))
+                return redirect(url_for("login_firebase"))
 
             user = session["user"]
             if user["rol"] not in roles:  # Asegurando que el rol es correcto
@@ -191,7 +203,8 @@ def admin_page():
 @app.route('/alumnos')
 def alumnos_page():
     if 'user' not in session:
-        return redirect(url_for('login'))  # Redirige si no hay sesión activa
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("alumnos.html")
 
     # Endpoint para obtener datos de alumnos
@@ -272,6 +285,9 @@ def catalogo_page(catalogo_id):
 
 @app.route("/catalogo/programas")
 def catalogo_programas():
+    if 'user' not in session:
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("cat_programas.html")
 
     # Ruta para visualizar todas las generaciones
@@ -279,6 +295,9 @@ def catalogo_programas():
 
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():
+    if 'user' not in session:
+        # Redirige si no hay sesión activa
+        return redirect(url_for('login_firebase'))
     return render_template("cat_generacion_programas.html")
 
     # API para obtener los datos de los programas
@@ -374,20 +393,30 @@ def nuevo_alumno():
 
     return render_template("nuevo_alumno.html")
 
+
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
         # Consulta para la información del alumno
         query_alumno = """
-            SELECT ID_ALUMNO, NOMBRE_ALUMNO, CORREO, TELEFONO,
-                   FECHA_INSCRIPCION, PROGRAMA, GENERACION_PROGRAMA
-            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+            SELECT
+            ID_ALUMNO,
+            CORREO,
+            STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
+            STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
+            MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
+            MAX(TELEFONO) AS TELEFONO,
+            MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL` 
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+            GROUP BY ID_ALUMNO, CORREO
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo)]
         )
-        result_alumno = client.query(query_alumno, job_config=job_config).result()
+        result_alumno = client.query(
+            query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -408,7 +437,8 @@ def get_alumno_info(correo):
             FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
             WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
         """
-        result_cursos = client.query(query_cursos, job_config=job_config).result()
+        result_cursos = client.query(
+            query_cursos, job_config=job_config).result()
 
         cursos_info = []
         for row in result_cursos:
@@ -422,13 +452,10 @@ def get_alumno_info(correo):
 
         print("Renderizando plantilla panel_alumnos.html...")
         return render_template('panel_alumnos.html',
-                            alumno_info=alumno_info,
-                            cursos_info=cursos_info)
-
+                               alumno_info=alumno_info,
+                               cursos_info=cursos_info)
 
     except Exception as e:
         import traceback
         traceback.print_exc()  # muestra el error en la consola de Cloud Run o local
         return jsonify({"error": str(e)}), 500
-
-

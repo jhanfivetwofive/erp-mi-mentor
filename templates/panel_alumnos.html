@@ -28,12 +28,21 @@
                     <input type="text" class="form-control" value="{{ alumno_info['FECHA_INSCRIPCION'] }}" disabled>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Programa</label>
-                    <input type="text" class="form-control" value="{{ alumno_info['PROGRAMA'] }}" disabled>
+                    <label class="form-label">Programas</label>
+                    <ul class="list-group">
+                        {% for programa in alumno_info['PROGRAMA'].split(', ') %}
+                        <li class="list-group-item">{{ programa }}</li>
+                        {% endfor %}
+                    </ul>
                 </div>
+
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Generación</label>
-                    <input type="text" class="form-control" value="{{ alumno_info['GENERACION_PROGRAMA'] }}" disabled>
+                    <label class="form-label">Generaciones</label>
+                    <ul class="list-group">
+                        {% for generacion in alumno_info['GENERACION_PROGRAMA'].split(', ') %}
+                        <li class="list-group-item">{{ generacion }}</li>
+                        {% endfor %}
+                    </ul>
                 </div>
             </form>
         </div>

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Iniciar sesión - Mi Mentor{% endblock %}
+
+{% block content %}
+<style>
+    .login-container {
+        max-width: 450px;
+        margin: 10% auto;
+        background-color: #f8f9fa;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        text-align: center;
+    }
+    .login-logo img {
+        width: 100px;
+        margin-bottom: 20px;
+    }
+    .login-header {
+        font-size: 1.8rem;
+        color: #8eb015ff;
+        margin-bottom: 20px;
+    }
+</style>
+
+<div class="login-container">
+    <div class="login-logo">
+        <img src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}" alt="Logo Mi Mentor">
+    </div>
+    <div class="login-header">Inicia sesión con Google</div>
+
+    <button class="btn btn-outline-danger w-100 mt-4" onclick="loginWithGoogle()">
+        <i class="bi bi-google"></i> Iniciar sesión con Google
+    </button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCVnGrLvUYx_BnhUn-MmNk9N97WA84r7QI",
+    authDomain: "mimentorerp.firebaseapp.com",
+    projectId: "mimentorerp"
+  };
+  firebase.initializeApp(firebaseConfig);
+
+  function loginWithGoogle() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    firebase.auth().signInWithPopup(provider)
+      .then(result => result.user.getIdToken())
+      .then(idToken => {
+        return fetch("/login_firebase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken })
+        });
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.message) {
+          window.location.href = "/alumnos";
+        } else {
+          alert(data.error || "No autorizado");
+        }
+      })
+      .catch(error => {
+        alert("Error al iniciar sesión con Google: " + error.message);
+      });
+  }
+</script>
+{% endblock %}
