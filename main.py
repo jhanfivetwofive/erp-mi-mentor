@@ -357,7 +357,7 @@ def get_alumno_info(correo):
             MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
             FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL` 
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-            GROUP BY CORREO
+            GROUP BY ID_ALUMNO, CORREO
         """
         job_config = bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter(
