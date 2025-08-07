@@ -78,30 +78,23 @@ def home():
     return redirect(url_for("login_firebase_page"))
 
 
-@app.route("/login_firebase", methods=["GET"])
-def login_firebase_page():
-    return render_template("login_firebase.html")
-
-
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
     try:
         data = request.get_json()
         id_token = data.get("idToken")
 
-        # Verifica el token con Firebase
         decoded_token = auth.verify_id_token(id_token)
         email = decoded_token["email"]
 
-        # Busca al usuario en tu BigQuery
+        # Buscar en BigQuery si el usuario existe
         query = """
             SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
             WHERE correo = @correo
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", email)]
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
         )
         result = client.query(query, job_config=job_config).result()
 
@@ -121,59 +114,6 @@ def login_firebase():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
-
-@app.route("/register", methods=["GET"])
-def register():
-    try:
-        firebase_credentials = json.loads(get_firebase_credentials())
-        firebase_api_key = firebase_credentials.get("apiKey")
-
-        return render_template("register.html", firebase_api_key=firebase_api_key)
-    except Exception as e:
-        return f"Error al cargar Firebase config: {str(e)}", 500
-
-@app.route("/register_firebase", methods=["POST"])
-def register_firebase():
-    try:
-        data = request.get_json()
-        id_token = data.get("idToken")
-        nombre = data.get("nombre")
-
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        email = decoded_token["email"]
-
-        # Validar si ya existe el usuario
-        query = """
-            SELECT COUNT(*) AS total FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-            WHERE correo = @correo
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", email)]
-        )
-        result = client.query(query, job_config=job_config).result()
-        if list(result)[0]["total"] > 0:
-            return jsonify({"error": "El usuario ya está registrado"}), 400
-
-        # Insertar en BigQuery
-        table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
-        uid = decoded_token.get("uid")
-        rows_to_insert = [{
-            "correo": email,
-            "nombre": nombre,
-            "rol": "alumno",
-            "firebase_uid": uid  # ✅ solo si agregas esta columna (ver paso 3)
-        }]
-
-        errors = client.insert_rows_json(table_id, rows_to_insert)
-        if errors:
-            return jsonify({"error": str(errors)}), 500
-
-        return jsonify({"message": "Usuario registrado correctamente"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
 
 @app.route('/logout')
 def logout():
