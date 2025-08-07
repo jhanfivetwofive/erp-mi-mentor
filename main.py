@@ -351,6 +351,18 @@ def get_alumno_info(correo):
                    FECHA_INSCRIPCION, PROGRAMA, GENERACION_PROGRAMA
             FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+
+            SELECT
+            ID_ALUMNO,
+            CORREO,
+            STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
+            STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
+            MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
+            MAX(TELEFONO) AS TELEFONO,
+            MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL` 
+            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+            GROUP BY CORREO
         """
         job_config = bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter(
