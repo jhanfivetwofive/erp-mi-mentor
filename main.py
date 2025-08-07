@@ -347,11 +347,6 @@ def get_alumno_info(correo):
     try:
         # Consulta para la información del alumno
         query_alumno = """
-            SELECT ID_ALUMNO, NOMBRE_ALUMNO, CORREO, TELEFONO,
-                   FECHA_INSCRIPCION, PROGRAMA, GENERACION_PROGRAMA
-            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-
             SELECT
             ID_ALUMNO,
             CORREO,
