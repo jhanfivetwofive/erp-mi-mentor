@@ -75,7 +75,7 @@ BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 
 @app.route("/")
 def home():
-    return redirect(url_for("login_firebase_page"))
+    return redirect(url_for("login_firebase"))
 
 
 @app.route("/login_firebase", methods=["POST"])
