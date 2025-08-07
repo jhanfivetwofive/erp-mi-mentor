@@ -15,7 +15,8 @@ from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
 from firebase_admin import auth as firebase_auth
-
+import firebase_admin
+from firebase_admin import auth as firebase_auth
 
 def get_firebase_credentials():
     client = secretmanager.SecretManagerServiceClient()
@@ -23,17 +24,10 @@ def get_firebase_credentials():
     response = client.access_secret_version(request={"name": name})
     return response.payload.data
 
-
+# Inicializa Firebase una sola vez
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
     firebase_admin.initialize_app(cred)
-
-import firebase_admin
-from firebase_admin import auth as firebase_auth
-
-# Inicializar Firebase con credenciales de servicio
-cred = credentials.Certificate("firebase_key.json")
-firebase_admin.initialize_app(cred)
 
 load_dotenv()
 
@@ -93,54 +87,12 @@ def login_firebase():
         data = request.get_json()
         id_token = data.get("idToken")
 
-        decoded_token = auth.verify_id_token(id_token)
-        email = decoded_token["email"]
-
-        # Buscar en BigQuery si el usuario existe
-        query = """
-            SELECT correo, nombre, rol
-            FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-            WHERE correo = @correo
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
-        )
-        result = client.query(query, job_config=job_config).result()
-
-        user = None
-        for row in result:
-            user = {
-                "correo": row["correo"],
-                "nombre": row["nombre"],
-                "rol": row["rol"]
-            }
-
-        if not user:
-            return jsonify({"error": "Usuario no autorizado"}), 403
-
-        session["user"] = user
-        return jsonify({"message": "Login exitoso"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 401
-def crear_usuario_firebase(correo, password):
-    user = firebase_auth.create_user(
-        email=correo,
-        password=password
-    )
-    print(f"Usuario creado: {user.uid}")
-
-@app.route("/login_firebase", methods=["POST"])
-def login_firebase():
-    try:
-        data = request.get_json()
-        id_token = data.get("idToken")
-
         # Verifica el token con Firebase
         decoded_token = firebase_auth.verify_id_token(id_token)
         email = decoded_token["email"]
+        name = decoded_token.get("name", "Sin Nombre")
 
-        # Busca al usuario en tu BigQuery
+        # Busca al usuario en BigQuery
         query = """
             SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
@@ -160,14 +112,30 @@ def login_firebase():
             }
 
         if not user:
-            return jsonify({"error": "Usuario no autorizado"}), 403
+            # Si no existe, lo insertamos con rol "pendiente"
+            insert_query = """
+                INSERT INTO `fivetwofive-20.INSUMOS.DB_USUARIO` (correo, nombre, rol)
+                VALUES (@correo, @nombre, @rol)
+            """
+            insert_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("correo", "STRING", email),
+                    bigquery.ScalarQueryParameter("nombre", "STRING", name),
+                    bigquery.ScalarQueryParameter("rol", "STRING", "pendiente")
+                ]
+            )
+            client.query(insert_query, job_config=insert_config).result()
+            return jsonify({"error": "Registro recibido. Acceso pendiente de aprobación."}), 403
 
+        if user["rol"] == "pendiente":
+            return jsonify({"error": "Acceso aún no aprobado por un administrador."}), 403
+
+        # Si todo bien, guardar en sesión
         session["user"] = user
         return jsonify({"message": "Login exitoso"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
-
 
 
 @app.route('/logout')
