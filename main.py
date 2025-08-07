@@ -86,37 +86,66 @@ def login_firebase():
     try:
         data = request.get_json()
         id_token = data.get("idToken")
+        if not id_token:
+            return jsonify({"error": "Falta idToken"}), 400
 
-        decoded_token = auth.verify_id_token(id_token)
-        email = decoded_token["email"]
+        # 1) Verificar token Firebase
+        decoded = firebase_auth.verify_id_token(id_token)
+        email = decoded.get("email")
+        uid = decoded.get("uid")
+        display_name = decoded.get("name") or (email.split("@")[0] if email else "")
 
-        # Buscar en BigQuery si el usuario existe
+        if not email:
+            return jsonify({"error": "Token sin email"}), 401
+
+        # 2) Buscar usuario en BigQuery
         query = """
-            SELECT correo, nombre, rol
+            SELECT correo, nombre, rol, SAFE_CAST(firebase_uid AS STRING) AS firebase_uid
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-            WHERE correo = @correo
+            WHERE LOWER(correo) = LOWER(@correo)
         """
         job_config = bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
         )
-        result = client.query(query, job_config=job_config).result()
+        rows = list(client.query(query, job_config=job_config).result())
 
-        user = None
-        for row in result:
-            user = {
-                "correo": row["correo"],
-                "nombre": row["nombre"],
-                "rol": row["rol"]
-            }
+        if not rows:
+            # 3) Auto-registro como 'pendiente'
+            table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
+            to_insert = [{
+                "correo": email,
+                "nombre": display_name,
+                "rol": "pendiente",
+                "firebase_uid": uid
+            }]
+            insert_errors = client.insert_rows_json(table_id, to_insert)
+            if insert_errors:
+                # Para depurar si faltan columnas/ESQUEMA
+                return jsonify({"error": f"No se pudo auto-registrar: {insert_errors}"}), 500
 
-        if not user:
-            return jsonify({"error": "Usuario no autorizado"}), 403
+            # Devuelve estado PENDIENTE para que el front muestre mensaje claro
+            return jsonify({"status": "pending", "message": "Tu acceso está pendiente de aprobación."}), 403
 
+        # 4) Usuario existe: arma objeto sesión
+        row = rows[0]
+        user = {
+            "correo": row["correo"],
+            "nombre": row["nombre"],
+            "rol": row["rol"],
+            "firebase_uid": row.get("firebase_uid")
+        }
+
+        # 5) Si sigue pendiente, no dejes entrar a rutas normales
+        if user["rol"] == "pendiente":
+            return jsonify({"status": "pending", "message": "Tu acceso está pendiente de aprobación."}), 403
+
+        # 6) Login OK
         session["user"] = user
         return jsonify({"message": "Login exitoso"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
+
 
 @app.route('/logout')
 def logout():

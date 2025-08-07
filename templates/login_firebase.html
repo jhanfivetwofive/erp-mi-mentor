@@ -46,28 +46,42 @@
   };
   firebase.initializeApp(firebaseConfig);
 
-  function loginWithGoogle() {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    firebase.auth().signInWithPopup(provider)
-      .then(result => result.user.getIdToken())
-      .then(idToken => {
-        return fetch("/login_firebase", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken })
-        });
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.message) {
-          window.location.href = "/alumnos";
-        } else {
-          alert(data.error || "No autorizado");
-        }
-      })
-      .catch(error => {
-        alert("Error al iniciar sesión con Google: " + error.message);
+  async function loginWithGoogle() {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      const result = await firebase.auth().signInWithPopup(provider);
+      const idToken = await result.user.getIdToken();
+
+      const resp = await fetch("/login_firebase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken })
       });
+
+      // intenta leer JSON incluso si es 403
+      let data = {};
+      try { data = await resp.json(); } catch (_) {}
+
+      if (resp.ok) {
+        // login exitoso
+        window.location.href = "/alumnos";
+        return;
+      }
+
+      // manejo especial cuando el backend auto-registra como "pendiente"
+      if (data && data.status === "pending") {
+        alert("Tu cuenta fue registrada.");
+        // opcional: cerrar sesión de Firebase para evitar confusiones
+        try { await firebase.auth().signOut(); } catch (_) {}
+        return;
+      }
+
+      // otros errores (no autorizado, etc.)
+      alert(data.error || "No autorizado. Si crees que es un error, contacta al administrador.");
+
+    } catch (err) {
+      alert("Error al iniciar sesión con Google: " + err.message);
+    }
   }
 </script>
 {% endblock %}
