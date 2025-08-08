@@ -15,6 +15,7 @@ from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
 from firebase_admin import auth as firebase_auth
+from datetime import datetime, timezone
 import uuid
 
 def current_user_role():
@@ -27,6 +28,10 @@ def get_firebase_credentials():
     response = client.access_secret_version(request={"name": name})
     return response.payload.data
 
+ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
+
+def _now_iso_utc():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
@@ -486,20 +491,23 @@ def get_alumno_info(correo):
 
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
-    rol = current_user_role()
+    rol = (current_user_role() or "").strip().lower()
     if rol not in ["postventa", "admin"]:
         return jsonify({"error": "No autorizado"}), 403
 
     data = request.get_json() or {}
-    correo = (data.get("correo") or "").strip()
-    nota = (data.get("nota") or "").strip()
-    tipo = (data.get("tipo") or "").strip()  # opcional
-    estado = (data.get("estado") or "pendiente").strip()
+    correo = (data.get("correo") or "").strip().lower()
+    nota   = (data.get("nota")   or "").strip()
+    tipo   = (data.get("tipo")   or "").strip().lower() or "otro"
+    estado = (data.get("estado") or "contactado").strip().lower()  # <- default actualizado
 
     if not correo or not nota:
-        return jsonify({"error": "Faltan datos"}), 400
+        return jsonify({"error": "Faltan datos (correo y nota)"}), 400
 
-    # (Opcional) intenta resolver ID_ALUMNO
+    if estado not in ESTADOS_PERMITIDOS:
+        return jsonify({"error": f"Estado inválido. Usa: {', '.join(sorted(ESTADOS_PERMITIDOS))}"}), 400
+
+    # Resolver ID_ALUMNO (opcional)
     query_id = """
       SELECT ANY_VALUE(ID_ALUMNO) AS ID_ALUMNO
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
@@ -515,13 +523,13 @@ def api_crear_seguimiento():
     for r in res:
         id_alumno = r["ID_ALUMNO"]
 
-    table_id = "fivetwofive-20.INSUMOS.DB_SEGUIMIENTO_ALUMNO"
+    table_id = "fivetwofive-20.PSOTVENTA.DB_SEGUIMIENTO_ALUMNO"
     rows = [{
         "ID": str(uuid.uuid4()),
-        "ID_ALUMNO": id_alumno,
+        "ID_ALUMNO": id_alumno,                       # puede ser NULL
         "CORREO": correo,
-        "FECHA": time.strftime("%Y-%m-%dT%H:%M:%S"),  # o datetime.utcnow().isoformat()
-        "AUTOR": (session.get("user") or {}).get("correo"),
+        "FECHA": _now_iso_utc(),                      # TIMESTAMP ISO UTC (Z)
+        "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
         "ROL_AUTOR": rol,
         "TIPO": tipo,
         "NOTA": nota,
