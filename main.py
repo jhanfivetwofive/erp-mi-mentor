@@ -15,8 +15,12 @@ from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
 from firebase_admin import auth as firebase_auth
-import firebase_admin
-from firebase_admin import auth as firebase_auth
+from datetime import datetime, timezone
+import uuid
+
+def current_user_role():
+    user = session.get("user") or {}
+    return user.get("rol")
 
 def get_firebase_credentials():
     client = secretmanager.SecretManagerServiceClient()
@@ -24,7 +28,27 @@ def get_firebase_credentials():
     response = client.access_secret_version(request={"name": name})
     return response.payload.data
 
-# Inicializa Firebase una sola vez
+def get_user_from_session():
+    return session.get("user") or {}
+
+def fetch_rol_from_bq(correo):
+    q = """
+      SELECT ANY_VALUE(rol) rol
+      FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
+      WHERE LOWER(correo)=LOWER(@c)
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("c","STRING", correo)]
+    )
+    for row in client.query(q, job_config=job).result():
+        return (row["rol"] or "").strip().lower()
+    return ""
+
+ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
+
+def _now_iso_utc():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
+
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
     firebase_admin.initialize_app(cred)
@@ -87,12 +111,12 @@ def login_firebase():
         data = request.get_json()
         id_token = data.get("idToken")
 
-        # Verifica el token con Firebase
+        # 1. Verifica el token con Firebase
         decoded_token = firebase_auth.verify_id_token(id_token)
         email = decoded_token["email"]
-        name = decoded_token.get("name", "Sin Nombre")
+        name = decoded_token.get("name", email.split("@")[0])
 
-        # Busca al usuario en BigQuery
+        # 2. Busca en BigQuery si ya existe
         query = """
             SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
@@ -111,26 +135,25 @@ def login_firebase():
                 "rol": row["rol"]
             }
 
+        # 3. Si no existe, crearlo como "invitado"
         if not user:
-            # Si no existe, lo insertamos con rol "pendiente"
-            insert_query = """
-                INSERT INTO `fivetwofive-20.INSUMOS.DB_USUARIO` (correo, nombre, rol)
-                VALUES (@correo, @nombre, @rol)
-            """
-            insert_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("correo", "STRING", email),
-                    bigquery.ScalarQueryParameter("nombre", "STRING", name),
-                    bigquery.ScalarQueryParameter("rol", "STRING", "pendiente")
-                ]
-            )
-            client.query(insert_query, job_config=insert_config).result()
-            return jsonify({"error": "Registro recibido. Acceso pendiente de aprobación."}), 403
+            table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
+            rows_to_insert = [{
+                "correo": email,
+                "nombre": name,
+                "rol": "invitado",  # 👈 Rol por defecto
+                "firebase_uid": decoded_token["uid"]
+            }]
+            errors = client.insert_rows_json(table_id, rows_to_insert)
+            if errors:
+                print(f"Error insertando nuevo usuario: {errors}")
+            user = {
+                "correo": email,
+                "nombre": name,
+                "rol": "invitado"
+            }
 
-        if user["rol"] == "pendiente":
-            return jsonify({"error": "Acceso aún no aprobado por un administrador."}), 403
-
-        # Si todo bien, guardar en sesión
+        # 4. Guardar en sesión
         session["user"] = user
         return jsonify({"message": "Login exitoso"}), 200
 
@@ -143,30 +166,38 @@ def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase'))  # Redirige a la página de login
 
+def login_required(roles=None):
+    if roles is None:
+        roles = ["admin"]  # por defecto
 
-def login_required(roles=["admin"]):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if "user" not in session:
-                # Redirige al login si no hay sesión
                 return redirect(url_for("login_firebase"))
 
             user = session["user"]
-            if user["rol"] not in roles:  # Asegurando que el rol es correcto
-                return "No tienes permiso para acceder a esta página", 403
+            if user["rol"] not in roles:
+                return render_template("no_autorizado.html"), 403  # vista amigable
 
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
-
 @app.route("/admin")
-# Solo los usuarios con rol 'admin' pueden acceder
 @login_required(roles=["admin"])
 def admin_page():
-    return render_template("admin.html")
+    render_template("alumnos.html")
 
+@app.route("/adquisicion")
+@login_required(roles=["admin", "adquisicion"])
+def adquisicion_page():
+    render_template("alumnos.html")
+
+@app.route("/panel_basico")
+@login_required(roles=["admin", "invitado", "postventa", "comunidad", "people", "adquisicion"])
+def panel_basico():
+    render_template("alumnos.html")
 
 @app.route('/alumnos')
 def alumnos_page():
@@ -365,26 +396,26 @@ def nuevo_alumno():
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
-        # Consulta para la información del alumno
+        # ---- Parametrización compartida ----
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+        )
+
+        # ---- 1) Info del alumno ----
         query_alumno = """
             SELECT
-            ID_ALUMNO,
-            CORREO,
-            STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
-            STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
-            MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
-            MAX(TELEFONO) AS TELEFONO,
-            MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
-            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL` 
+              ID_ALUMNO,
+              CORREO,
+              STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
+              STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
+              MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
+              MAX(TELEFONO) AS TELEFONO,
+              MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             GROUP BY ID_ALUMNO, CORREO
         """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", correo)]
-        )
-        result_alumno = client.query(
-            query_alumno, job_config=job_config).result()
+        result_alumno = client.query(query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -397,16 +428,28 @@ def get_alumno_info(correo):
                 'PROGRAMA': row['PROGRAMA'],
                 'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA']
             }
+            break  # solo el primero (debería ser único)
 
-        # Consulta para cursos
+        if not alumno_info:
+            return render_template('panel_alumnos.html',
+                                   alumno_info=None,
+                                   cursos_info=[],
+                                   seguimientos=[],
+                                   rol_usuario=current_user_role() if 'current_user_role' in globals() else None), 404
+
+        # ---- 2) Cursos Thinkific ----
         query_cursos = """
-            SELECT COURSE_NAME, PERCENTAGE_COMPLETED,
-                   STARTED_AT, UPDATED_AT, COMPLETED_AT
+            SELECT
+              COURSE_NAME,
+              PERCENTAGE_COMPLETED,
+              STARTED_AT,
+              UPDATED_AT,
+              COMPLETED_AT
             FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
             WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+            ORDER BY UPDATED_AT DESC
         """
-        result_cursos = client.query(
-            query_cursos, job_config=job_config).result()
+        result_cursos = client.query(query_cursos, job_config=job_config).result()
 
         cursos_info = []
         for row in result_cursos:
@@ -418,12 +461,126 @@ def get_alumno_info(correo):
                 'COMPLETED_AT': row['COMPLETED_AT']
             })
 
-        print("Renderizando plantilla panel_alumnos.html...")
-        return render_template('panel_alumnos.html',
-                               alumno_info=alumno_info,
-                               cursos_info=cursos_info)
+        # ---- 3) Seguimientos ----
+        query_seg = """
+            SELECT
+              ID,
+              FECHA,
+              AUTOR,
+              ROL_AUTOR,
+              TIPO,
+              NOTA,
+              ESTADO
+            FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+            ORDER BY FECHA DESC
+        """
+        result_seg = client.query(query_seg, job_config=job_config).result()
+
+        seguimientos = []
+        for row in result_seg:
+            # Si FECHA es TIMESTAMP/DATETIME, el template puede formatearlo; aquí lo dejamos "raw".
+            seguimientos.append({
+                "ID": row["ID"],
+                "FECHA": row["FECHA"],
+                "AUTOR": row["AUTOR"],
+                "ROL_AUTOR": row["ROL_AUTOR"],
+                "TIPO": row.get("TIPO", ""),
+                "NOTA": row.get("NOTA", ""),
+                "ESTADO": row.get("ESTADO", "")
+            })
+
+        # ---- Render final (¡un solo return!) ----
+        return render_template(
+            'panel_alumnos.html',
+            alumno_info=alumno_info,
+            cursos_info=cursos_info,
+            seguimientos=seguimientos,
+            rol_usuario=current_user_role() if 'current_user_role' in globals() else None
+        )
 
     except Exception as e:
         import traceback
-        traceback.print_exc()  # muestra el error en la consola de Cloud Run o local
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/seguimiento", methods=["POST"])
+def api_crear_seguimiento():
+    try:
+        # 1) intenta sacar rol de sesión
+        user = get_user_from_session()
+        rol = (user.get("rol") or "").strip().lower()
+
+        # 2) si no hay rol, rehidrata desde BQ por el usuario en sesión
+        if not rol:
+            correo_sesion = (user.get("correo") or "").strip().lower()
+            if correo_sesion:
+                rol = fetch_rol_from_bq(correo_sesion)
+                # actualiza la sesión para siguientes requests
+                if rol:
+                    user["rol"] = rol
+                    session["user"] = user
+
+        # 3) autoriza
+        if rol not in ["postventa", "admin"]:
+            return jsonify({"error": "No autorizado"}), 403
+
+        data = request.get_json() or {}
+        correo = (data.get("correo") or "").strip().lower()
+        nota   = (data.get("nota")   or "").strip()
+        tipo   = (data.get("tipo")   or "").strip().lower() or "otro"
+        estado = (data.get("estado") or "contactado").strip().lower()
+
+        ESTADOS_PERMITIDOS = {"contactado","en_proceso","cerrado"}
+        if not correo or not nota:
+            return jsonify({"error": "Faltan datos (correo y nota)"}), 400
+        if estado not in ESTADOS_PERMITIDOS:
+            return jsonify({"error": f"Estado inválido. Usa: {', '.join(sorted(ESTADOS_PERMITIDOS))}"}), 400
+
+        # Resolver ID_ALUMNO
+        query_id = """
+          SELECT ANY_VALUE(ID_ALUMNO) AS ID_ALUMNO
+          FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+          WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+        """
+        res = client.query(
+            query_id,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
+            )
+        ).result()
+        id_alumno = None
+        for r in res:
+            id_alumno = r["ID_ALUMNO"]
+
+        table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"  # unificado
+        row = {
+            "ID": str(uuid.uuid4()),
+            "ID_ALUMNO": id_alumno,   # ahora es STRING en BQ
+            "CORREO": correo,
+            "FECHA": _now_iso_utc(),
+            "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
+            "ROL_AUTOR": rol,
+            "TIPO": tipo,
+            "NOTA": nota,
+            "ESTADO": estado,
+        }
+
+        # Log útil en Cloud Run
+        print("Insertando en:", table_id, "row=", row, flush=True)
+
+        errors = client.insert_rows_json(table_id, [row])
+        if errors:
+            # Manda el detalle literal al front
+            return jsonify({"error": errors}), 500
+
+        return jsonify({"message": "Seguimiento agregado"}), 200
+
+    except Exception as e:
+        # Propaga el mensaje en JSON para que el front lo muestre
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
