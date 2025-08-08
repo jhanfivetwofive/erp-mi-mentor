@@ -5,260 +5,447 @@
 {% block content %}
 <div class="container mt-4">
 
-  {% if not alumno_info %}
+    {% if not alumno_info %}
     <div class="alert alert-warning">
-      No se encontró información para este alumno.
+        No se encontró información para este alumno.
     </div>
-  {% else %}
+    {% else %}
 
-  <!-- Información del Alumno -->
-  <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white d-flex align-items-center">
-      <h4 class="mb-0"><i class="bi bi-person-fill me-2"></i>Información del Alumno</h4>
+    <!-- Información del Alumno -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white d-flex align-items-center">
+            <h4 class="mb-0"><i class="bi bi-person-fill me-2"></i>Información del Alumno</h4>
+        </div>
+        <div class="card-body">
+            <form class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nombre</label>
+                    <input type="text" class="form-control" value="{{ alumno_info.NOMBRE_ALUMNO|default('-') }}"
+                        disabled>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Correo</label>
+                    <input type="email" class="form-control" value="{{ alumno_info.CORREO|default('-') }}" disabled>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Teléfono</label>
+                    <input type="text" class="form-control" value="{{ alumno_info.TELEFONO|default('-') }}" disabled>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Fecha de Inscripción</label>
+                    <input type="text" class="form-control" value="{{ alumno_info.FECHA_INSCRIPCION|default('') }}"
+                        disabled>
+                </div>
+
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Programas</label>
+                    <div>
+                        {% set programas = (alumno_info.PROGRAMA or '') %}
+                        {% for p in programas.split(', ') if p %}
+                        <span class="badge text-bg-success mb-1 me-1">{{ p }}</span>
+                        {% else %}
+                        <span class="text-muted">Sin programas</span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Generaciones</label>
+                    <div>
+                        {% set gens = (alumno_info.GENERACION_PROGRAMA or '') %}
+                        {% for g in gens.split(', ') if g %}
+                        <span class="badge text-bg-secondary mb-1 me-1">{{ g }}</span>
+                        {% else %}
+                        <span class="text-muted">Sin generaciones</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </form>
+        </div>
     </div>
-    <div class="card-body">
-      <form class="row">
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Nombre</label>
-          <input type="text" class="form-control" value="{{ alumno_info.NOMBRE_ALUMNO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Correo</label>
-          <input type="email" class="form-control" value="{{ alumno_info.CORREO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Teléfono</label>
-          <input type="text" class="form-control" value="{{ alumno_info.TELEFONO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Fecha de Inscripción</label>
-          <input type="text" class="form-control" value="{{ alumno_info.FECHA_INSCRIPCION|default('') }}" disabled>
-        </div>
 
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Programas</label>
-          <div>
-            {% set programas = (alumno_info.PROGRAMA or '') %}
-            {% for p in programas.split(', ') if p %}
-              <span class="badge text-bg-success mb-1 me-1">{{ p }}</span>
+    <!-- Historial de Cursos (solo comunidad/admin/postventa) -->
+    {% if rol_usuario|default('', true)|lower in ['comunidad','admin'] %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0"><i class="bi bi-journal-text me-2"></i>Historial de Cursos</h4>
+        </div>
+        <div class="card-body">
+            <table id="cursosTable"
+                class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">
+                <thead>
+                    <tr>
+                        <th>Curso</th>
+                        <th>% Completado</th>
+                        <th>Inicio</th>
+                        <th>Última actualización</th>
+                        <th>Finalización</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for curso in (cursos_info or []) %}
+                    {% set started_iso = (curso.STARTED_AT or '') %}
+                    {% set updated_iso = (curso.UPDATED_AT or '') %}
+                    {% set completed_iso = (curso.COMPLETED_AT or '') %}
+                    <tr>
+                        <td>{{ curso.COURSE_NAME|default('-') }}</td>
+                        <td data-order="{{ curso.PERCENTAGE_COMPLETED|default(0) }}">{{
+                            curso.PERCENTAGE_COMPLETED|default(0) }}%</td>
+                        <td data-order="{{ started_iso }}">{{ started_iso }}</td>
+                        <td data-order="{{ updated_iso }}">{{ updated_iso }}</td>
+                        <td data-order="{{ completed_iso }}">{{ completed_iso }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% endif %} {# cierra el else de alumno_info #}
+
+    <!-- Seguimiento (sólo Postventa/Admin) -->
+    {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Seguimiento (Postventa)</h4>
+        </div>
+        <div class="card-body">
+            <div id="alertSeg" class="alert d-none" role="alert"></div>
+            <form id="formSeguimiento" class="row g-2">
+                <input type="hidden" id="correo" value="{{ alumno_info.CORREO }}">
+                <div class="col-md-3">
+                    <label class="form-label">Tipo</label>
+                    <select id="tipo" class="form-select" required>
+                        <option value="llamada">Llamada</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="correo">Correo</option>
+                        <option value="otro">Otro</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Estado</label>
+                    <select id="estado" class="form-select" required>
+                        <option value="contactado">Contactado</option>
+                        <option value="en_proceso">En proceso</option>
+                        <option value="cerrado">Cerrado</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Nota</label>
+                    <textarea id="nota" class="form-control" rows="3"
+                        placeholder="Escribe el detalle de tu seguimiento..." required></textarea>
+                </div>
+                <div class="col-12 mt-2">
+                    <button type="submit" class="btn btn-success">
+                        <span class="spinner-border spinner-border-sm me-2 d-none" id="segSpinner" role="status"
+                            aria-hidden="true"></span>
+                        Guardar seguimiento
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Historial de seguimiento -->
+    {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Historial de Seguimiento</h4>
+        </div>
+        <div class="card-body">
+            {% if seguimientos and seguimientos|length > 0 %}
+            <div class="list-group">
+                {% for s in seguimientos %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between">
+                        <strong>{{ (s.TIPO or '')|upper }} · {{ (s.ESTADO or '')|upper }}</strong>
+                        <small>{{ s.FECHA }}</small>
+                    </div>
+                    <div class="mt-1">{{ s.NOTA }}</div>
+                    <div class="mt-1 text-muted"><small>Por: {{ s.AUTOR }} ({{ s.ROL_AUTOR }})</small></div>
+                </div>
+                {% endfor %}
+            </div>
             {% else %}
-              <span class="text-muted">Sin programas</span>
-            {% endfor %}
-          </div>
+            <em>No hay seguimientos todavía.</em>
+            {% endif %}
         </div>
+    </div>
+    {% endif %}
 
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Generaciones</label>
-          <div>
-            {% set gens = (alumno_info.GENERACION_PROGRAMA or '') %}
-            {% for g in gens.split(', ') if g %}
-              <span class="badge text-bg-secondary mb-1 me-1">{{ g }}</span>
-            {% else %}
-              <span class="text-muted">Sin generaciones</span>
-            {% endfor %}
-          </div>
+    {% if rol_usuario|default('',true)|lower in ['postventa','admin'] and alumno_info %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0"><i class="bi bi-kanban me-2"></i>Seguimientos (Kanban)</h4>
         </div>
-      </form>
+        <div class="card-body">
+            <div class="row g-3">
+                <!-- Columnas -->
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">CONTACTADO</h6>
+                    <div id="col-contactado" class="kanban-col border rounded p-2" data-estado="contactado"></div>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">EN PROCESO</h6>
+                    <div id="col-enproceso" class="kanban-col border rounded p-2" data-estado="en_proceso"></div>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">CERRADO</h6>
+                    <div id="col-cerrado" class="kanban-col border rounded p-2" data-estado="cerrado"></div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
+    <style>
+        .kanban-col {
+            min-height: 280px;
+            background: #f8f9fa;
+        }
 
-  <!-- Historial de Cursos (solo comunidad/admin/postventa) -->
-  {% if rol_usuario|default('', true)|lower in ['comunidad','admin'] %}
-  <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-journal-text me-2"></i>Historial de Cursos</h4>
-    </div>
-    <div class="card-body">
-      <table id="cursosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">
-        <thead>
-          <tr>
-            <th>Curso</th>
-            <th>% Completado</th>
-            <th>Inicio</th>
-            <th>Última actualización</th>
-            <th>Finalización</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for curso in (cursos_info or []) %}
-          {% set started_iso   = (curso.STARTED_AT or '') %}
-          {% set updated_iso   = (curso.UPDATED_AT or '') %}
-          {% set completed_iso = (curso.COMPLETED_AT or '') %}
-          <tr>
-            <td>{{ curso.COURSE_NAME|default('-') }}</td>
-            <td data-order="{{ curso.PERCENTAGE_COMPLETED|default(0) }}">{{ curso.PERCENTAGE_COMPLETED|default(0) }}%</td>
-            <td data-order="{{ started_iso }}">{{ started_iso }}</td>
-            <td data-order="{{ updated_iso }}">{{ updated_iso }}</td>
-            <td data-order="{{ completed_iso }}">{{ completed_iso }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
+        .kanban-card {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: .5rem;
+            padding: .5rem .75rem;
+            margin-bottom: .5rem;
+            cursor: grab;
+        }
 
-  {% endif %} {# cierra el else de alumno_info #}
+        .kanban-col.drag-over {
+            outline: 2px dashed #198754;
+        }
 
-  <!-- Seguimiento (sólo Postventa/Admin) -->
-  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
-  <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Seguimiento (Postventa)</h4>
-    </div>
-    <div class="card-body">
-      <div id="alertSeg" class="alert d-none" role="alert"></div>
-      <form id="formSeguimiento" class="row g-2">
-        <input type="hidden" id="correo" value="{{ alumno_info.CORREO }}">
-        <div class="col-md-3">
-          <label class="form-label">Tipo</label>
-          <select id="tipo" class="form-select" required>
-            <option value="llamada">Llamada</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="correo">Correo</option>
-            <option value="otro">Otro</option>
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Estado</label>
-          <select id="estado" class="form-select" required>
-            <option value="contactado">Contactado</option>
-            <option value="en_proceso">En proceso</option>
-            <option value="cerrado">Cerrado</option>
-          </select>
-        </div>
-        <div class="col-12">
-          <label class="form-label">Nota</label>
-          <textarea id="nota" class="form-control" rows="3" placeholder="Escribe el detalle de tu seguimiento..." required></textarea>
-        </div>
-        <div class="col-12 mt-2">
-          <button type="submit" class="btn btn-success">
-            <span class="spinner-border spinner-border-sm me-2 d-none" id="segSpinner" role="status" aria-hidden="true"></span>
-            Guardar seguimiento
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-  {% endif %}
+        .kanban-badge {
+            font-size: .75rem;
+        }
+    </style>
+    {% endif %}
 
-  <!-- Historial de seguimiento -->
-  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
-  <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Historial de Seguimiento</h4>
-    </div>
-    <div class="card-body">
-      {% if seguimientos and seguimientos|length > 0 %}
-      <div class="list-group">
-        {% for s in seguimientos %}
-        <div class="list-group-item">
-          <div class="d-flex justify-content-between">
-            <strong>{{ (s.TIPO or '')|upper }} · {{ (s.ESTADO or '')|upper }}</strong>
-            <small>{{ s.FECHA }}</small>
-          </div>
-          <div class="mt-1">{{ s.NOTA }}</div>
-          <div class="mt-1 text-muted"><small>Por: {{ s.AUTOR }} ({{ s.ROL_AUTOR }})</small></div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <em>No hay seguimientos todavía.</em>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
 
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  // Inicializa DataTables solo si existe la tabla
-  $(document).ready(function () {
-    const table = document.getElementById('cursosTable');
-    if (table) {
-      $('#cursosTable').DataTable({
-        pageLength: 25,
-        lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
-        order: [[3, 'desc']], // "Última actualización"
-        language: {
-          search: "Buscar:",
-          lengthMenu: "Mostrar _MENU_ registros",
-          zeroRecords: "No se encontraron resultados",
-          info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-          infoEmpty: "No hay registros",
-          infoFiltered: "(filtrado de _MAX_ registros)",
-          paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
-        },
-        columnDefs: [
-          { targets: [2, 3, 4], type: 'string' } // usará data-order ISO para ordenar
-        ]
-      });
-    }
-  });
-
-  // Guardar seguimiento (AJAX) — único handler y único endpoint
-  (function () {
-    const form = document.getElementById('formSeguimiento');
-    if (!form) return;
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const spinner = document.getElementById('segSpinner');
-      const alertSeg = document.getElementById('alertSeg');
-
-      const payload = {
-        correo: document.getElementById('correo').value,
-        tipo:   document.getElementById('tipo').value,
-        estado: document.getElementById('estado').value,
-        nota:   document.getElementById('nota').value.trim()
-      };
-
-      if (!payload.nota) {
-        alertSeg.textContent = 'Escribe una nota.';
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-danger');
-        return;
-      }
-
-      // Reset de alertas + spinner
-      alertSeg.classList.add('d-none');
-      alertSeg.classList.remove('alert-success', 'alert-danger');
-      spinner.classList.remove('d-none');
-
-      try {
-        const resp = await fetch('/api/seguimiento', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin', // por si acaso
-          body: JSON.stringify(payload)
-        });
-
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-        const msg = (data && data.error) ? JSON.stringify(data.error) : 'Error desconocido';
-        throw new Error(msg);
+    // Inicializa DataTables solo si existe la tabla
+    $(document).ready(function () {
+        const table = document.getElementById('cursosTable');
+        if (table) {
+            $('#cursosTable').DataTable({
+                pageLength: 25,
+                lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
+                order: [[3, 'desc']], // "Última actualización"
+                language: {
+                    search: "Buscar:",
+                    lengthMenu: "Mostrar _MENU_ registros",
+                    zeroRecords: "No se encontraron resultados",
+                    info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
+                    infoEmpty: "No hay registros",
+                    infoFiltered: "(filtrado de _MAX_ registros)",
+                    paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
+                },
+                columnDefs: [
+                    { targets: [2, 3, 4], type: 'string' } // usará data-order ISO para ordenar
+                ]
+            });
         }
+    });
+
+    // Guardar seguimiento (AJAX) — único handler y único endpoint
+    (function () {
+        const form = document.getElementById('formSeguimiento');
+        if (!form) return;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const spinner = document.getElementById('segSpinner');
+            const alertSeg = document.getElementById('alertSeg');
+
+            const payload = {
+                correo: document.getElementById('correo').value,
+                tipo: document.getElementById('tipo').value,
+                estado: document.getElementById('estado').value,
+                nota: document.getElementById('nota').value.trim()
+            };
+
+            if (!payload.nota) {
+                alertSeg.textContent = 'Escribe una nota.';
+                alertSeg.classList.remove('d-none');
+                alertSeg.classList.add('alert', 'alert-danger');
+                return;
+            }
+
+            // Reset de alertas + spinner
+            alertSeg.classList.add('d-none');
+            alertSeg.classList.remove('alert-success', 'alert-danger');
+            spinner.classList.remove('d-none');
+
+            try {
+                const resp = await fetch('/api/seguimiento', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', // por si acaso
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    const msg = (data && data.error) ? JSON.stringify(data.error) : 'Error desconocido';
+                    throw new Error(msg);
+                }
 
 
-        // OK
-        alertSeg.textContent = 'Seguimiento guardado correctamente.';
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-success');
-        form.reset();
+                // OK
+                alertSeg.textContent = 'Seguimiento guardado correctamente.';
+                alertSeg.classList.remove('d-none');
+                alertSeg.classList.add('alert', 'alert-success');
+                form.reset();
 
-        // Refresca historial
-        setTimeout(() => window.location.reload(), 800);
+                // Refresca historial
+                setTimeout(() => window.location.reload(), 800);
 
-      } catch (err) {
-        alertSeg.textContent = 'No se pudo guardar el seguimiento: ' + err.message;
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-danger');
-      } finally {
-        spinner.classList.add('d-none');
+            } catch (err) {
+                alertSeg.textContent = 'No se pudo guardar el seguimiento: ' + err.message;
+                alertSeg.classList.remove('d-none');
+                alertSeg.classList.add('alert', 'alert-danger');
+            } finally {
+                spinner.classList.add('d-none');
+            }
+        });
+    })();
+</script>
+<script>
+(function () {
+  const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
+  const rol = "{{ rol_usuario|default('',true)|lower }}";
+  if (!correoAlumno || !['postventa', 'admin'].includes(rol)) return;
+
+  const cols = {
+    contactado: document.getElementById('col-contactado'),
+    en_proceso: document.getElementById('col-enproceso'),
+    cerrado: document.getElementById('col-cerrado'),
+  };
+
+  function escapeText(text) { return (text ?? '').toString(); }
+
+  function cardTemplate(s) {
+    const fecha = s.FECHA ? new Date(s.FECHA).toLocaleString() : '';
+    const el = document.createElement('div');
+    el.className = 'kanban-card';
+    el.draggable = true;
+    el.dataset.id = s.ID;
+    el.dataset.estado = s.ESTADO || '';
+
+    const top = document.createElement('div');
+    top.className = 'd-flex justify-content-between align-items-start';
+
+    const strong = document.createElement('strong');
+    strong.textContent = (s.TIPO || '').toUpperCase();
+
+    const badge = document.createElement('span');
+    badge.className = 'badge text-bg-secondary kanban-badge';
+    badge.textContent = (s.ROL_AUTOR || '').toUpperCase();
+
+    const smallFecha = document.createElement('div');
+    smallFecha.className = 'small text-muted';
+    smallFecha.textContent = fecha;
+
+    const notaDiv = document.createElement('div');
+    notaDiv.className = 'mt-1';
+    notaDiv.textContent = escapeText(s.NOTA);
+
+    const autorDiv = document.createElement('div');
+    autorDiv.className = 'small text-muted mt-1';
+    autorDiv.textContent = `Por: ${escapeText(s.AUTOR)}`;
+
+    top.appendChild(strong);
+    top.appendChild(badge);
+    el.appendChild(top);
+    el.appendChild(smallFecha);
+    el.appendChild(notaDiv);
+    el.appendChild(autorDiv);
+
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', s.ID);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    return el;
+  }
+
+  function ensureEmptyState() {
+    Object.values(cols).forEach(col => {
+      if (!col.querySelector('.kanban-card')) {
+        const p = document.createElement('div');
+        p.className = 'text-muted small';
+        p.textContent = 'Sin registros';
+        col.appendChild(p);
       }
     });
-  })();
+  }
+
+  async function loadSeguimientos() {
+    const res = await fetch(`/api/seguimientos?correo=${encodeURIComponent(correoAlumno)}`, {
+      credentials: 'same-origin'
+    });
+    if (!res.ok) {
+      console.warn('No se pudieron cargar seguimientos', res.status);
+      return;
+    }
+    const data = await res.json();
+
+    // Limpia columnas
+    Object.values(cols).forEach(c => c.innerHTML = '');
+
+    // Render
+    (data || []).forEach(s => {
+      const estado = (s.ESTADO || '').toLowerCase();
+      const col = cols[estado] || cols.contactado;
+      col.appendChild(cardTemplate(s));
+    });
+
+    ensureEmptyState();
+  }
+
+  // Drag & drop handlers por columna
+  Object.entries(cols).forEach(([estado, colEl]) => {
+    colEl.addEventListener('dragover', (e) => { e.preventDefault(); colEl.classList.add('drag-over'); });
+    colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
+    colEl.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      colEl.classList.remove('drag-over');
+      const segId = e.dataTransfer.getData('text/plain');
+      if (!segId) return;
+
+      // Mueve visualmente
+      const card = document.querySelector(`.kanban-card[data-id="${segId}"]`);
+      if (card) colEl.appendChild(card);
+
+      // PATCH al backend
+      try {
+        const resp = await fetch(`/api/seguimiento/${encodeURIComponent(segId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ estado })
+        });
+        const out = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          alert(out.error || 'No se pudo actualizar el estado');
+          // Revertir: recargar estado desde servidor
+          await loadSeguimientos();
+        }
+      } catch (err) {
+        alert(err.message || 'Error de red');
+        await loadSeguimientos();
+      }
+    });
+  });
+
+  // Carga inicial
+  loadSeguimientos();
+})();
 </script>
+
 {% endblock %}

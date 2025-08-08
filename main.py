@@ -164,7 +164,7 @@ def login_firebase():
 @app.route('/logout')
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
-    return redirect(url_for('login_firebase'))  # Redirige a la página de login
+    return redirect(url_for('login_firebase_page'))
 
 def login_required(roles=None):
     if roles is None:
@@ -583,4 +583,68 @@ def api_crear_seguimiento():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/seguimiento/<seg_id>", methods=["PATCH"])
+def api_mover_seguimiento(seg_id):
+    try:
+        rol = (current_user_role() or "").strip().lower()
+        if rol not in ["postventa","admin"]:
+            return jsonify({"error":"No autorizado"}), 403
+
+        data = request.get_json() or {}
+        nuevo_estado = (data.get("estado") or "").strip().lower()
+
+        if nuevo_estado not in ESTADOS_PERMITIDOS:
+            return jsonify({"error":"Estado inválido"}), 400
+
+        q = """
+          UPDATE `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+          SET ESTADO = @estado
+          WHERE ID = @id
+        """
+        job = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("estado","STRING", nuevo_estado),
+                bigquery.ScalarQueryParameter("id","STRING", seg_id),
+            ]
+        )
+        client.query(q, job_config=job).result()
+        return jsonify({"message":"Estado actualizado"}), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/api/seguimientos")
+def api_listar_seguimientos():
+    if "user" not in session:
+        return jsonify({"error": "No autorizado"}), 401
+
+    correo = (request.args.get("correo") or "").strip().lower()
+    if not correo:
+        return jsonify({"error": "Falta correo"}), 400
+
+    q = """
+      SELECT ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
+      FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+      WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+      ORDER BY FECHA DESC
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
+    )
+    rows = client.query(q, job_config=job).result()
+
+    out = []
+    for r in rows:
+        out.append({
+            "ID": r["ID"],
+            "FECHA": r["FECHA"].isoformat() if r["FECHA"] else None,
+            "AUTOR": r["AUTOR"],
+            "ROL_AUTOR": r["ROL_AUTOR"],
+            "TIPO": r["TIPO"],
+            "NOTA": r["NOTA"],
+            "ESTADO": r["ESTADO"]
+        })
+    return jsonify(out)
 
