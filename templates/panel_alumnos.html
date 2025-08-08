@@ -231,6 +231,7 @@
         const resp = await fetch('/api/seguimiento', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin', // por si acaso
           body: JSON.stringify(payload)
         });
 

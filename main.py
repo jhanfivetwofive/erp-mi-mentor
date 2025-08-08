@@ -28,6 +28,22 @@ def get_firebase_credentials():
     response = client.access_secret_version(request={"name": name})
     return response.payload.data
 
+def get_user_from_session():
+    return session.get("user") or {}
+
+def fetch_rol_from_bq(correo):
+    q = """
+      SELECT ANY_VALUE(rol) rol
+      FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
+      WHERE LOWER(correo)=LOWER(@c)
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("c","STRING", correo)]
+    )
+    for row in client.query(q, job_config=job).result():
+        return (row["rol"] or "").strip().lower()
+    return ""
+
 ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 
 def _now_iso_utc():
@@ -492,7 +508,21 @@ def get_alumno_info(correo):
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
     try:
-        rol = (current_user_role() or "").strip().lower()
+        # 1) intenta sacar rol de sesión
+        user = get_user_from_session()
+        rol = (user.get("rol") or "").strip().lower()
+
+        # 2) si no hay rol, rehidrata desde BQ por el usuario en sesión
+        if not rol:
+            correo_sesion = (user.get("correo") or "").strip().lower()
+            if correo_sesion:
+                rol = fetch_rol_from_bq(correo_sesion)
+                # actualiza la sesión para siguientes requests
+                if rol:
+                    user["rol"] = rol
+                    session["user"] = user
+
+        # 3) autoriza
         if rol not in ["postventa", "admin"]:
             return jsonify({"error": "No autorizado"}), 403
 
