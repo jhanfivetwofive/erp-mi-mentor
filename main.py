@@ -524,7 +524,7 @@ def api_crear_seguimiento():
         for r in res:
             id_alumno = r["ID_ALUMNO"]
 
-        table_id = "fivetwofive-20.INSUMOS.DB_SEGUIMIENTO_ALUMNO"  # unificado
+        table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"  # unificado
         row = {
             "ID": str(uuid.uuid4()),
             "ID_ALUMNO": id_alumno,   # ahora es STRING en BQ
