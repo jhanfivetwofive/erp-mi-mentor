@@ -491,53 +491,66 @@ def get_alumno_info(correo):
 
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
-    rol = (current_user_role() or "").strip().lower()
-    if rol not in ["postventa", "admin"]:
-        return jsonify({"error": "No autorizado"}), 403
+    try:
+        rol = (current_user_role() or "").strip().lower()
+        if rol not in ["postventa", "admin"]:
+            return jsonify({"error": "No autorizado"}), 403
 
-    data = request.get_json() or {}
-    correo = (data.get("correo") or "").strip().lower()
-    nota   = (data.get("nota")   or "").strip()
-    tipo   = (data.get("tipo")   or "").strip().lower() or "otro"
-    estado = (data.get("estado") or "contactado").strip().lower()  # <- default actualizado
+        data = request.get_json() or {}
+        correo = (data.get("correo") or "").strip().lower()
+        nota   = (data.get("nota")   or "").strip()
+        tipo   = (data.get("tipo")   or "").strip().lower() or "otro"
+        estado = (data.get("estado") or "contactado").strip().lower()
 
-    if not correo or not nota:
-        return jsonify({"error": "Faltan datos (correo y nota)"}), 400
+        ESTADOS_PERMITIDOS = {"contactado","en_proceso","cerrado"}
+        if not correo or not nota:
+            return jsonify({"error": "Faltan datos (correo y nota)"}), 400
+        if estado not in ESTADOS_PERMITIDOS:
+            return jsonify({"error": f"Estado inválido. Usa: {', '.join(sorted(ESTADOS_PERMITIDOS))}"}), 400
 
-    if estado not in ESTADOS_PERMITIDOS:
-        return jsonify({"error": f"Estado inválido. Usa: {', '.join(sorted(ESTADOS_PERMITIDOS))}"}), 400
+        # Resolver ID_ALUMNO
+        query_id = """
+          SELECT ANY_VALUE(ID_ALUMNO) AS ID_ALUMNO
+          FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+          WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+        """
+        res = client.query(
+            query_id,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
+            )
+        ).result()
+        id_alumno = None
+        for r in res:
+            id_alumno = r["ID_ALUMNO"]
 
-    # Resolver ID_ALUMNO (opcional)
-    query_id = """
-      SELECT ANY_VALUE(ID_ALUMNO) AS ID_ALUMNO
-      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-      WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-    """
-    res = client.query(
-        query_id,
-        job_config=bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
-        )
-    ).result()
-    id_alumno = None
-    for r in res:
-        id_alumno = r["ID_ALUMNO"]
+        table_id = "fivetwofive-20.INSUMOS.DB_SEGUIMIENTO_ALUMNO"  # unificado
+        row = {
+            "ID": str(uuid.uuid4()),
+            "ID_ALUMNO": id_alumno,   # ahora es STRING en BQ
+            "CORREO": correo,
+            "FECHA": _now_iso_utc(),
+            "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
+            "ROL_AUTOR": rol,
+            "TIPO": tipo,
+            "NOTA": nota,
+            "ESTADO": estado,
+        }
 
-    table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"
-    rows = [{
-        "ID": str(uuid.uuid4()),
-        "ID_ALUMNO": id_alumno,                       # puede ser NULL
-        "CORREO": correo,
-        "FECHA": _now_iso_utc(),                      # TIMESTAMP ISO UTC (Z)
-        "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
-        "ROL_AUTOR": rol,
-        "TIPO": tipo,
-        "NOTA": nota,
-        "ESTADO": estado
-    }]
-    errors = client.insert_rows_json(table_id, rows)
-    if errors:
-        return jsonify({"error": str(errors)}), 500
+        # Log útil en Cloud Run
+        print("Insertando en:", table_id, "row=", row, flush=True)
 
-    return jsonify({"message": "Seguimiento agregado"}), 200
+        errors = client.insert_rows_json(table_id, [row])
+        if errors:
+            # Manda el detalle literal al front
+            return jsonify({"error": errors}), 500
+
+        return jsonify({"message": "Seguimiento agregado"}), 200
+
+    except Exception as e:
+        # Propaga el mensaje en JSON para que el front lo muestre
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 

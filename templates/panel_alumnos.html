@@ -235,7 +235,11 @@
         });
 
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.error || 'Error desconocido');
+        if (!resp.ok) {
+        const msg = (data && data.error) ? JSON.stringify(data.error) : 'Error desconocido';
+        throw new Error(msg);
+        }
+
 
         // OK
         alertSeg.textContent = 'Seguimiento guardado correctamente.';
