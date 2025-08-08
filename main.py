@@ -86,96 +86,93 @@ def login_firebase():
     try:
         data = request.get_json()
         id_token = data.get("idToken")
-        if not id_token:
-            return jsonify({"error": "Falta idToken"}), 400
 
-        # 1) Verificar token Firebase
-        decoded = firebase_auth.verify_id_token(id_token)
-        email = decoded.get("email")
-        uid = decoded.get("uid")
-        display_name = decoded.get("name") or (email.split("@")[0] if email else "")
+        # 1. Verifica el token con Firebase
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        email = decoded_token["email"]
+        name = decoded_token.get("name", email.split("@")[0])
 
-        if not email:
-            return jsonify({"error": "Token sin email"}), 401
-
-        # 2) Buscar usuario en BigQuery
+        # 2. Busca en BigQuery si ya existe
         query = """
-            SELECT correo, nombre, rol, SAFE_CAST(firebase_uid AS STRING) AS firebase_uid
+            SELECT correo, nombre, rol
             FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-            WHERE LOWER(correo) = LOWER(@correo)
+            WHERE correo = @correo
         """
         job_config = bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
         )
-        rows = list(client.query(query, job_config=job_config).result())
+        result = client.query(query, job_config=job_config).result()
 
-        if not rows:
-            # 3) Auto-registro como 'pendiente'
+        user = None
+        for row in result:
+            user = {
+                "correo": row["correo"],
+                "nombre": row["nombre"],
+                "rol": row["rol"]
+            }
+
+        # 3. Si no existe, crearlo como "invitado"
+        if not user:
             table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
-            to_insert = [{
+            rows_to_insert = [{
                 "correo": email,
-                "nombre": display_name,
-                "rol": "pendiente",
-                "firebase_uid": uid
+                "nombre": name,
+                "rol": "invitado",  # 👈 Rol por defecto
+                "firebase_uid": decoded_token["uid"]
             }]
-            insert_errors = client.insert_rows_json(table_id, to_insert)
-            if insert_errors:
-                # Para depurar si faltan columnas/ESQUEMA
-                return jsonify({"error": f"No se pudo auto-registrar: {insert_errors}"}), 500
+            errors = client.insert_rows_json(table_id, rows_to_insert)
+            if errors:
+                print(f"Error insertando nuevo usuario: {errors}")
+            user = {
+                "correo": email,
+                "nombre": name,
+                "rol": "invitado"
+            }
 
-            # Devuelve estado PENDIENTE para que el front muestre mensaje claro
-            return jsonify({"status": "pending", "message": "Tu acceso está pendiente de aprobación."}), 403
-
-        # 4) Usuario existe: arma objeto sesión
-        row = rows[0]
-        user = {
-            "correo": row["correo"],
-            "nombre": row["nombre"],
-            "rol": row["rol"],
-            "firebase_uid": row.get("firebase_uid")
-        }
-
-        # 5) Si sigue pendiente, no dejes entrar a rutas normales
-        if user["rol"] == "pendiente":
-            return jsonify({"status": "pending", "message": "Tu acceso está pendiente de aprobación."}), 403
-
-        # 6) Login OK
+        # 4. Guardar en sesión
         session["user"] = user
         return jsonify({"message": "Login exitoso"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
-
 @app.route('/logout')
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase'))  # Redirige a la página de login
 
+def login_required(roles=None):
+    if roles is None:
+        roles = ["admin"]  # por defecto
 
-def login_required(roles=["admin"]):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if "user" not in session:
-                # Redirige al login si no hay sesión
                 return redirect(url_for("login_firebase"))
 
             user = session["user"]
-            if user["rol"] not in roles:  # Asegurando que el rol es correcto
-                return "No tienes permiso para acceder a esta página", 403
+            if user["rol"] not in roles:
+                return render_template("no_autorizado.html"), 403  # vista amigable
 
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
-
 @app.route("/admin")
-# Solo los usuarios con rol 'admin' pueden acceder
 @login_required(roles=["admin"])
 def admin_page():
-    return render_template("admin.html")
+    render_template("alumnos.html")
 
+@app.route("/adquisicion")
+@login_required(roles=["admin", "adquisicion"])
+def adquisicion_page():
+    render_template("alumnos.html")
+
+@app.route("/panel_basico")
+@login_required(roles=["admin", "invitado", "postventa", "comunidad", "people", "adquisicion"])
+def panel_basico():
+    render_template("alumnos.html")
 
 @app.route('/alumnos')
 def alumnos_page():

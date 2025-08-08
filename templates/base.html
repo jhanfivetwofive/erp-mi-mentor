@@ -36,32 +36,46 @@
 
 <body class="bg-light">
 
-<!-- ✅ Mostrar el menú solo si hay sesión activa -->
-{% if session.get('user') %}
+{% set current_user = session.get('user') %}
+{% set rol = (current_user or {}).get('rol') %}
+
+{% if current_user %}
 <nav class="navbar navbar-expand-lg navbar-light bg-success">
-    <div class="container mt-4">
-        <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto">
-                <li class="nav-item"><a class="nav-link text-white" href="/alumnos">Alumnos</a></li>
-                <li class="nav-item"><a class="nav-link text-white" href="/catalogo/programas">Programas</a></li>
-                <li class="nav-item"><a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a></li>
-                <li class="nav-item"><a class="nav-link text-white" href="/logout">Cerrar sesión</a></li>
-            </ul>
-        </div>
+  <div class="container mt-4">
+    <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav ms-auto">
+        <!-- Vistas comunes -->
+        <li class="nav-item"><a class="nav-link text-white" href="/alumnos">Alumnos</a></li>
+        <li class="nav-item"><a class="nav-link text-white" href="/catalogo/programas">Programas</a></li>
+        <li class="nav-item"><a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a></li>
+
+        <!-- Panel básico visible a varios roles (incluye invitado) -->
+        {% if rol in ['admin','invitado','postventa','comunidad','people','adquisicion'] %}
+        <li class="nav-item"><a class="nav-link text-white" href="/panel_basico">Panel Básico</a></li>
+        {% endif %}
+
+        <!-- Sólo Admin -->
+        {% if rol == 'admin' %}
+        <li class="nav-item"><a class="nav-link text-white" href="/admin">Admin</a></li>
+        {% endif %}
+
+        <li class="nav-item"><a class="nav-link text-white" href="/logout">Cerrar sesión</a></li>
+      </ul>
     </div>
+  </div>
 </nav>
 {% endif %}
 
-<!-- Contenido principal -->
 <div class="container mt-4">
-    {% block content %}{% endblock %}
+  {% block content %}{% endblock %}
 </div>
 
 {% block scripts %}{% endblock %}
-
 </body>
+
 </html>
