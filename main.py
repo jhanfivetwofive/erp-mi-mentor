@@ -592,22 +592,45 @@ def api_mover_seguimiento(seg_id):
 
         data = request.get_json() or {}
         nuevo_estado = (data.get("estado") or "").strip().lower()
-
-        if nuevo_estado not in ESTADOS_PERMITIDOS:
+        if nuevo_estado not in {"contactado","en_proceso","cerrado"}:
             return jsonify({"error":"Estado inválido"}), 400
 
-        q = """
-          UPDATE `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
-          SET ESTADO = @estado
+        # 1) Traer contexto de la tarjeta (correo, id_alumno) por su ID
+        q_ctx = """
+          SELECT CORREO, ID_ALUMNO
+          FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
           WHERE ID = @id
+          ORDER BY FECHA DESC
+          LIMIT 1
         """
-        job = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("estado","STRING", nuevo_estado),
-                bigquery.ScalarQueryParameter("id","STRING", seg_id),
-            ]
+        job_ctx = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("id","STRING", seg_id)]
         )
-        client.query(q, job_config=job).result()
+        correo = None
+        id_alumno = None
+        for r in client.query(q_ctx, job_config=job_ctx).result():
+            correo = (r["CORREO"] or "").strip().lower()
+            id_alumno = r["ID_ALUMNO"]
+        if not correo:
+            return jsonify({"error":"No se encontró el seguimiento a mover"}), 404
+
+        # 2) Insertar un nuevo evento con MISMO ID y nuevo estado
+        table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"
+        row = {
+            "ID": seg_id,                                # <- mismo ID (hilo de seguimiento)
+            "ID_ALUMNO": id_alumno,
+            "CORREO": correo,
+            "FECHA": _now_iso_utc(),
+            "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
+            "ROL_AUTOR": rol,
+            "TIPO": "movimiento",                        # opcional
+            "NOTA": f"Cambio de estado a {nuevo_estado}",# opcional
+            "ESTADO": nuevo_estado,
+        }
+        errors = client.insert_rows_json(table_id, [row])
+        if errors:
+            return jsonify({"error": errors}), 500
+
         return jsonify({"message":"Estado actualizado"}), 200
 
     except Exception as e:
@@ -625,9 +648,11 @@ def api_listar_seguimientos():
         return jsonify({"error": "Falta correo"}), 400
 
     q = """
-      SELECT ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
+      SELECT
+        ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
       FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
       WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY ID ORDER BY FECHA DESC) = 1
       ORDER BY FECHA DESC
     """
     job = bigquery.QueryJobConfig(
@@ -644,7 +669,8 @@ def api_listar_seguimientos():
             "ROL_AUTOR": r["ROL_AUTOR"],
             "TIPO": r["TIPO"],
             "NOTA": r["NOTA"],
-            "ESTADO": r["ESTADO"]
+            "ESTADO": r["ESTADO"],
         })
     return jsonify(out)
+
 

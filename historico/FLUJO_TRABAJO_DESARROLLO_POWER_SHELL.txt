@@ -5,14 +5,60 @@ $env:GCP_PROJECT_ID = "fivetwofive-20"
 1. Desarrollo
 
 git checkout dev
-# Haces cambios...
 git add .
-git commit -m "Cambios en panel de alumnos"
+git commit -m
 git push origin dev
+
+gcloud run deploy mi-app-dev `
+  --source . `
+  --region us-central1 `
+  --project fivetwofive-20
+
+
 ➡️ Esto activa el despliegue automático a mi-app-dev.
 
 2. Paso a producción
 
 git checkout main
-git merge dev
+git pull origin main          # actualiza main
+git merge dev                 # trae cambios de dev a main
+# si hay conflictos: resuélvelos, luego:
+git add .
+git commit -m "Merge dev into main (release prod)"
 git push origin main
+
+gcloud run deploy mi-app-prod `
+  --source . `
+  --region us-central1 `
+  --project fivetwofive-20
+
+
+3.- regresar a dev
+
+git checkout dev
+git pull origin dev
+# (opcional) sincronizar dev con lo último de main:
+git merge main
+git push origin dev
+
+
+🧰 Tip en VS Code
+Presiona:
+
+scss
+Copiar
+Editar
+Ctrl + A   (Seleccionar todo)
+Ctrl + K, Ctrl + F   (Autoformatear indentación)
+O en menú: Click derecho > Format Document.
+
+gcloud beta run jobs run facebook-etl-job --region=us-central1
+gcloud beta run jobs describe facebook-etl-job --region=REGION --format yaml
+gcloud run deploy mi-app-dev \`
+  --image gcr.io/fivetwofive-20/mi-app-dev \`
+  --platform managed \`
+  --region us-central1 \`
+  --allow-unauthenticated
+
+Google 
+project-306311554573
