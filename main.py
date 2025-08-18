@@ -95,7 +95,19 @@ client = bigquery.Client()
 
 # Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
+# Vista de comunidad consolidada de alumnos
+COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
 
+# Filtro para formatear moneda MXN en Jinja
+def mxn(value):
+    try:
+        if value is None or value == "":
+            return ""
+        return f"${float(value):,.2f}"
+    except Exception:
+        return str(value)
+
+app.jinja_env.filters["mxn"] = mxn
 
 @app.route("/")
 def home():
@@ -674,3 +686,127 @@ def api_listar_seguimientos():
     return jsonify(out)
 
 
+@app.route("/comunidad")
+@login_required(roles=["admin", "postventa", "comunidad"])
+def comunidad_list():
+    return render_template("comunidad.html")
+
+@app.route("/api/comunidad")
+@login_required(roles=["admin", "postventa", "comunidad"])
+def api_comunidad():
+    correo = (request.args.get("correo") or "").strip().lower()
+    q = f"""
+      SELECT *
+      FROM `{COMMUNITY_VIEW}`
+      WHERE 1=1
+        {"AND LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))" if correo else ""}
+      ORDER BY NOMBRE_ALUMNO
+    """
+    params = []
+    if correo:
+        params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
+    job = bigquery.QueryJobConfig(query_parameters=params)
+
+    df = client.query(q, job_config=job).to_dataframe()
+    df = df.fillna("")
+    # (opcional) redondea numéricos
+    for c in [
+        "MONTO_INVERTIDO_CURSOS","MONTO_INVERTIDO_GALA","MONTO_INVERTIDO_TOTAL",
+        "CALIF_EXPECTATIVAS","CALIF_TEMAS","CALIF_CONTENIDO","CALIF_CLASE",
+        "CALIF_CALC_0_10","NPS_FINAL","PROMEDIO_AVANCE"
+    ]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+
+    return jsonify(df.to_dict(orient="records"))
+
+@app.route("/comunidad/<correo>")
+@login_required(roles=["admin", "postventa", "comunidad", "invitado"])
+def comunidad_panel(correo):
+    correo = (correo or "").strip().lower()
+
+    # 1) Trae 1 fila consolidada
+    q = f"""
+      SELECT *
+      FROM `{COMMUNITY_VIEW}`
+      WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+      LIMIT 1
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("correo","STRING",correo)]
+    )
+    row = None
+    for r in client.query(q, job_config=job).result():
+        row = dict(r)
+        break
+
+    if not row:
+        # Reutiliza tu template de panel si prefieres
+        return render_template("comunidad_panel.html", data=None, cursos=[], webinars=[], seguimientos=[]), 404
+
+    # 2) (Opcional) Detalle de cursos Thinkific del alumno
+    q_courses = """
+      SELECT
+        COURSE_NAME, PERCENTAGE_COMPLETED, STARTED_AT, UPDATED_AT, COMPLETED_AT
+      FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
+      WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+      ORDER BY UPDATED_AT DESC
+      LIMIT 50
+    """
+    courses = []
+    for r in client.query(q_courses, job_config=job).result():
+        courses.append({
+            "COURSE_NAME": r["COURSE_NAME"],
+            "PERCENTAGE_COMPLETED": r["PERCENTAGE_COMPLETED"],
+            "STARTED_AT": r["STARTED_AT"],
+            "UPDATED_AT": r["UPDATED_AT"],
+            "COMPLETED_AT": r["COMPLETED_AT"],
+        })
+
+    # 3) (Opcional) Últimos webinars asistidos (detalle simple)
+    q_webs = """
+      SELECT webinar_id, webinar_topic, join_time, leave_time, duration, status
+      FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
+      WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
+      ORDER BY join_time DESC
+      LIMIT 50
+    """
+    webinars = []
+    for r in client.query(q_webs, job_config=job).result():
+        webinars.append({
+            "webinar_id": r["webinar_id"],
+            "webinar_topic": r["webinar_topic"],
+            "join_time": r["join_time"],
+            "leave_time": r["leave_time"],
+            "duration": r["duration"],
+            "status": r["status"],
+        })
+
+    # 4) Seguimientos (tu lógica existente, última versión por ID)
+    q_seg = """
+      SELECT ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
+      FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+      WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY ID ORDER BY FECHA DESC) = 1
+      ORDER BY FECHA DESC
+    """
+    seguimientos = []
+    for r in client.query(q_seg, job_config=job).result():
+        seguimientos.append({
+            "ID": r["ID"],
+            "FECHA": r["FECHA"],
+            "AUTOR": r["AUTOR"],
+            "ROL_AUTOR": r["ROL_AUTOR"],
+            "TIPO": r["TIPO"],
+            "NOTA": r["NOTA"],
+            "ESTADO": r["ESTADO"],
+        })
+
+    return render_template(
+        "comunidad_panel.html",
+        data=row,
+        cursos=courses,
+        webinars=webinars,
+        seguimientos=seguimientos,
+        rol_usuario=current_user_role()
+    )

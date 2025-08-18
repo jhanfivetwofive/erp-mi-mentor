@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Alumno - Comunidad{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  {% if not data %}
+    <div class="alert alert-warning">No se encontró información para este alumno.</div>
+  {% else %}
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">{{ data.NOMBRE_ALUMNO }}</h3>
+    <a class="btn btn-secondary" href="/comunidad">← Volver</a>
+  </div>
+
+  <div class="mb-2 text-muted">
+    <strong>Correo:</strong> {{ data.CORREO }} &nbsp; | &nbsp;
+    <strong>Tel.:</strong> {{ data.TELEFONO }} &nbsp; | &nbsp;
+    <strong>Fuente:</strong> {{ data.FUENTE }}
+  </div>
+
+  <!-- KPIs -->
+  <div class="row g-3">
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold">Monto Total</div>
+          <div class="fs-4">{{ data.MONTO_INVERTIDO_TOTAL | mxn }}</div>
+          <small class="text-muted">Cursos: {{ data.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ data.MONTO_INVERTIDO_GALA | mxn }}</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold">NPS</div>
+          <div class="fs-4">{{ data.NPS_FINAL }}</div>
+          <small class="text-muted">Calc 0–10: {{ data.CALIF_CALC_0_10 }}</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold">Cursos Thinkific</div>
+          <div class="fs-4">{{ data.TOTAL_CURSOS or 0 }}</div>
+          <small class="text-muted">% avance prom.: {{ data.PROMEDIO_AVANCE }}%</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold">Asistencias Webinar</div>
+          <div class="fs-4">{{ data.TOTAL_ASISTENCIA_WEBINAR or 0 }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Programas -->
+  <div class="row g-3 mt-3">
+    <div class="col-md-6">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold mb-2">Programas (Cursos)</div>
+          <div class="small">{{ data.PROGRAMAS_CURSOS }}</div>
+          <hr>
+          <div class="fw-semibold mb-2">Generaciones</div>
+          <div class="small">{{ data.GENERACION_PROGRAMAS }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold mb-2">Comentarios de Encuestas</div>
+          {% if data.COMENTARIOS %}
+            <ul class="small">
+              {% for c in data.COMENTARIOS.split(' | ') %}
+                {% if c.strip() %}
+                  <li>{{ c }}</li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="text-muted small">Sin comentarios.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calificaciones -->
+  <div class="row g-3 mt-1">
+    <div class="col-md-12">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold mb-2">Calificaciones promedio</div>
+          <div class="small">
+            Expectativas: <strong>{{ data.CALIF_EXPECTATIVAS }}</strong> &nbsp;·&nbsp;
+            Temas: <strong>{{ data.CALIF_TEMAS }}</strong> &nbsp;·&nbsp;
+            Contenido: <strong>{{ data.CALIF_CONTENIDO }}</strong> &nbsp;·&nbsp;
+            Clase: <strong>{{ data.CALIF_CLASE }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thinkific (detalle) -->
+  <div class="row g-3 mt-1">
+    <div class="col-md-12">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold mb-2">Cursos Thinkific (detalle)</div>
+          {% if cursos and cursos|length > 0 %}
+            <div class="table-responsive">
+              <table class="table table-sm table-striped">
+                <thead>
+                  <tr>
+                    <th>Curso</th>
+                    <th>%</th>
+                    <th>Inicio</th>
+                    <th>Últ. act.</th>
+                    <th>Completado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for c in cursos %}
+                  <tr>
+                    <td>{{ c.COURSE_NAME }}</td>
+                    <td>{{ c.PERCENTAGE_COMPLETED }}</td>
+                    <td>{{ c.STARTED_AT }}</td>
+                    <td>{{ c.UPDATED_AT }}</td>
+                    <td>{{ c.COMPLETED_AT }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="text-muted small">Sin cursos registrados.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webinars (detalle simple) -->
+  <div class="row g-3 mt-1">
+    <div class="col-md-12">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-semibold mb-2">Webinars</div>
+          {% if webinars and webinars|length > 0 %}
+            <div class="table-responsive">
+              <table class="table table-sm table-striped">
+                <thead>
+                  <tr>
+                    <th>Tema</th>
+                    <th>Ingreso</th>
+                    <th>Salida</th>
+                    <th>Duración</th>
+                    <th>Estatus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for w in webinars %}
+                  <tr>
+                    <td>{{ w.webinar_topic }}</td>
+                    <td>{{ w.join_time }}</td>
+                    <td>{{ w.leave_time }}</td>
+                    <td>{{ w.duration }}</td>
+                    <td>{{ w.status }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="text-muted small">Sin asistencias registradas.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Seguimientos -->
+  <div class="row g-3 mt-1 mb-4">
+    <div class="col-md-12">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="fw-semibold">Seguimiento</div>
+            {% if rol_usuario in ["admin","postventa"] %}
+              <a class="btn btn-sm btn-primary" href="/alumno/{{ data.CORREO }}">Abrir módulo de seguimiento</a>
+            {% endif %}
+          </div>
+          {% if seguimientos and seguimientos|length > 0 %}
+            <div class="table-responsive">
+              <table class="table table-sm table-striped">
+                <thead>
+                  <tr>
+                    <th>Fecha</th><th>Autor</th><th>Rol</th><th>Tipo</th><th>Nota</th><th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for s in seguimientos %}
+                  <tr>
+                    <td>{{ s.FECHA }}</td>
+                    <td>{{ s.AUTOR }}</td>
+                    <td>{{ s.ROL_AUTOR }}</td>
+                    <td>{{ s.TIPO }}</td>
+                    <td>{{ s.NOTA }}</td>
+                    <td>{{ s.ESTADO }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="text-muted small">Sin seguimientos.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% endif %}
+</div>
+{% endblock %}

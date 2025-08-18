@@ -1,3 +1,31 @@
+1.- Crear el entorno virtual (solo la primera vez)
+En la carpeta de tu proyecto (donde está tu código), ejecuta:
+
+python -m venv venv
+
+#Esto creará una carpeta llamada venv con el entorno virtual.
+
+2.- Activar el entorno virtual
+En PowerShell, ejecuta:
+
+venv\Scripts\Activate.ps1
+
+3.- Instalar dependencias del job
+Si tienes un requirements.txt para tu job de asistencia Thinkific, instálalo así:
+
+pip install -r requirements.txt
+
+4.- Ejecutar tu script dentro del entorno virtual
+Por ejemplo:
+
+python main.py
+
+Desactivar el entorno virtual (cuando termines)
+
+deactivate
+
+----------------------------------------------------------------------------------------------
+
 $env:FLASK_SECRET_KEY = "f9b3dd7a758a83c10b4ae43db3a472a887f50595c31c9e2dbe6be3426fd9d0f3"
 $env:GCP_PROJECT_ID = "fivetwofive-20"
 
