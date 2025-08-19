@@ -402,15 +402,30 @@ def get_alumno_info(correo):
 
         # ---- 2) Cursos Thinkific ----
         query_cursos = """
-            SELECT
-              COURSE_NAME,
-              PERCENTAGE_COMPLETED,
-              STARTED_AT,
-              UPDATED_AT,
-              COMPLETED_AT
-            FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
-            WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
-            ORDER BY UPDATED_AT DESC
+            WITH base AS (
+                    SELECT
+                        COURSE_NAME,
+                        -- Limpia posibles '%' y espacios, y castea a número
+                        SAFE_CAST(REGEXP_REPLACE(CAST(PERCENTAGE_COMPLETED AS STRING), r'[%\s]', '') AS FLOAT64) AS pct,
+                        STARTED_AT,
+                        UPDATED_AT,
+                        COMPLETED_AT
+                    FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
+                    WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+                    )
+                    SELECT
+                    COURSE_NAME,
+                    -- Normaliza: si está entre 0 y 1 => *100; si ya está 0–100 => se queda
+                    CASE
+                        WHEN pct IS NULL THEN NULL
+                        WHEN pct <= 1.0 THEN ROUND(pct * 100, 2)
+                        ELSE ROUND(pct, 2)
+                    END AS PERCENTAGE_COMPLETED,
+                    STARTED_AT,
+                    UPDATED_AT,
+                    COMPLETED_AT
+                    FROM base
+                    ORDER BY UPDATED_AT DESC;
         """
         result_cursos = client.query(query_cursos, job_config=job_config).result()
 
@@ -423,6 +438,27 @@ def get_alumno_info(correo):
                 'UPDATED_AT': row['UPDATED_AT'],
                 'COMPLETED_AT': row['COMPLETED_AT']
             })
+        
+        # 2.1) Datos para gráfico de barras (Top 12 por % completado)
+        chart_labels, chart_values = [], []
+        try:
+            cursos_sorted = sorted(
+                cursos_info,
+                key=lambda r: (
+                    float(r.get('PERCENTAGE_COMPLETED') or 0),
+                    str(r.get('UPDATED_AT') or '')
+                ),
+                reverse=True
+            )
+            top = cursos_sorted[:12]
+            for r in top:
+                nombre = (r.get('COURSE_NAME') or '').strip()
+                if len(nombre) > 38:
+                    nombre = nombre[:35] + '…'
+                chart_labels.append(nombre or 'Curso')
+                chart_values.append(float(r.get('PERCENTAGE_COMPLETED') or 0))
+        except Exception as e:
+            print("WARN chart data:", e, flush=True)
 
         # ---- 3) Seguimientos ----
         query_seg = """
@@ -455,21 +491,25 @@ def get_alumno_info(correo):
         # ---- 4) KPIs de Comunidad (vista consolidada) ----
         q_comm = """
             SELECT
-                MONTO_INVERTIDO_CURSOS,
-                MONTO_INVERTIDO_GALA,
-                MONTO_INVERTIDO_TOTAL,
-                NPS_FINAL,
-                CALIF_CALC_0_10,
-                TOTAL_CURSOS,
-                PROMEDIO_AVANCE,
-                PROGRAMAS_CURSOS,
-                GENERACION_PROGRAMAS,
-                COMENTARIOS,
-                TOTAL_ASISTENCIA_WEBINAR
+            MONTO_INVERTIDO_CURSOS,
+            MONTO_INVERTIDO_GALA,
+            MONTO_INVERTIDO_TOTAL,
+            NPS_FINAL,
+            CALIF_CALC_0_10,
+            CALIF_EXPECTATIVAS,     -- <-- agregado
+            CALIF_TEMAS,            -- <-- agregado
+            CALIF_CONTENIDO,        -- <-- agregado
+            CALIF_CLASE,            -- <-- agregado
+            TOTAL_CURSOS,
+            PROMEDIO_AVANCE,
+            PROGRAMAS_CURSOS,
+            GENERACION_PROGRAMAS,
+            COMENTARIOS,
+            TOTAL_ASISTENCIA_WEBINAR
             FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             LIMIT 1
-        """
+            """
         comunidad = None
         for r in client.query(q_comm, job_config=job_config).result():
             comunidad = dict(r)
@@ -482,8 +522,11 @@ def get_alumno_info(correo):
             cursos_info=cursos_info,
             seguimientos=seguimientos,
             comunidad=comunidad,
+            chart_labels=chart_labels,      # <-- nuevo
+            chart_values=chart_values,      # <-- nuevo
             rol_usuario=current_user_role() if 'current_user_role' in globals() else None
         )
+
 
     except Exception as e:
         import traceback
