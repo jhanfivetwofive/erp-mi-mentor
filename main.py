@@ -18,6 +18,7 @@ from google.cloud import secretmanager
 from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone
 import uuid
+import re
 
 def current_user_role():
     user = session.get("user") or {}
@@ -460,6 +461,19 @@ def get_alumno_info(correo):
         except Exception as e:
             print("WARN chart data:", e, flush=True)
 
+        # ---- 2.7) Webinars (detalle simple para fallback) ----
+        q_webs = """
+        SELECT DISTINCT webinar_topic
+        FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
+        WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
+        ORDER BY webinar_topic
+        LIMIT 100
+        """
+        webinars = []
+        for r in client.query(q_webs, job_config=job_config).result():
+            webinars.append({"webinar_topic": r["webinar_topic"]})
+
+
         # ---- 3) Seguimientos ----
         query_seg = """
             SELECT
@@ -496,36 +510,61 @@ def get_alumno_info(correo):
             MONTO_INVERTIDO_TOTAL,
             NPS_FINAL,
             CALIF_CALC_0_10,
-            CALIF_EXPECTATIVAS,     -- <-- agregado
-            CALIF_TEMAS,            -- <-- agregado
-            CALIF_CONTENIDO,        -- <-- agregado
-            CALIF_CLASE,            -- <-- agregado
+            CALIF_EXPECTATIVAS,
+            CALIF_TEMAS,
+            CALIF_CONTENIDO,
+            CALIF_CLASE,
             TOTAL_CURSOS,
             PROMEDIO_AVANCE,
             PROGRAMAS_CURSOS,
             GENERACION_PROGRAMAS,
             COMENTARIOS,
-            TOTAL_ASISTENCIA_WEBINAR
+            TOTAL_ASISTENCIA_WEBINAR,
+            WEBINARS_ASISTIDOS
             FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             LIMIT 1
-            """
+        """
         comunidad = None
         for r in client.query(q_comm, job_config=job_config).result():
             comunidad = dict(r)
             break
 
-        # ---- Render final (¡un solo return!) ----
+        # ---- NORMALIZA los nombres de webinars para el template ----
+        # 1) Intenta leer de la vista consolidada (probamos varias posibles llaves)
+        webinar_topics = []
+        if comunidad:
+            raw = None
+            for key in ("WEBINARS_ASISTIDOS", "WEBINAR", "WEBINARS", "WEBINAR_TOPIC"):
+                if key in comunidad and comunidad[key]:
+                    raw = str(comunidad[key])
+                    break
+            if raw:
+                parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
+                webinar_topics = [p.strip() for p in parts if p and p.strip()]
+
+        # 2) Si sigue vacío, usa el detalle directo de Zoom (fallback)
+        if not webinar_topics:
+            webinar_topics = sorted({
+                (w.get("webinar_topic") or "").strip()
+                for w in webinars
+                if (w.get("webinar_topic") or "").strip()
+            })
+
+        # ---- Render final ----
         return render_template(
             'panel_alumnos.html',
             alumno_info=alumno_info,
             cursos_info=cursos_info,
             seguimientos=seguimientos,
             comunidad=comunidad,
-            chart_labels=chart_labels,      # <-- nuevo
-            chart_values=chart_values,      # <-- nuevo
+            webinars=webinars,              # por si lo quieres en otra parte
+            webinar_topics=webinar_topics,  # <-- NUEVO: lista limpia para el template
+            chart_labels=chart_labels,
+            chart_values=chart_values,
             rol_usuario=current_user_role() if 'current_user_role' in globals() else None
         )
+
 
 
     except Exception as e:
