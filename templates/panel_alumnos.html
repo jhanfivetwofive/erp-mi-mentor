@@ -171,14 +171,26 @@
               <div class="fw-semibold mb-2">
                 Webinars asistidos
                 <span class="text-muted small">
-                  {% if comunidad %}(Total: {{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 }}){% endif %}
+                  (Total: {{ (comunidad.TOTAL_ASISTENCIA_WEBINAR or 0) if comunidad else 0 }})
                 </span>
               </div>
-              {% if comunidad and comunidad.WEBINARS_ASISTIDOS %}
+
+              {# Lista agregada desde la vista #}
+              {% set topics_str = (comunidad.WEBINARS_ASISTIDOS if comunidad else '') %}
+              {% set topics = topics_str.split(' | ') if topics_str else [] %}
+
+              {# Fallback: si por alguna razón la vista no trae la lista, usar 'webinars' detalle #}
+              {% if (not topics) and webinars and (webinars|length > 0) %}
+                {% set topics = [] %}
+                {% for w in webinars[:50] %}
+                  {% if w.webinar_topic %}{% set _ = topics.append(w.webinar_topic) %}{% endif %}
+                {% endfor %}
+              {% endif %}
+
+              {% if topics and (topics|length > 0) %}
                 <div>
-                  {% set topics = comunidad.WEBINARS_ASISTIDOS.split(' | ') %}
                   {% for t in topics[:50] %}
-                    {% if t.strip() %}
+                    {% if t and t.strip() %}
                       <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
                     {% endif %}
                   {% endfor %}
@@ -193,6 +205,7 @@
           </div>
         </div>
       </div>
+
 
     </div>
   </div> <!-- /Insights -->
