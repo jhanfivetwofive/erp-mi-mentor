@@ -1,3 +1,31 @@
+1.- Crear el entorno virtual (solo la primera vez)
+En la carpeta de tu proyecto (donde está tu código), ejecuta:
+
+python -m venv venv
+
+#Esto creará una carpeta llamada venv con el entorno virtual.
+
+2.- Activar el entorno virtual
+En PowerShell, ejecuta:
+
+venv\Scripts\Activate.ps1
+
+3.- Instalar dependencias del job
+Si tienes un requirements.txt para tu job de asistencia Thinkific, instálalo así:
+
+pip install -r requirements.txt
+
+4.- Ejecutar tu script dentro del entorno virtual
+Por ejemplo:
+
+python main.py
+
+Desactivar el entorno virtual (cuando termines)
+
+deactivate
+
+----------------------------------------------------------------------------------------------
+
 $env:FLASK_SECRET_KEY = "f9b3dd7a758a83c10b4ae43db3a472a887f50595c31c9e2dbe6be3426fd9d0f3"
 $env:GCP_PROJECT_ID = "fivetwofive-20"
 
@@ -5,14 +33,60 @@ $env:GCP_PROJECT_ID = "fivetwofive-20"
 1. Desarrollo
 
 git checkout dev
-# Haces cambios...
 git add .
-git commit -m "Cambios en panel de alumnos"
+git commit -m
 git push origin dev
+
+gcloud run deploy mi-app-dev `
+  --source . `
+  --region us-central1 `
+  --project fivetwofive-20
+
+
 ➡️ Esto activa el despliegue automático a mi-app-dev.
 
 2. Paso a producción
 
 git checkout main
-git merge dev
+git pull origin main          # actualiza main
+git merge dev                 # trae cambios de dev a main
+# si hay conflictos: resuélvelos, luego:
+git add .
+git commit -m "Merge dev into main (release prod)"
 git push origin main
+
+gcloud run deploy mi-app-prod `
+  --source . `
+  --region us-central1 `
+  --project fivetwofive-20
+
+
+3.- regresar a dev
+
+git checkout dev
+git pull origin dev
+# (opcional) sincronizar dev con lo último de main:
+git merge main
+git push origin dev
+
+
+🧰 Tip en VS Code
+Presiona:
+
+scss
+Copiar
+Editar
+Ctrl + A   (Seleccionar todo)
+Ctrl + K, Ctrl + F   (Autoformatear indentación)
+O en menú: Click derecho > Format Document.
+
+gcloud beta run jobs run facebook-etl-job --region=us-central1
+gcloud beta run jobs describe facebook-etl-job --region=REGION --format yaml
+gcloud run deploy mi-app-dev \`
+  --image gcr.io/fivetwofive-20/mi-app-dev \`
+  --platform managed \`
+  --region us-central1 \`
+  --allow-unauthenticated
+
+Google 
+project-306311554573

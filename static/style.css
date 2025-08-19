@@ -1,7 +1,7 @@
 :root {
-    --color-verde: #8eb015ff;
+    --color-verde: #203c20ff;
     --color-blanco: #ffffff;
-    --color-texto-claro: #f8f9fa;
+    --color-texto-claro: #8eb015;
     --font-small: 0.85rem;
     --font-xsmall: 13px;
 }
@@ -30,7 +30,7 @@ table.dataTable td {
 }
 
 #alumnosTable tbody tr:hover {
-    background-color: #f5f5f5;
+    background-color: #203c20ff;
     cursor: pointer;
 }
 
@@ -46,7 +46,7 @@ table.dataTable td {
 }
 
 .dt-buttons button:hover {
-    background-color: #749a13;
+    background-color: #203c20ff;
 }
 
 /* Estilo general del body */

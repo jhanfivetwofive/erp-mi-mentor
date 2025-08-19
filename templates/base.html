@@ -40,26 +40,64 @@
 {% set rol = (current_user or {}).get('rol') %}
 
 {% if current_user %}
-<nav class="navbar navbar-expand-lg navbar-light bg-success">
-  <div class="container mt-4">
-    <a class="navbar-brand text-white" href="#">Mi Mentor de Inversión</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+  <div class="container-fluid">
+    <!-- Brand con logo -->
+    <a class="navbar-brand d-flex align-items-center" href="{{ url_for('alumnos_page') }}">
+      <img
+        src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}"
+        alt="Mi Mentor de Inversión"
+        height="28"
+        class="me-2"
+        style="object-fit:contain"
+      />
+      <span class="fw-semibold">Mi Mentor de Inversión</span>
+    </a>
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav"
+      aria-controls="topNav" aria-expanded="false" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
 
-    <div class="collapse navbar-collapse" id="navbarNav">
-      <ul class="navbar-nav ms-auto">
-        <!-- Vistas comunes -->
-        <li class="nav-item"><a class="nav-link text-white" href="/alumnos">Alumnos</a></li>
-        <li class="nav-item"><a class="nav-link text-white" href="/catalogo/programas">Programas</a></li>
-        <li class="nav-item"><a class="nav-link text-white" href="/catalogo/generaciones">Generaciones</a></li>
+    <div class="collapse navbar-collapse" id="topNav">
+      {% set user = session.get('user') or {} %}
+      {% set rol = (user.get('rol') or '')|lower %}
 
-        <!-- Sólo Admin -->
-        {% if rol == 'admin' %}
-        <li class="nav-item"><a class="nav-link text-white" href="/admin">Admin</a></li>
+      <!-- Menú izquierdo -->
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        {% if user %}
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
+               href="{{ url_for('alumnos_page') }}">Alumnos</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
+               href="{{ url_for('catalogo_programas') }}">Programas</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
+               href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
+          </li>
         {% endif %}
+      </ul>
 
-        <li class="nav-item"><a class="nav-link text-white" href="/logout">Cerrar sesión</a></li>
+      <!-- Menú derecho -->
+      <ul class="navbar-nav ms-auto">
+        {% if user %}
+          <li class="nav-item d-flex align-items-center me-2">
+            <span class="navbar-text small text-muted">
+              {{ user.get('correo') }} · <strong>{{ rol|title }}</strong>
+            </span>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('logout') }}">Salir</a>
+          </li>
+        {% else %}
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('login_firebase_page')) else '' }}"
+               href="{{ url_for('login_firebase_page') }}">Iniciar sesión</a>
+          </li>
+        {% endif %}
       </ul>
     </div>
   </div>

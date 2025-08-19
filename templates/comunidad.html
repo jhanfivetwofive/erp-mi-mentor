@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Comunidad - Consolidado{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h3 class="mb-3">Comunidad (Consolidado por Alumno)</h3>
+
+  <div class="row mb-3">
+    <div class="col-md-4">
+      <input id="filtroCorreo" class="form-control" placeholder="Filtrar por correo...">
+    </div>
+    <div class="col-md-2">
+      <button id="btnBuscar" class="btn btn-primary w-100">Buscar</button>
+    </div>
+  </div>
+
+  <table id="tblComunidad" class="display table table-striped" style="width:100%">
+    <thead>
+      <tr>
+        <th>Alumno</th>
+        <th>Correo</th>
+        <th>Programas</th>
+        <th>Generaciones</th>
+        <th>Total Cursos</th>
+        <th>% Avance</th>
+        <th>Monto Cursos</th>
+        <th>Monto Gala</th>
+        <th>Monto Total</th>
+        <th>NPS</th>
+        <th>Asistencias</th>
+        <th>Detalle</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  const table = $('#tblComunidad').DataTable({
+    ajax: {
+      url: "/api/comunidad",
+      dataSrc: ""
+    },
+    columns: [
+      { data: "NOMBRE_ALUMNO" },
+      { data: "CORREO" },
+      { data: "PROGRAMAS_CURSOS" },
+      { data: "GENERACION_PROGRAMAS" },
+      { data: "TOTAL_CURSOS" },
+      { data: "PROMEDIO_AVANCE",
+        render: function(v){ return v !== null && v !== "" ? (parseFloat(v).toFixed(2) + "%") : ""; } },
+      { data: "MONTO_INVERTIDO_CURSOS",
+        render: function(v){ return v !== null && v !== "" ? "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits:2}) : ""; } },
+      { data: "MONTO_INVERTIDO_GALA",
+        render: function(v){ return v !== null && v !== "" ? "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits:2}) : ""; } },
+      { data: "MONTO_INVERTIDO_TOTAL",
+        render: function(v){ return v !== null && v !== "" ? "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits:2}) : ""; } },
+      { data: "NPS_FINAL" },
+      { data: "TOTAL_ASISTENCIA_WEBINAR" },
+      { data: "CORREO",
+        render: function(c){ return `<a class="btn btn-sm btn-outline-primary" href="/comunidad/${encodeURIComponent(c)}">Ver</a>`; },
+        orderable: false, searchable: false
+      }
+    ],
+    pageLength: 25
+  });
+
+  document.getElementById("btnBuscar").addEventListener("click", function(){
+    const c = (document.getElementById("filtroCorreo").value || "").trim().toLowerCase();
+    const url = c ? ("/api/comunidad?correo=" + encodeURIComponent(c)) : "/api/comunidad";
+    table.ajax.url(url).load();
+  });
+});
+</script>
+{% endblock %}

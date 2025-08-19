@@ -1,17 +1,14 @@
 {% extends "base.html" %}
-
 {% block title %}Panel de Alumno - Mi Mentor{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
 
   {% if not alumno_info %}
-    <div class="alert alert-warning">
-      No se encontró información para este alumno.
-    </div>
+    <div class="alert alert-warning">No se encontró información para este alumno.</div>
   {% else %}
 
-  <!-- Información del Alumno -->
+  <!-- Información del Alumno (completa) -->
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white d-flex align-items-center">
       <h4 class="mb-0"><i class="bi bi-person-fill me-2"></i>Información del Alumno</h4>
@@ -62,46 +59,150 @@
     </div>
   </div>
 
-  <!-- Historial de Cursos (solo comunidad/admin/postventa) -->
-  {% if rol_usuario|default('', true)|lower in ['comunidad','admin'] %}
+  <!-- INSIGHTS (KPI + gráfica + comentarios/calif) -->
   <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-journal-text me-2"></i>Historial de Cursos</h4>
+    <div class="card-header bg-success text-white d-flex align-items-center">
+      <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h4>
     </div>
     <div class="card-body">
-      <table id="cursosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">
-        <thead>
-          <tr>
-            <th>Curso</th>
-            <th>% Completado</th>
-            <th>Inicio</th>
-            <th>Última actualización</th>
-            <th>Finalización</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for curso in (cursos_info or []) %}
-          {% set started_iso   = (curso.STARTED_AT or '') %}
-          {% set updated_iso   = (curso.UPDATED_AT or '') %}
-          {% set completed_iso = (curso.COMPLETED_AT or '') %}
-          <tr>
-            <td>{{ curso.COURSE_NAME|default('-') }}</td>
-            <td data-order="{{ curso.PERCENTAGE_COMPLETED|default(0) }}">{{ curso.PERCENTAGE_COMPLETED|default(0) }}%</td>
-            <td data-order="{{ started_iso }}">{{ started_iso }}</td>
-            <td data-order="{{ updated_iso }}">{{ updated_iso }}</td>
-            <td data-order="{{ completed_iso }}">{{ completed_iso }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
 
-  {% endif %} {# cierra el else de alumno_info #}
+      <!-- KPIs -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold">Monto Total</div>
+              <div class="fs-4">
+                {% if comunidad %}{{ comunidad.MONTO_INVERTIDO_TOTAL | mxn }}{% else %}-{% endif %}
+              </div>
+              <small class="text-muted">
+                {% if comunidad %}
+                  Cursos: {{ comunidad.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ comunidad.MONTO_INVERTIDO_GALA | mxn }}
+                {% else %}
+                  Sin datos
+                {% endif %}
+              </small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold">NPS</div>
+              <div class="fs-4">{% if comunidad %}{{ comunidad.NPS_FINAL }}{% else %}-{% endif %}</div>
+              <small class="text-muted">Calc 0–10: {% if comunidad %}{{ comunidad.CALIF_CALC_0_10 }}{% else %}-{% endif %}</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold">Cursos Thinkific</div>
+              <div class="fs-4">{% if comunidad %}{{ comunidad.TOTAL_CURSOS or 0 }}{% else %}-{% endif %}</div>
+              <small class="text-muted">% avance prom.: {% if comunidad %}{{ comunidad.PROMEDIO_AVANCE }}{% else %}-{% endif %}%</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold">Asistencias Webinar</div>
+              <div class="fs-4">{% if comunidad %}{{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 }}{% else %}-{% endif %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gráfica -->
+      <div class="mb-4">
+        <h6 class="mb-2">Avance de Cursos</h6>
+        {% if chart_labels and chart_labels|length > 0 %}
+          <div style="height: 320px;">
+            <canvas id="chartCursos"></canvas>
+          </div>
+          <div class="text-muted small mt-2">Mostrando los {{ chart_labels|length }} cursos con mayor % de avance.</div>
+        {% else %}
+          <div class="text-muted small">Sin cursos registrados.</div>
+        {% endif %}
+      </div>
+
+      <!-- Comentarios & Calificaciones -->
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold mb-2">Comentarios de Encuestas</div>
+              {% if comunidad and comunidad.COMENTARIOS %}
+                <ul class="small mb-0">
+                  {% for c in comunidad.COMENTARIOS.split(' | ') %}
+                    {% if c.strip() %}<li>{{ c }}</li>{% endif %}
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <div class="text-muted small">Sin comentarios.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="fw-semibold mb-2">Calificaciones Promedio</div>
+              {% if comunidad %}
+                <div class="small">
+                  Expectativas: <strong>{{ comunidad.CALIF_EXPECTATIVAS }}</strong> &nbsp;·&nbsp;
+                  Temas: <strong>{{ comunidad.CALIF_TEMAS }}</strong> &nbsp;·&nbsp;
+                  Contenido: <strong>{{ comunidad.CALIF_CONTENIDO }}</strong> &nbsp;·&nbsp;
+                  Clase: <strong>{{ comunidad.CALIF_CLASE }}</strong>
+                </div>
+              {% else %}
+                <div class="text-muted small">Sin calificaciones.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# --- DEBUG (quitar luego) ---
+      <pre class="small bg-light p-2 border">WEBINARS_ASISTIDOS: {{ (comunidad.WEBINARS_ASISTIDOS if comunidad else '') }}</pre>
+      <pre class="small bg-light p-2 border">webinars detalle: {{ webinars | tojson(indent=2) }}</pre>
+      #}
+
+      <!-- Webinars asistidos -->
+      <div class="row g-3 mt-2">
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <div class="fw-semibold mb-2">
+                Webinars asistidos
+                <span class="text-muted small">
+                  (Total: {{ (comunidad.TOTAL_ASISTENCIA_WEBINAR or webinar_topics|length) if comunidad else (webinar_topics|length) }})
+                </span>
+              </div>
+
+              {% if webinar_topics and (webinar_topics|length > 0) %}
+                <div>
+                  {% for t in webinar_topics[:50] %}
+                    <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
+                  {% endfor %}
+                  {% if webinar_topics|length > 50 %}
+                    <div class="small text-muted mt-2">y {{ webinar_topics|length - 50 }} más…</div>
+                  {% endif %}
+                </div>
+              {% else %}
+                <div class="text-muted small">Sin registros de webinars.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+  </div> <!-- /Insights -->
 
   <!-- Seguimiento (sólo Postventa/Admin) -->
-  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
+  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
       <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Seguimiento (Postventa)</h4>
@@ -143,7 +244,7 @@
   {% endif %}
 
   <!-- Historial de seguimiento -->
-  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] and alumno_info %}
+  {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
       <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Historial de Seguimiento</h4>
@@ -152,53 +253,89 @@
       {% if seguimientos and seguimientos|length > 0 %}
       <div class="list-group">
         {% for s in seguimientos %}
-        <div class="list-group-item">
-          <div class="d-flex justify-content-between">
-            <strong>{{ (s.TIPO or '')|upper }} · {{ (s.ESTADO or '')|upper }}</strong>
-            <small>{{ s.FECHA }}</small>
+          <div class="list-group-item">
+            <div class="d-flex justify-content-between">
+              <strong>{{ (s.TIPO or '')|upper }} · {{ (s.ESTADO or '')|upper }}</strong>
+              <small>{{ s.FECHA }}</small>
+            </div>
+            <div class="mt-1">{{ s.NOTA }}</div>
+            <div class="mt-1 text-muted"><small>Por: {{ s.AUTOR }} ({{ s.ROL_AUTOR }})</small></div>
           </div>
-          <div class="mt-1">{{ s.NOTA }}</div>
-          <div class="mt-1 text-muted"><small>Por: {{ s.AUTOR }} ({{ s.ROL_AUTOR }})</small></div>
-        </div>
         {% endfor %}
       </div>
       {% else %}
-      <em>No hay seguimientos todavía.</em>
+        <em>No hay seguimientos todavía.</em>
       {% endif %}
     </div>
   </div>
   {% endif %}
 
+  <!-- Kanban -->
+  {% if rol_usuario|default('',true)|lower in ['postventa','admin'] %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-success text-white">
+      <h4 class="mb-0"><i class="bi bi-kanban me-2"></i>Seguimientos (Kanban)</h4>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <h6 class="text-muted mb-2">CONTACTADO</h6>
+          <div id="col-contactado" class="kanban-col border rounded p-2" data-estado="contactado"></div>
+        </div>
+        <div class="col-md-4">
+          <h6 class="text-muted mb-2">EN PROCESO</h6>
+          <div id="col-enproceso" class="kanban-col border rounded p-2" data-estado="en_proceso"></div>
+        </div>
+        <div class="col-md-4">
+          <h6 class="text-muted mb-2">CERRADO</h6>
+          <div id="col-cerrado" class="kanban-col border rounded p-2" data-estado="cerrado"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <style>
+    .kanban-col { min-height: 280px; background: #f8f9fa; }
+    .kanban-card { background: white; border: 1px solid #dee2e6; border-radius: .5rem; padding: .5rem .75rem; margin-bottom: .5rem; cursor: grab; }
+    .kanban-col.drag-over { outline: 2px dashed #198754; }
+    .kanban-badge { font-size: .75rem; }
+  </style>
+  {% endif %}
+
+  {% endif %} {# /alumno_info #}
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-  // Inicializa DataTables solo si existe la tabla
-  $(document).ready(function () {
-    const table = document.getElementById('cursosTable');
-    if (table) {
-      $('#cursosTable').DataTable({
-        pageLength: 25,
-        lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
-        order: [[3, 'desc']], // "Última actualización"
-        language: {
-          search: "Buscar:",
-          lengthMenu: "Mostrar _MENU_ registros",
-          zeroRecords: "No se encontraron resultados",
-          info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-          infoEmpty: "No hay registros",
-          infoFiltered: "(filtrado de _MAX_ registros)",
-          paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
-        },
-        columnDefs: [
-          { targets: [2, 3, 4], type: 'string' } // usará data-order ISO para ordenar
-        ]
-      });
-    }
-  });
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  // Guardar seguimiento (AJAX) — único handler y único endpoint
+<script>
+  // Gráfica de barras horizontal
+  (function(){
+    const labels = {{ (chart_labels or []) | tojson }};
+    const values = {{ (chart_values or []) | tojson }};
+    const el = document.getElementById('chartCursos');
+    if (!el || !labels.length) return;
+
+    new Chart(el.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{ label: '% completado', data: values, borderWidth: 1 }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: (v) => v + '%' } },
+          y: { ticks: { autoSkip: false, maxTicksLimit: 20 } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  })();
+
+  // Guardar seguimiento
   (function () {
     const form = document.getElementById('formSeguimiento');
     if (!form) return;
@@ -210,55 +347,105 @@
 
       const payload = {
         correo: document.getElementById('correo').value,
-        tipo:   document.getElementById('tipo').value,
+        tipo: document.getElementById('tipo').value,
         estado: document.getElementById('estado').value,
-        nota:   document.getElementById('nota').value.trim()
+        nota: (document.getElementById('nota').value || '').trim()
       };
-
       if (!payload.nota) {
         alertSeg.textContent = 'Escribe una nota.';
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-danger');
+        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
         return;
       }
 
-      // Reset de alertas + spinner
-      alertSeg.classList.add('d-none');
-      alertSeg.classList.remove('alert-success', 'alert-danger');
+      alertSeg.classList.add('d-none'); alertSeg.classList.remove('alert-success','alert-danger');
       spinner.classList.remove('d-none');
-
       try {
         const resp = await fetch('/api/seguimiento', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin', // por si acaso
+          method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'same-origin',
           body: JSON.stringify(payload)
         });
-
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-        const msg = (data && data.error) ? JSON.stringify(data.error) : 'Error desconocido';
-        throw new Error(msg);
-        }
-
-
-        // OK
+        const data = await resp.json().catch(()=>({}));
+        if (!resp.ok) throw new Error((data && data.error) ? JSON.stringify(data.error) : 'Error desconocido');
         alertSeg.textContent = 'Seguimiento guardado correctamente.';
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-success');
+        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-success');
         form.reset();
-
-        // Refresca historial
-        setTimeout(() => window.location.reload(), 800);
-
+        setTimeout(()=> window.location.reload(), 800);
       } catch (err) {
         alertSeg.textContent = 'No se pudo guardar el seguimiento: ' + err.message;
-        alertSeg.classList.remove('d-none');
-        alertSeg.classList.add('alert', 'alert-danger');
-      } finally {
-        spinner.classList.add('d-none');
-      }
+        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
+      } finally { spinner.classList.add('d-none'); }
     });
+  })();
+
+  // Kanban
+  (function () {
+    const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
+    const rol = "{{ rol_usuario|default('',true)|lower }}";
+    if (!correoAlumno || !['postventa', 'admin'].includes(rol)) return;
+
+    const cols = {
+      contactado: document.getElementById('col-contactado'),
+      en_proceso: document.getElementById('col-enproceso'),
+      cerrado: document.getElementById('col-cerrado'),
+    };
+
+    function cardTemplate(s) {
+      const fecha = s.FECHA ? new Date(s.FECHA).toLocaleString() : '';
+      const el = document.createElement('div');
+      el.className = 'kanban-card'; el.draggable = true; el.dataset.id = s.ID; el.dataset.estado = s.ESTADO || '';
+
+      const top = document.createElement('div'); top.className = 'd-flex justify-content-between align-items-start';
+      const strong = document.createElement('strong'); strong.textContent = (s.TIPO || '').toUpperCase();
+      const badge = document.createElement('span'); badge.className = 'badge text-bg-secondary kanban-badge'; badge.textContent = (s.ROL_AUTOR || '').toUpperCase();
+      const smallFecha = document.createElement('div'); smallFecha.className = 'small text-muted'; smallFecha.textContent = fecha;
+      const notaDiv = document.createElement('div'); notaDiv.className = 'mt-1'; notaDiv.textContent = (s.NOTA ?? '').toString();
+      const autorDiv = document.createElement('div'); autorDiv.className = 'small text-muted mt-1'; autorDiv.textContent = `Por: ${(s.AUTOR ?? '').toString()}`;
+
+      top.appendChild(strong); top.appendChild(badge);
+      el.appendChild(top); el.appendChild(smallFecha); el.appendChild(notaDiv); el.appendChild(autorDiv);
+
+      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', s.ID); e.dataTransfer.effectAllowed = 'move'; });
+      return el;
+    }
+
+    function ensureEmptyState() {
+      Object.values(cols).forEach(col => {
+        if (!col.querySelector('.kanban-card')) {
+          const p = document.createElement('div'); p.className = 'text-muted small'; p.textContent = 'Sin registros'; col.appendChild(p);
+        }
+      });
+    }
+
+    async function loadSeguimientos() {
+      const res = await fetch(`/api/seguimientos?correo=${encodeURIComponent(correoAlumno)}`, { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      Object.values(cols).forEach(c => c.innerHTML = '');
+      (data || []).forEach(s => {
+        const estado = (s.ESTADO || '').toLowerCase();
+        const col = cols[estado] || cols.contactado;
+        col.appendChild(cardTemplate(s));
+      });
+      ensureEmptyState();
+    }
+
+    Object.entries(cols).forEach(([estado, colEl]) => {
+      colEl.addEventListener('dragover', (e) => { e.preventDefault(); colEl.classList.add('drag-over'); });
+      colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
+      colEl.addEventListener('drop', async (e) => {
+        e.preventDefault(); colEl.classList.remove('drag-over');
+        const segId = e.dataTransfer.getData('text/plain'); if (!segId) return;
+        const card = document.querySelector(`.kanban-card[data-id="${segId}"]`); if (card) colEl.appendChild(card);
+        try {
+          const resp = await fetch(`/api/seguimiento/${encodeURIComponent(segId)}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ estado })
+          });
+          if (!resp.ok) { await loadSeguimientos(); alert('No se pudo actualizar el estado'); }
+        } catch { await loadSeguimientos(); alert('Error de red'); }
+      });
+    });
+
+    loadSeguimientos();
   })();
 </script>
 {% endblock %}
