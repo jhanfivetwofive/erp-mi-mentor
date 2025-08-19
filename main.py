@@ -501,6 +501,28 @@ def get_alumno_info(correo):
                 "NOTA": row.get("NOTA", ""),
                 "ESTADO": row.get("ESTADO", "")
             })
+            # ---- 2.5) KPIs de Comunidad (vista consolidada) ----
+            q_comm = """
+            SELECT
+                MONTO_INVERTIDO_CURSOS,
+                MONTO_INVERTIDO_GALA,
+                MONTO_INVERTIDO_TOTAL,
+                NPS_FINAL,
+                CALIF_CALC_0_10,
+                TOTAL_CURSOS,
+                PROMEDIO_AVANCE,
+                PROGRAMAS_CURSOS,
+                GENERACION_PROGRAMAS,
+                COMENTARIOS,
+                TOTAL_ASISTENCIA_WEBINAR
+            FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
+            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+            LIMIT 1
+            """
+            comunidad = None
+            for r in client.query(q_comm, job_config=job_config).result():
+                comunidad = dict(r)
+                break
 
         # ---- Render final (¡un solo return!) ----
         return render_template(
@@ -508,6 +530,7 @@ def get_alumno_info(correo):
             alumno_info=alumno_info,
             cursos_info=cursos_info,
             seguimientos=seguimientos,
+            comunidad=comunidad,
             rol_usuario=current_user_role() if 'current_user_role' in globals() else None
         )
 

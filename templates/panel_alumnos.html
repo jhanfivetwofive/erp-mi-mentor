@@ -227,6 +227,49 @@
 </div>
 {% endblock %}
 
+{% if comunidad %}
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="fw-semibold">Monto Total</div>
+        <div class="fs-4">{{ comunidad.MONTO_INVERTIDO_TOTAL | mxn }}</div>
+        <small class="text-muted">
+          Cursos: {{ comunidad.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ comunidad.MONTO_INVERTIDO_GALA | mxn }}
+        </small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="fw-semibold">NPS</div>
+        <div class="fs-4">{{ comunidad.NPS_FINAL }}</div>
+        <small class="text-muted">Calc 0–10: {{ comunidad.CALIF_CALC_0_10 }}</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="fw-semibold">Cursos Thinkific</div>
+        <div class="fs-4">{{ comunidad.TOTAL_CURSOS or 0 }}</div>
+        <small class="text-muted">% avance prom.: {{ comunidad.PROMEDIO_AVANCE }}%</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="fw-semibold">Asistencias Webinar</div>
+        <div class="fs-4">{{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+
 {% block scripts %}
 <script>
     // Inicializa DataTables solo si existe la tabla
