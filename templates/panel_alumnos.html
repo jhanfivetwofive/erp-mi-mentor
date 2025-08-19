@@ -163,7 +163,12 @@
         </div>
       </div>
 
-      <!-- NUEVO: Webinars asistidos -->
+      {# --- DEBUG (quitar luego) ---
+      <pre class="small bg-light p-2 border">WEBINARS_ASISTIDOS: {{ (comunidad.WEBINARS_ASISTIDOS if comunidad else '') }}</pre>
+      <pre class="small bg-light p-2 border">webinars detalle: {{ webinars | tojson(indent=2) }}</pre>
+      #}
+
+      <!-- Webinars asistidos -->
       <div class="row g-3 mt-2">
         <div class="col-12">
           <div class="card shadow-sm">
@@ -175,22 +180,24 @@
                 </span>
               </div>
 
-              {# Lista agregada desde la vista #}
-              {% set topics_str = (comunidad.WEBINARS_ASISTIDOS if comunidad else '') %}
-              {% set topics = topics_str.split(' | ') if topics_str else [] %}
+              {# Normaliza separadores: convierte ' | ' o ', ' a '|' y divide #}
+              {% set topics_str = (comunidad.WEBINARS_ASISTIDOS or '') if comunidad else '' %}
+              {% set topics_norm = topics_str.replace(' | ', '|').replace(', ', '|').replace('  |  ', '|') %}
+              {% set topics = topics_norm.split('|') if topics_norm else [] %}
 
-              {# Fallback: si por alguna razón la vista no trae la lista, usar 'webinars' detalle #}
-              {% if (not topics) and webinars and (webinars|length > 0) %}
+              {# Fallback al detalle si la cadena vino vacía #}
+              {% if (not topics or topics|length == 0) and webinars and (webinars|length > 0) %}
                 {% set topics = [] %}
-                {% for w in webinars[:50] %}
+                {% for w in webinars[:100] %}
                   {% if w.webinar_topic %}{% set _ = topics.append(w.webinar_topic) %}{% endif %}
                 {% endfor %}
               {% endif %}
 
               {% if topics and (topics|length > 0) %}
                 <div>
-                  {% for t in topics[:50] %}
-                    {% if t and t.strip() %}
+                  {% for raw in topics[:50] %}
+                    {% set t = (raw or '')|trim %}
+                    {% if t %}
                       <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
                     {% endif %}
                   {% endfor %}
@@ -205,7 +212,6 @@
           </div>
         </div>
       </div>
-
 
     </div>
   </div> <!-- /Insights -->
