@@ -176,33 +176,17 @@
               <div class="fw-semibold mb-2">
                 Webinars asistidos
                 <span class="text-muted small">
-                  (Total: {{ (comunidad.TOTAL_ASISTENCIA_WEBINAR or 0) if comunidad else 0 }})
+                  (Total: {{ (comunidad.TOTAL_ASISTENCIA_WEBINAR or webinar_topics|length) if comunidad else (webinar_topics|length) }})
                 </span>
               </div>
 
-              {# Normaliza separadores: convierte ' | ' o ', ' a '|' y divide #}
-              {% set topics_str = (comunidad.WEBINARS_ASISTIDOS or '') if comunidad else '' %}
-              {% set topics_norm = topics_str.replace(' | ', '|').replace(', ', '|').replace('  |  ', '|') %}
-              {% set topics = topics_norm.split('|') if topics_norm else [] %}
-
-              {# Fallback al detalle si la cadena vino vacía #}
-              {% if (not topics or topics|length == 0) and webinars and (webinars|length > 0) %}
-                {% set topics = [] %}
-                {% for w in webinars[:100] %}
-                  {% if w.webinar_topic %}{% set _ = topics.append(w.webinar_topic) %}{% endif %}
-                {% endfor %}
-              {% endif %}
-
-              {% if topics and (topics|length > 0) %}
+              {% if webinar_topics and (webinar_topics|length > 0) %}
                 <div>
-                  {% for raw in topics[:50] %}
-                    {% set t = (raw or '')|trim %}
-                    {% if t %}
-                      <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
-                    {% endif %}
+                  {% for t in webinar_topics[:50] %}
+                    <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
                   {% endfor %}
-                  {% if topics|length > 50 %}
-                    <div class="small text-muted mt-2">y {{ topics|length - 50 }} más…</div>
+                  {% if webinar_topics|length > 50 %}
+                    <div class="small text-muted mt-2">y {{ webinar_topics|length - 50 }} más…</div>
                   {% endif %}
                 </div>
               {% else %}
@@ -212,6 +196,7 @@
           </div>
         </div>
       </div>
+
 
     </div>
   </div> <!-- /Insights -->
