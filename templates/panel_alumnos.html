@@ -163,6 +163,37 @@
         </div>
       </div>
 
+      <!-- NUEVO: Webinars asistidos -->
+      <div class="row g-3 mt-2">
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <div class="fw-semibold mb-2">
+                Webinars asistidos
+                <span class="text-muted small">
+                  {% if comunidad %}(Total: {{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 }}){% endif %}
+                </span>
+              </div>
+              {% if comunidad and comunidad.WEBINARS_ASISTIDOS %}
+                <div>
+                  {% set topics = comunidad.WEBINARS_ASISTIDOS.split(' | ') %}
+                  {% for t in topics[:50] %}
+                    {% if t.strip() %}
+                      <span class="badge rounded-pill text-bg-secondary me-1 mb-1">{{ t }}</span>
+                    {% endif %}
+                  {% endfor %}
+                  {% if topics|length > 50 %}
+                    <div class="small text-muted mt-2">y {{ topics|length - 50 }} más…</div>
+                  {% endif %}
+                </div>
+              {% else %}
+                <div class="text-muted small">Sin registros de webinars.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div> <!-- /Insights -->
 
