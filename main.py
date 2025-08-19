@@ -3,6 +3,7 @@ from authlib.integrations.flask_client import OAuth
 from google.cloud import bigquery
 import os
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 import time
 import json
 from functools import wraps  # Asegúrate de importar wraps
@@ -49,6 +50,7 @@ ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 def _now_iso_utc():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
 
+# --- Inicialización de Firebase en arranque (asegúrate que la SA tenga secretAccessor) ---
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
     firebase_admin.initialize_app(cred)
@@ -64,26 +66,15 @@ project_id = os.getenv("GCP_PROJECT_ID")
 
 # Ruta del directorio de sesiones
 session_dir = '/tmp/flask_sessions'
-
-# Verificar si el directorio existe, si no, crear el directorio
 if not os.path.exists(session_dir):
     os.makedirs(session_dir)
     print(f"Directorio {session_dir} creado.")
 else:
     print(f"El directorio {session_dir} ya existe.")
 
-    # Configuración
-
-
-# Configuración de la clave secreta para manejar las sesiones
-# app.secret_key = os.urandom(24)  # Usa una clave secreta aleatoria
-
 # Configuración explícita del almacenamiento de sesiones
-# Esto almacenará las sesiones en el sistema de archivos
 app.config['SESSION_TYPE'] = 'filesystem'
-# Hace que las sesiones sean temporales por defecto
 app.config['SESSION_PERMANENT'] = False
-# Opcional: directorio donde se almacenarán las sesiones
 app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
 
 # Inicializa la extensión Flask-Session
@@ -199,17 +190,17 @@ def login_required(roles=None):
 @app.route("/admin")
 @login_required(roles=["admin"])
 def admin_page():
-    render_template("alumnos.html")
+    return render_template("alumnos.html")  # <-- faltaba return
 
 @app.route("/adquisicion")
 @login_required(roles=["admin", "adquisicion"])
 def adquisicion_page():
-    render_template("alumnos.html")
+    return render_template("alumnos.html")  # <-- faltaba return
 
 @app.route("/panel_basico")
 @login_required(roles=["admin", "invitado", "postventa", "comunidad", "people", "adquisicion"])
 def panel_basico():
-    render_template("alumnos.html")
+    return render_template("alumnos.html")  # <-- faltaba return
 
 @app.route('/alumnos')
 def alumnos_page():
@@ -218,12 +209,9 @@ def alumnos_page():
         return redirect(url_for('login_firebase'))
     return render_template("alumnos.html")
 
-    # Endpoint para obtener datos de alumnos
-
-
+# --------- API alumnos (ya estaba OK) ----------
 @app.route("/api/alumnos")
 def api_alumnos():
-    # Lógica para obtener datos
     start = time.time()
     generacion = request.args.get("generacion", "").strip()
     correo = request.args.get("correo", "").strip()
@@ -260,12 +248,12 @@ def api_alumnos():
         ]
     )
     df = client.query(query, job_config=job_config).to_dataframe()
+    df = df.convert_dtypes()
 
     # Convertir fechas de manera segura
     for col in df.select_dtypes(include=["datetime64[ns]", "object"]).columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].apply(lambda x: x.strftime(
-                '%Y-%m-%d') if pd.notnull(x) else "")
+            df[col] = df[col].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else "")
 
     # Rellenar valores vacíos en columnas tipo texto
     for col in df.select_dtypes(include=["object", "string"]).columns:
@@ -273,7 +261,6 @@ def api_alumnos():
 
     alumnos = df.to_dict(orient="records")
     return jsonify(alumnos)
-
 
 @app.route('/api/generaciones')
 def obtener_generaciones():
@@ -286,33 +273,21 @@ def obtener_generaciones():
     generaciones = client.query(query).result()
     return jsonify([row.GENERACION_PROGRAMA for row in generaciones])
 
-
 @app.route("/catalogo/<catalogo_id>")
 def catalogo_page(catalogo_id):
     return render_template(f"catalogo_{catalogo_id}.html", catalogo_id=catalogo_id)
 
-    # Ruta para visualizar todos los programas
-
-
 @app.route("/catalogo/programas")
 def catalogo_programas():
     if 'user' not in session:
-        # Redirige si no hay sesión activa
         return redirect(url_for('login_firebase'))
     return render_template("cat_programas.html")
-
-    # Ruta para visualizar todas las generaciones
-
 
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():
     if 'user' not in session:
-        # Redirige si no hay sesión activa
         return redirect(url_for('login_firebase'))
     return render_template("cat_generacion_programas.html")
-
-    # API para obtener los datos de los programas
-
 
 @app.route('/api/catalogo/programas')
 def api_programas():
@@ -328,22 +303,15 @@ def api_programas():
         """
     try:
         df = client.query(query).to_dataframe()
-
-        # Verificar si la consulta tiene resultados
         if df.empty:
             return jsonify({"error": "No data found for programs"}), 404
 
-        # Convertir valores vacíos en columnas tipo texto
         for col in df.select_dtypes(include=["object", "string"]).columns:
             df[col] = df[col].fillna("")
-
         programas = df.to_dict(orient="records")
         return jsonify(programas)
     except Exception as e:
         return jsonify({"error": f"Failed to load data: {str(e)}"}), 500
-
-    # API para obtener los datos de las generaciones
-
 
 @app.route('/api/catalogo/generaciones')
 def api_generaciones():
@@ -361,32 +329,21 @@ def api_generaciones():
         """
     try:
         df = client.query(query).to_dataframe()
-
-        # Verificar si la consulta tiene resultados
         if df.empty:
             return jsonify({"error": "No data found for generations"}), 404
 
-        # Convertir fechas de manera segura
-        # Asegurarse de que los valores NaT sean manejados correctamente
         for col in ['FECHA_INICIO', 'FECHA_FIN']:
-            # Convierte las fechas, 'coerce' reemplaza errores por NaT
             df[col] = pd.to_datetime(df[col], errors='coerce')
-            # Rellena los NaT con un valor predeterminado (puede ser una cadena vacía o 'No Disponible')
             df[col] = df[col].fillna('No Disponible')
 
-        # Convertir valores vacíos en columnas tipo texto
         for col in df.select_dtypes(include=["object", "string"]).columns:
             df[col] = df[col].fillna("")
-
         generaciones = df.to_dict(orient="records")
         return jsonify(generaciones)
-
     except Exception as e:
         return jsonify({"error": f"Failed to load data: {str(e)}"}), 500
 
-
 @app.route("/alumnos/nuevo", methods=["GET", "POST"])
-# Opcional, puedes quitar esto si deseas acceso libre
 @login_required(roles=["admin"])
 def nuevo_alumno():
     if request.method == "POST":
@@ -395,15 +352,9 @@ def nuevo_alumno():
         telefono = request.form.get("telefono")
         programa = request.form.get("programa")
         generacion = request.form.get("generacion")
-
-        # Aquí iría la lógica para guardar en BigQuery
-        print("Alumno recibido:", nombre, correo,
-              telefono, programa, generacion)
-
+        print("Alumno recibido:", nombre, correo, telefono, programa, generacion)
         return redirect(url_for("alumnos_page"))
-
     return render_template("nuevo_alumno.html")
-
 
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
@@ -491,7 +442,6 @@ def get_alumno_info(correo):
 
         seguimientos = []
         for row in result_seg:
-            # Si FECHA es TIMESTAMP/DATETIME, el template puede formatearlo; aquí lo dejamos "raw".
             seguimientos.append({
                 "ID": row["ID"],
                 "FECHA": row["FECHA"],
@@ -501,8 +451,9 @@ def get_alumno_info(correo):
                 "NOTA": row.get("NOTA", ""),
                 "ESTADO": row.get("ESTADO", "")
             })
-            # ---- 2.5) KPIs de Comunidad (vista consolidada) ----
-            q_comm = """
+
+        # ---- 4) KPIs de Comunidad (vista consolidada) ----
+        q_comm = """
             SELECT
                 MONTO_INVERTIDO_CURSOS,
                 MONTO_INVERTIDO_GALA,
@@ -518,11 +469,11 @@ def get_alumno_info(correo):
             FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             LIMIT 1
-            """
-            comunidad = None
-            for r in client.query(q_comm, job_config=job_config).result():
-                comunidad = dict(r)
-                break
+        """
+        comunidad = None
+        for r in client.query(q_comm, job_config=job_config).result():
+            comunidad = dict(r)
+            break
 
         # ---- Render final (¡un solo return!) ----
         return render_template(
@@ -539,7 +490,6 @@ def get_alumno_info(correo):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
     try:
@@ -552,7 +502,6 @@ def api_crear_seguimiento():
             correo_sesion = (user.get("correo") or "").strip().lower()
             if correo_sesion:
                 rol = fetch_rol_from_bq(correo_sesion)
-                # actualiza la sesión para siguientes requests
                 if rol:
                     user["rol"] = rol
                     session["user"] = user
@@ -602,18 +551,15 @@ def api_crear_seguimiento():
             "ESTADO": estado,
         }
 
-        # Log útil en Cloud Run
         print("Insertando en:", table_id, "row=", row, flush=True)
 
         errors = client.insert_rows_json(table_id, [row])
         if errors:
-            # Manda el detalle literal al front
             return jsonify({"error": errors}), 500
 
         return jsonify({"message": "Seguimiento agregado"}), 200
 
     except Exception as e:
-        # Propaga el mensaje en JSON para que el front lo muestre
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -652,14 +598,14 @@ def api_mover_seguimiento(seg_id):
         # 2) Insertar un nuevo evento con MISMO ID y nuevo estado
         table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"
         row = {
-            "ID": seg_id,                                # <- mismo ID (hilo de seguimiento)
+            "ID": seg_id,
             "ID_ALUMNO": id_alumno,
             "CORREO": correo,
             "FECHA": _now_iso_utc(),
             "AUTOR": ((session.get("user") or {}).get("correo") or "").lower(),
             "ROL_AUTOR": rol,
-            "TIPO": "movimiento",                        # opcional
-            "NOTA": f"Cambio de estado a {nuevo_estado}",# opcional
+            "TIPO": "movimiento",
+            "NOTA": f"Cambio de estado a {nuevo_estado}",
             "ESTADO": nuevo_estado,
         }
         errors = client.insert_rows_json(table_id, [row])
@@ -708,7 +654,7 @@ def api_listar_seguimientos():
         })
     return jsonify(out)
 
-
+# -------------------- Comunidad: Lista y Panel --------------------
 @app.route("/comunidad")
 @login_required(roles=["admin", "postventa", "comunidad"])
 def comunidad_list():
@@ -717,31 +663,62 @@ def comunidad_list():
 @app.route("/api/comunidad")
 @login_required(roles=["admin", "postventa", "comunidad"])
 def api_comunidad():
-    correo = (request.args.get("correo") or "").strip().lower()
-    q = f"""
-      SELECT *
-      FROM `{COMMUNITY_VIEW}`
-      WHERE 1=1
-        {"AND LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))" if correo else ""}
-      ORDER BY NOMBRE_ALUMNO
-    """
-    params = []
-    if correo:
-        params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
-    job = bigquery.QueryJobConfig(query_parameters=params)
+    try:
+        correo = (request.args.get("correo") or "").strip().lower()
+        q = f"""
+          SELECT *
+          FROM `{COMMUNITY_VIEW}`
+          WHERE 1=1
+            {"AND LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))" if correo else ""}
+          ORDER BY NOMBRE_ALUMNO
+        """
+        params = []
+        if correo:
+            params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
+        job = bigquery.QueryJobConfig(query_parameters=params)
 
-    df = client.query(q, job_config=job).to_dataframe()
-    df = df.fillna("")
-    # (opcional) redondea numéricos
-    for c in [
-        "MONTO_INVERTIDO_CURSOS","MONTO_INVERTIDO_GALA","MONTO_INVERTIDO_TOTAL",
-        "CALIF_EXPECTATIVAS","CALIF_TEMAS","CALIF_CONTENIDO","CALIF_CLASE",
-        "CALIF_CALC_0_10","NPS_FINAL","PROMEDIO_AVANCE"
-    ]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+        df = client.query(q, job_config=job).to_dataframe()
 
-    return jsonify(df.to_dict(orient="records"))
+        # ✅ Formateo seguro para DataTables:
+        # 1) Asegura dtypes "modernos"
+        df = df.convert_dtypes()
+
+        # 2) Redondea numéricos (Float64) donde aplique
+        float_cols = [
+            "MONTO_INVERTIDO_CURSOS","MONTO_INVERTIDO_GALA","MONTO_INVERTIDO_TOTAL",
+            "CALIF_EXPECTATIVAS","CALIF_TEMAS","CALIF_CONTENIDO","CALIF_CLASE",
+            "CALIF_CALC_0_10","NPS_FINAL","PROMEDIO_AVANCE"
+        ]
+        for c in float_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64").round(2)
+
+        # 3) Enteros (permiten pd.NA)
+        int_cols = ["TOTAL_CURSOS","TOTAL_ASISTENCIA_WEBINAR"]
+        for c in int_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+
+        # 4) Solo columnas de texto se llenan con ''
+        text_cols = [
+            "NOMBRE_ALUMNO","CORREO","TELEFONO","FUENTE",
+            "PROGRAMAS_CURSOS","GENERACION_PROGRAMAS","PROGRAMAS_THINKIFIC",
+            "WEBINAR","WEBINARS","COMENTARIOS","GENERACION_GALA","PRODUCTO_GALA",
+            "PONENTE_GALA","PONENCIA_GALA","BANDERA_GALA"
+        ]
+        for c in text_cols:
+            if c in df.columns:
+                df[c] = df[c].astype("string").fillna("")
+
+        # 5) pd.NA/NaN -> None para JSON
+        df = df.replace({pd.NA: None})
+        df = df.where(pd.notnull(df), None)
+
+        return jsonify(df.to_dict(orient="records")), 200
+    except Exception as e:
+        # Para evitar "Invalid JSON response" en DataTables
+        app.logger.exception("Error en /api/comunidad: %s", e)
+        return jsonify([]), 200
 
 @app.route("/comunidad/<correo>")
 @login_required(roles=["admin", "postventa", "comunidad", "invitado"])
@@ -764,7 +741,6 @@ def comunidad_panel(correo):
         break
 
     if not row:
-        # Reutiliza tu template de panel si prefieres
         return render_template("comunidad_panel.html", data=None, cursos=[], webinars=[], seguimientos=[]), 404
 
     # 2) (Opcional) Detalle de cursos Thinkific del alumno
@@ -805,7 +781,7 @@ def comunidad_panel(correo):
             "status": r["status"],
         })
 
-    # 4) Seguimientos (tu lógica existente, última versión por ID)
+    # 4) Seguimientos (última versión por ID)
     q_seg = """
       SELECT ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
       FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
