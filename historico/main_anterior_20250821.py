@@ -6,8 +6,8 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import time
 import json
-from functools import wraps
-# from flask_session import Session
+from functools import wraps 
+#from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
@@ -20,42 +20,10 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import re
 
-# =========================================================
-# 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
-# =========================================================
-app = Flask(__name__)
-
-def load_secret(project_id: str, name: str, version: str = "latest") -> str:
-    sm_client = secretmanager.SecretManagerServiceClient()
-    resource = f"projects/{project_id}/secrets/{name}/versions/{version}"
-    resp = sm_client.access_secret_version(request={"name": resource})
-    return resp.payload.data.decode("utf-8")
-
-project_id = os.getenv("GCP_PROJECT_ID", "fivetwofive-20")
-
-# Secret key: primero ENV, si no, Secret Manager
-app.secret_key = os.getenv("FLASK_SECRET_KEY") or load_secret(project_id, "FLASK_SECRET_KEY")
-if not app.secret_key:
-    raise RuntimeError("FLASK_SECRET_KEY no está configurado")
-
-# Sesión nativa de Flask (cookies firmadas)
-app.config['SESSION_PERMANENT'] = False
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
-app.config['SESSION_COOKIE_NAME'] = 'mmi_sess'
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# En Cloud Run producción (HTTPS) → True. En local http → False.
-app.config['SESSION_COOKIE_SECURE'] = False  # cambia a True en producción HTTPS
-
-app.debug = True
-load_dotenv()
-
-# =========================================================
-# 2) Helpers, Firebase, BigQuery (manteniendo tus nombres)
-# =========================================================
-
 # --- Helpers de rol/sesión ---
 ROLES_VALIDOS = {"admin", "postventa", "comunidad", "adquisicion", "people", "invitado"}
+
+app.config['SESSION_COOKIE_SECURE'] = False  # solo local http
 
 def normalize_email(s: str) -> str:
     return (s or "").strip().lower()
@@ -107,27 +75,72 @@ def role_required(*roles):
     return deco
 
 def get_firebase_credentials():
-    sm_client = secretmanager.SecretManagerServiceClient()
+    client = secretmanager.SecretManagerServiceClient()
     name = "projects/fivetwofive-20/secrets/firebase-key/versions/latest"
-    response = sm_client.access_secret_version(request={"name": name})
+    response = client.access_secret_version(request={"name": name})
     return response.payload.data
+
+def load_secret(project_id: str, name: str, version: str = "latest") -> str:
+    client = secretmanager.SecretManagerServiceClient()
+    resource = f"projects/{project_id}/secrets/{name}/versions/{version}"
+    resp = client.access_secret_version(request={"name": resource})
+    return resp.payload.data.decode("utf-8")
+
+project_id = os.getenv("GCP_PROJECT_ID", "fivetwofive-20")
+
+# 1) intenta por env var (local/dev), 2) si no, Secret Manager
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or load_secret(project_id, "FLASK_SECRET_KEY")
+
+if not app.secret_key:
+    raise RuntimeError("FLASK_SECRET_KEY no está configurado")
 
 ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 
 def _now_iso_utc():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
 
-# --- Inicialización de Firebase (como ya la tenías) ---
+# --- Inicialización de Firebase en arranque (asegúrate que la SA tenga secretAccessor) ---
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
     firebase_admin.initialize_app(cred)
 
-# BigQuery client (manteniendo tu nombre)
+load_dotenv()
+
+# Crear la app antes de usarla
+app = Flask(__name__)  # ✅ Esto debe ir antes de usar app
+
+# Configuración secreta y de entorno
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
+project_id = os.getenv("GCP_PROJECT_ID")
+
+# Ruta del directorio de sesiones
+session_dir = '/tmp/flask_sessions'
+if not os.path.exists(session_dir):
+    os.makedirs(session_dir)
+    print(f"Directorio {session_dir} creado.")
+else:
+    print(f"El directorio {session_dir} ya existe.")
+
+# Configuración explícita del almacenamiento de sesiones
+#app.config['SESSION_TYPE'] = 'filesystem'
+#app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
+# (opcional) si quieres que dure X horas si es permanente
+app.config['SESSION_PERMANENT'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+app.config['SESSION_COOKIE_NAME'] = 'mmi_sess'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS
+# Si usas subdominios (p.ej. app.tu-dominio.com y www.tu-dominio.com):
+# app.config['SESSION_COOKIE_DOMAIN'] = '.tu-dominio.com'
+
+# Inicializa la extensión Flask-Session
+#Session(app)
+
+app.debug = True
+
 client = bigquery.Client()
 
-# =========================================================
-# 3) Constantes de vistas / filtros
-# =========================================================
 # Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 # Vista de comunidad consolidada de alumnos
@@ -135,7 +148,7 @@ COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
 # Vista de usuarios
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 
-# Filtro para formatear moneda MXN en Jinja (SIN CAMBIOS)
+# Filtro para formatear moneda MXN en Jinja
 def mxn(value):
     try:
         if value is None or value == "":
@@ -146,9 +159,7 @@ def mxn(value):
 
 app.jinja_env.filters["mxn"] = mxn
 
-# =========================================================
-# 4) Rutas
-# =========================================================
+# === FIN: configuración de sesión ===
 
 @app.route("/")
 def home():
@@ -174,12 +185,10 @@ def comunidad_insights():
 def postventa_insights():
     return render_template("postventa/insights.html")
 
-# --- Login Firebase: GET (pantalla)
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
     return render_template("login_firebase.html")
 
-# --- Login Firebase: POST (verifica token, guarda sesión)
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
     try:
@@ -223,7 +232,39 @@ def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase_page'))
 
-# -------------------- Alumnos y catálogos --------------------
+def login_required(roles=None):
+    if roles is None:
+        roles = ["admin"]  # por defecto
+
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if "user" not in session:
+                return redirect(url_for("login_firebase"))
+
+            user = session["user"]
+            if user["rol"] not in roles:
+                return render_template("no_autorizado.html"), 403  # vista amigable
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+@app.route("/admin")
+@login_required(roles=["admin"])
+def admin_page():
+    return render_template("alumnos.html")  # <-- faltaba return
+
+@app.route("/adquisicion")
+@login_required(roles=["admin", "adquisicion"])
+def adquisicion_page():
+    return render_template("alumnos.html")  # <-- faltaba return
+
+@app.route("/panel_basico")
+@login_required(roles=["admin", "invitado", "postventa", "comunidad", "people", "adquisicion"])
+def panel_basico():
+    return render_template("alumnos.html")  # <-- faltaba return
+
 @app.route('/alumnos')
 def alumnos_page():
     if 'user' not in session:
@@ -231,6 +272,7 @@ def alumnos_page():
         return redirect(url_for('login_firebase_page'))
     return render_template("alumnos.html")
 
+# --------- API alumnos (ya estaba OK) ----------
 @app.route("/api/alumnos")
 def api_alumnos():
     start = time.time()
@@ -238,33 +280,38 @@ def api_alumnos():
     correo = request.args.get("correo", "").strip()
 
     query = """
-        SELECT
-            ID_INSCRIPCION,
-            FECHA_INSCRIPCION,
-            ID_ALUMNO,
-            FECHA_COMPRA,
-            NOMBRE_ALUMNO,
-            TELEFONO,
-            CORREO,
-            ID_PROGRAMA,
-            PROGRAMA,
-            SKU_PRODUCTO,
-            ID_GENERACION_PROGRAMA,
-            GENERACION_PROGRAMA,
-            FUENTE,
-            PRECIO_GENERACION
-        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-        WHERE 1=1
-    """
+            SELECT
+                ID_INSCRIPCION,
+                FECHA_INSCRIPCION,
+                ID_ALUMNO,
+                FECHA_COMPRA,
+                NOMBRE_ALUMNO,
+                TELEFONO,
+                CORREO,
+                ID_PROGRAMA,
+                PROGRAMA,
+                SKU_PRODUCTO,
+                ID_GENERACION_PROGRAMA,
+                GENERACION_PROGRAMA,
+                FUENTE,
+                PRECIO_GENERACION
+            FROM fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL
+            WHERE 1=1
+        """
     params = []
     if generacion:
-        query += " AND GENERACION_PROGRAMA = @generacion"
+        query += f" AND GENERACION_PROGRAMA = @generacion"
         params.append(bigquery.ScalarQueryParameter("generacion", "STRING", generacion))
     if correo:
-        query += " AND LOWER(CORREO) = @correo"
+        query += f" AND LOWER(CORREO) = @correo"
         params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo.lower()))
 
-    job_config = bigquery.QueryJobConfig(query_parameters=params)
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("generacion", "STRING", generacion),
+            bigquery.ScalarQueryParameter("correo", "STRING", correo.lower())
+        ]
+    )
     df = client.query(query, job_config=job_config).to_dataframe()
     df = df.convert_dtypes()
 
@@ -283,11 +330,11 @@ def api_alumnos():
 @app.route('/api/generaciones')
 def obtener_generaciones():
     query = """
-        SELECT DISTINCT GENERACION_PROGRAMA
-        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-        WHERE GENERACION_PROGRAMA IS NOT NULL
-        ORDER BY GENERACION_PROGRAMA
-    """
+            SELECT DISTINCT GENERACION_PROGRAMA
+            FROM fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL
+            WHERE GENERACION_PROGRAMA IS NOT NULL
+            ORDER BY GENERACION_PROGRAMA
+        """
     generaciones = client.query(query).result()
     return jsonify([row.GENERACION_PROGRAMA for row in generaciones])
 
@@ -298,27 +345,27 @@ def catalogo_page(catalogo_id):
 @app.route("/catalogo/programas")
 def catalogo_programas():
     if 'user' not in session:
-        return redirect(url_for('login_firebase_page'))
+        return redirect(url_for('login_firebase'))
     return render_template("cat_programas.html")
 
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():
     if 'user' not in session:
-        return redirect(url_for('login_firebase_page'))
+        return redirect(url_for('login_firebase'))
     return render_template("cat_generacion_programas.html")
 
 @app.route('/api/catalogo/programas')
 def api_programas():
     query = """
-        SELECT 
-            ID_PROGRAMA, 
-            NOMBRE_PROGRAMA, 
-            NOMENCLATURA, 
-            DESCRIPCION, 
-            SKU_PRODUCTO, 
-            EMBUDO 
-        FROM `fivetwofive-20.INSUMOS.CAT_PROGRAMA`
-    """
+            SELECT 
+                ID_PROGRAMA, 
+                NOMBRE_PROGRAMA, 
+                NOMENCLATURA, 
+                DESCRIPCION, 
+                SKU_PRODUCTO, 
+                EMBUDO 
+            FROM fivetwofive-20.INSUMOS.CAT_PROGRAMA
+        """
     try:
         df = client.query(query).to_dataframe()
         if df.empty:
@@ -334,17 +381,17 @@ def api_programas():
 @app.route('/api/catalogo/generaciones')
 def api_generaciones():
     query = """
-        SELECT 
-            ID_GENERACION_PROGRAMA, 
-            PROGRAMA, 
-            GENERACION, 
-            GENERACION_ETIQUETA, 
-            FECHA_INICIO, 
-            FECHA_FIN, 
-            PRECIO_GENERACION, 
-            DESCRIPCION 
-        FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-    """
+            SELECT 
+                ID_GENERACION_PROGRAMA, 
+                PROGRAMA, 
+                GENERACION, 
+                GENERACION_ETIQUETA, 
+                FECHA_INICIO, 
+                FECHA_FIN, 
+                PRECIO_GENERACION, 
+                DESCRIPCION 
+            FROM fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA
+        """
     try:
         df = client.query(query).to_dataframe()
         if df.empty:
@@ -361,9 +408,8 @@ def api_generaciones():
     except Exception as e:
         return jsonify({"error": f"Failed to load data: {str(e)}"}), 500
 
-# -------------------- Crear nuevo alumno (solo admin) --------------------
 @app.route("/alumnos/nuevo", methods=["GET", "POST"])
-@role_required("admin")
+@login_required(roles=["admin"])
 def nuevo_alumno():
     if request.method == "POST":
         nombre = request.form.get("nombre")
@@ -375,7 +421,6 @@ def nuevo_alumno():
         return redirect(url_for("alumnos_page"))
     return render_template("nuevo_alumno.html")
 
-# -------------------- Panel de alumno --------------------
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
@@ -418,33 +463,34 @@ def get_alumno_info(correo):
                                    alumno_info=None,
                                    cursos_info=[],
                                    seguimientos=[],
-                                   rol_usuario=current_user_role()), 404
+                                   rol_usuario=current_user_role() if 'current_user_role' in globals() else None), 404
 
         # ---- 2) Cursos Thinkific ----
         query_cursos = """
             WITH base AS (
-                SELECT
+                    SELECT
+                        COURSE_NAME,
+                        -- Limpia posibles '%' y espacios, y castea a número
+                        SAFE_CAST(REGEXP_REPLACE(CAST(PERCENTAGE_COMPLETED AS STRING), r'[%\s]', '') AS FLOAT64) AS pct,
+                        STARTED_AT,
+                        UPDATED_AT,
+                        COMPLETED_AT
+                    FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
+                    WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+                    )
+                    SELECT
                     COURSE_NAME,
-                    -- Limpia posibles '%' y espacios, y castea a número
-                    SAFE_CAST(REGEXP_REPLACE(CAST(PERCENTAGE_COMPLETED AS STRING), r'[%\\s]', '') AS FLOAT64) AS pct,
+                    -- Normaliza: si está entre 0 y 1 => *100; si ya está 0–100 => se queda
+                    CASE
+                        WHEN pct IS NULL THEN NULL
+                        WHEN pct <= 1.0 THEN ROUND(pct * 100, 2)
+                        ELSE ROUND(pct, 2)
+                    END AS PERCENTAGE_COMPLETED,
                     STARTED_AT,
                     UPDATED_AT,
                     COMPLETED_AT
-                FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
-                WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
-            )
-            SELECT
-                COURSE_NAME,
-                CASE
-                    WHEN pct IS NULL THEN NULL
-                    WHEN pct <= 1.0 THEN ROUND(pct * 100, 2)
-                    ELSE ROUND(pct, 2)
-                END AS PERCENTAGE_COMPLETED,
-                STARTED_AT,
-                UPDATED_AT,
-                COMPLETED_AT
-            FROM base
-            ORDER BY UPDATED_AT DESC
+                    FROM base
+                    ORDER BY UPDATED_AT DESC;
         """
         result_cursos = client.query(query_cursos, job_config=job_config).result()
 
@@ -457,8 +503,8 @@ def get_alumno_info(correo):
                 'UPDATED_AT': row['UPDATED_AT'],
                 'COMPLETED_AT': row['COMPLETED_AT']
             })
-
-        # Top 12 para gráfico
+        
+        # 2.1) Datos para gráfico de barras (Top 12 por % completado)
         chart_labels, chart_values = [], []
         try:
             cursos_sorted = sorted(
@@ -481,15 +527,16 @@ def get_alumno_info(correo):
 
         # ---- 2.7) Webinars (detalle simple para fallback) ----
         q_webs = """
-            SELECT DISTINCT webinar_topic
-            FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
-            WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
-            ORDER BY webinar_topic
-            LIMIT 100
+        SELECT DISTINCT webinar_topic
+        FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
+        WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
+        ORDER BY webinar_topic
+        LIMIT 100
         """
         webinars = []
         for r in client.query(q_webs, job_config=job_config).result():
             webinars.append({"webinar_topic": r["webinar_topic"]})
+
 
         # ---- 3) Seguimientos ----
         query_seg = """
@@ -522,22 +569,22 @@ def get_alumno_info(correo):
         # ---- 4) KPIs de Comunidad (vista consolidada) ----
         q_comm = """
             SELECT
-              MONTO_INVERTIDO_CURSOS,
-              MONTO_INVERTIDO_GALA,
-              MONTO_INVERTIDO_TOTAL,
-              NPS_FINAL,
-              CALIF_CALC_0_10,
-              CALIF_EXPECTATIVAS,
-              CALIF_TEMAS,
-              CALIF_CONTENIDO,
-              CALIF_CLASE,
-              TOTAL_CURSOS,
-              PROMEDIO_AVANCE,
-              PROGRAMAS_CURSOS,
-              GENERACION_PROGRAMAS,
-              COMENTARIOS,
-              TOTAL_ASISTENCIA_WEBINAR,
-              WEBINARS_ASISTIDOS
+            MONTO_INVERTIDO_CURSOS,
+            MONTO_INVERTIDO_GALA,
+            MONTO_INVERTIDO_TOTAL,
+            NPS_FINAL,
+            CALIF_CALC_0_10,
+            CALIF_EXPECTATIVAS,
+            CALIF_TEMAS,
+            CALIF_CONTENIDO,
+            CALIF_CLASE,
+            TOTAL_CURSOS,
+            PROMEDIO_AVANCE,
+            PROGRAMAS_CURSOS,
+            GENERACION_PROGRAMAS,
+            COMENTARIOS,
+            TOTAL_ASISTENCIA_WEBINAR,
+            WEBINARS_ASISTIDOS
             FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             LIMIT 1
@@ -547,7 +594,8 @@ def get_alumno_info(correo):
             comunidad = dict(r)
             break
 
-        # Normaliza nombres de webinars para el template
+        # ---- NORMALIZA los nombres de webinars para el template ----
+        # 1) Intenta leer de la vista consolidada (probamos varias posibles llaves)
         webinar_topics = []
         if comunidad:
             raw = None
@@ -558,6 +606,8 @@ def get_alumno_info(correo):
             if raw:
                 parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
                 webinar_topics = [p.strip() for p in parts if p and p.strip()]
+
+        # 2) Si sigue vacío, usa el detalle directo de Zoom (fallback)
         if not webinar_topics:
             webinar_topics = sorted({
                 (w.get("webinar_topic") or "").strip()
@@ -565,25 +615,27 @@ def get_alumno_info(correo):
                 if (w.get("webinar_topic") or "").strip()
             })
 
+        # ---- Render final ----
         return render_template(
             'panel_alumnos.html',
             alumno_info=alumno_info,
             cursos_info=cursos_info,
             seguimientos=seguimientos,
             comunidad=comunidad,
-            webinars=webinars,
-            webinar_topics=webinar_topics,
+            webinars=webinars,              # por si lo quieres en otra parte
+            webinar_topics=webinar_topics,  # <-- NUEVO: lista limpia para el template
             chart_labels=chart_labels,
             chart_values=chart_values,
-            rol_usuario=current_user_role()
+            rol_usuario=current_user_role() if 'current_user_role' in globals() else None
         )
+
+
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# -------------------- Seguimientos (crear / mover / listar) --------------------
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
     try:
@@ -595,7 +647,7 @@ def api_crear_seguimiento():
         if not rol:
             correo_sesion = (user.get("correo") or "").strip().lower()
             if correo_sesion:
-                rol = fetch_role_from_bq(correo_sesion)
+                rol = fetch_rol_from_bq(correo_sesion)
                 if rol:
                     user["rol"] = rol
                     session["user"] = user
@@ -712,7 +764,7 @@ def api_mover_seguimiento(seg_id):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
+    
 @app.route("/api/seguimientos")
 def api_listar_seguimientos():
     if "user" not in session:
@@ -750,12 +802,12 @@ def api_listar_seguimientos():
 
 # -------------------- Comunidad: Lista y Panel --------------------
 @app.route("/comunidad")
-@login_required
+@login_required(roles=["admin", "postventa", "comunidad"])
 def comunidad_list():
     return render_template("comunidad.html")
 
 @app.route("/api/comunidad")
-@login_required
+@login_required(roles=["admin", "postventa", "comunidad"])
 def api_comunidad():
     try:
         correo = (request.args.get("correo") or "").strip().lower()
@@ -773,9 +825,11 @@ def api_comunidad():
 
         df = client.query(q, job_config=job).to_dataframe()
 
-        # Formateo seguro para DataTables
+        # ✅ Formateo seguro para DataTables:
+        # 1) Asegura dtypes "modernos"
         df = df.convert_dtypes()
 
+        # 2) Redondea numéricos (Float64) donde aplique
         float_cols = [
             "MONTO_INVERTIDO_CURSOS","MONTO_INVERTIDO_GALA","MONTO_INVERTIDO_TOTAL",
             "CALIF_EXPECTATIVAS","CALIF_TEMAS","CALIF_CONTENIDO","CALIF_CLASE",
@@ -785,11 +839,13 @@ def api_comunidad():
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64").round(2)
 
+        # 3) Enteros (permiten pd.NA)
         int_cols = ["TOTAL_CURSOS","TOTAL_ASISTENCIA_WEBINAR"]
         for c in int_cols:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
 
+        # 4) Solo columnas de texto se llenan con ''
         text_cols = [
             "NOMBRE_ALUMNO","CORREO","TELEFONO","FUENTE",
             "PROGRAMAS_CURSOS","GENERACION_PROGRAMAS","PROGRAMAS_THINKIFIC",
@@ -800,22 +856,25 @@ def api_comunidad():
             if c in df.columns:
                 df[c] = df[c].astype("string").fillna("")
 
+        # 5) pd.NA/NaN -> None para JSON
         df = df.replace({pd.NA: None})
         df = df.where(pd.notnull(df), None)
 
         return jsonify(df.to_dict(orient="records")), 200
     except Exception as e:
+        # Para evitar "Invalid JSON response" en DataTables
         app.logger.exception("Error en /api/comunidad: %s", e)
         return jsonify([]), 200
 
 @app.route("/comunidad/<correo>")
-@login_required
+@login_required(roles=["admin", "postventa", "comunidad", "invitado"])
 def comunidad_panel(correo):
     correo = (correo or "").strip().lower()
 
-    q = """
+    # 1) Trae 1 fila consolidada
+    q = f"""
       SELECT *
-      FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
+      FROM `{COMMUNITY_VIEW}`
       WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
       LIMIT 1
     """
@@ -830,6 +889,7 @@ def comunidad_panel(correo):
     if not row:
         return render_template("comunidad_panel.html", data=None, cursos=[], webinars=[], seguimientos=[]), 404
 
+    # 2) (Opcional) Detalle de cursos Thinkific del alumno
     q_courses = """
       SELECT
         COURSE_NAME, PERCENTAGE_COMPLETED, STARTED_AT, UPDATED_AT, COMPLETED_AT
@@ -848,6 +908,7 @@ def comunidad_panel(correo):
             "COMPLETED_AT": r["COMPLETED_AT"],
         })
 
+    # 3) (Opcional) Últimos webinars asistidos (detalle simple)
     q_webs = """
       SELECT webinar_id, webinar_topic, join_time, leave_time, duration, status
       FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
@@ -866,6 +927,7 @@ def comunidad_panel(correo):
             "status": r["status"],
         })
 
+    # 4) Seguimientos (última versión por ID)
     q_seg = """
       SELECT ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
       FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
