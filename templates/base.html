@@ -61,15 +61,40 @@
 
     <div class="collapse navbar-collapse" id="topNav">
       {% set user = session.get('user') or {} %}
-      {% set rol = (user.get('rol') or '')|lower %}
+      {% set rol  = (user.get('rol') or '')|lower %}
+      {% set path = request.path %}
 
-      <!-- Menú izquierdo (condicionado por rol) -->
+      {# -------- Resuelve back_url contextual -------- #}
+      {% set back_url = None %}
+      {% if path.startswith('/comunidad/') %}
+        {% set back_url = url_for('comunidad_list') %}
+      {% elif path.startswith('/alumno/') %}
+        {% set back_url = url_for('alumnos_page') %}
+      {% elif path.startswith('/catalogo/') %}
+        {% set back_url = url_for('catalogo_programas') %}
+      {% elif path.startswith('/postventa/') %}
+        {% set back_url = url_for('postventa_insights') %}
+      {% endif %}
+
+      <!-- Menú izquierdo -->
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         {% if user %}
 
-          {# =========================
-            ADMIN → TODO
-            ========================= #}
+          <!-- Botón Atrás siempre que haya contexto -->
+          {% if back_url %}
+            <li class="nav-item me-2">
+              <a class="btn btn-outline-secondary btn-sm"
+                href="{{ back_url }}"><i class="bi bi-arrow-left"></i> Atrás</a>
+            </li>
+          {% endif %}
+
+          <!-- Inicio siempre visible -->
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path == url_for('dashboard') else '' }}"
+              href="{{ url_for('dashboard') }}">Inicio</a>
+          </li>
+
+          {# ===== ADMIN: todo ===== #}
           {% if rol == 'admin' %}
             <li class="nav-item">
               <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
@@ -84,41 +109,37 @@
                 href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) else '' }}"
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) or request.path.startswith('/comunidad/') else '' }}"
                 href="{{ url_for('comunidad_insights') }}">Comunidad</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) or request.path.startswith('/postventa/') else '' }}"
                 href="{{ url_for('postventa_insights') }}">Postventa</a>
             </li>
           {% endif %}
 
-          {# =========================
-            COMUNIDAD → solo Comunidad
-            ========================= #}
+          {# ===== COMUNIDAD: acceso a su módulo ===== #}
           {% if rol == 'comunidad' %}
             <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) else '' }}"
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) or request.path.startswith('/comunidad/') else '' }}"
                 href="{{ url_for('comunidad_insights') }}">Comunidad</a>
             </li>
           {% endif %}
 
-          {# =========================
-            POSTVENTA → solo Postventa
-            ========================= #}
+          {# ===== POSTVENTA: acceso a su módulo ===== #}
           {% if rol == 'postventa' %}
             <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) or request.path.startswith('/postventa/') else '' }}"
                 href="{{ url_for('postventa_insights') }}">Postventa</a>
             </li>
           {% endif %}
 
-          {# (Opcional) Otros roles como 'adquisicion'/'people' podrían ir aquí #}
+          {# (opcionales) otros roles como 'adquisicion', 'people' aquí... #}
 
         {% endif %}
       </ul>
 
-      <!-- Menú derecho (usuario / logout) -->
+      <!-- Menú derecho -->
       <ul class="navbar-nav ms-auto">
         {% if user %}
           <li class="nav-item d-flex align-items-center me-2">
