@@ -45,7 +45,7 @@
         </div>
 
         <div class="col-md-6 mb-3">
-          <label class="form-label">Generaciones</label>
+          <label class="form-label">Generación Programa</label>
           <div>
             {% set gens = (alumno_info.GENERACION_PROGRAMA or '') %}
             {% for g in gens.split(', ') if g %}
