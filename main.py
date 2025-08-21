@@ -547,6 +547,43 @@ def get_alumno_info(correo):
             """
             for r in client.query(q_webs, job_config=job_config).result():
                 webinars.append({"webinar_topic": r["webinar_topic"]})
+        
+        # -------------------------------------------------------
+        # ---- 2.9) KPIs de Postventa (solo admin/postventa) ----
+        # -------------------------------------------------------
+        postventa = None
+        if rol in ("admin", "postventa"):
+            try:
+                q_post = """
+                SELECT
+                    ID_ALUMNO,
+                    CORREO,
+                    NOMBRE,
+                    TELEFONO,
+                    CORREO_OFICIAL,
+                    FORMA_DE_PAGO_ULT,
+                    FECHA_COMPRA_ULTIMA,
+                    VENTA_TOTAL_SUM,
+                    TOTAL_PAGADO_SUM,
+                    POR_COBRAR_SUM,
+                    NUM_COMPRAS,
+                    GENERACION_INVINF_ULT,
+                    GENERACION_MP_ULT,
+                    OBS_ULT,
+                    ESTATUS_GLOBAL
+                FROM `fivetwofive-20.POSTVENTA.VW_POSTVENTA_X_ALUMNO`
+                WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+                LIMIT 1
+                """
+                for r in client.query(q_post, job_config=job_config).result():
+                    postventa = dict(r)
+                    break
+            
+            except Exception as e:
+                # Si la vista no existe o está en otra región, no rompemos el panel
+                print("[WARN] Postventa no disponible:", e)
+                postventa = None
+
 
         # -------------------------------------------------
         # 3) Seguimientos → SOLO admin/postventa
@@ -632,6 +669,7 @@ def get_alumno_info(correo):
             webinar_topics=webinar_topics,    # vacío para postventa
             chart_labels=chart_labels,        # vacío para postventa
             chart_values=chart_values,        # vacío para postventa
+            postventa=postventa,              # vacío para comunidad
             rol_usuario=rol
         )
 
