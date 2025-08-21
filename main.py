@@ -7,7 +7,7 @@ from pandas.api.types import is_numeric_dtype
 import time
 import json
 from functools import wraps 
-from flask_session import Session
+#from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 # opcional, si generarás hashes también
@@ -110,7 +110,7 @@ else:
 #app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
 # (opcional) si quieres que dure X horas si es permanente
 app.config['SESSION_PERMANENT'] = False
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_NAME'] = 'mmi_sess'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -119,7 +119,7 @@ app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS
 # app.config['SESSION_COOKIE_DOMAIN'] = '.tu-dominio.com'
 
 # Inicializa la extensión Flask-Session
-Session(app)
+#Session(app)
 
 app.debug = True
 
