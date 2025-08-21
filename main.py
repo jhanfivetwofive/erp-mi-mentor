@@ -16,7 +16,7 @@ from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
 from firebase_admin import auth as firebase_auth
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 import re
 
@@ -77,6 +77,8 @@ else:
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
+# (opcional) si quieres que dure X horas si es permanente
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 
 # Inicializa la extensión Flask-Session
 Session(app)
