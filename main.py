@@ -106,16 +106,17 @@ else:
     print(f"El directorio {session_dir} ya existe.")
 
 # Configuración explícita del almacenamiento de sesiones
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
+#app.config['SESSION_TYPE'] = 'filesystem'
+#app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
 # (opcional) si quieres que dure X horas si es permanente
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_SECURE=True,   # requiere HTTPS
-)
+app.config['SESSION_PERMANENT'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+app.config['SESSION_COOKIE_NAME'] = 'mmi_sess'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS
+# Si usas subdominios (p.ej. app.tu-dominio.com y www.tu-dominio.com):
+# app.config['SESSION_COOKIE_DOMAIN'] = '.tu-dominio.com'
 
 # Inicializa la extensión Flask-Session
 Session(app)

@@ -88,12 +88,6 @@
             </li>
           {% endif %}
 
-          <!-- Inicio siempre visible -->
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path == url_for('dashboard') else '' }}"
-              href="{{ url_for('dashboard') }}">Inicio</a>
-          </li>
-
           {# ===== ADMIN: todo ===== #}
           {% if rol == 'admin' %}
             <li class="nav-item">
@@ -107,30 +101,6 @@
             <li class="nav-item">
               <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
                 href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) or request.path.startswith('/comunidad/') else '' }}"
-                href="{{ url_for('comunidad_insights') }}">Comunidad</a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) or request.path.startswith('/postventa/') else '' }}"
-                href="{{ url_for('postventa_insights') }}">Postventa</a>
-            </li>
-          {% endif %}
-
-          {# ===== COMUNIDAD: acceso a su módulo ===== #}
-          {% if rol == 'comunidad' %}
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) or request.path.startswith('/comunidad/') else '' }}"
-                href="{{ url_for('comunidad_insights') }}">Comunidad</a>
-            </li>
-          {% endif %}
-
-          {# ===== POSTVENTA: acceso a su módulo ===== #}
-          {% if rol == 'postventa' %}
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) or request.path.startswith('/postventa/') else '' }}"
-                href="{{ url_for('postventa_insights') }}">Postventa</a>
             </li>
           {% endif %}
 
