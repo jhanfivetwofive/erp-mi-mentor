@@ -59,7 +59,11 @@
     </div>
   </div>
 
-  <!-- INSIGHTS (KPI + gráfica + comentarios/calif) -->
+  {# ============================
+     INSIGHTS DE COMUNIDAD
+     SOLO para admin / comunidad
+     ============================ #}
+  {% if rol_usuario|default('', true)|lower in ['admin','comunidad'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white d-flex align-items-center">
       <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h4>
@@ -163,11 +167,6 @@
         </div>
       </div>
 
-      {# --- DEBUG (quitar luego) ---
-      <pre class="small bg-light p-2 border">WEBINARS_ASISTIDOS: {{ (comunidad.WEBINARS_ASISTIDOS if comunidad else '') }}</pre>
-      <pre class="small bg-light p-2 border">webinars detalle: {{ webinars | tojson(indent=2) }}</pre>
-      #}
-
       <!-- Webinars asistidos -->
       <div class="row g-3 mt-2">
         <div class="col-12">
@@ -197,9 +196,9 @@
         </div>
       </div>
 
-
     </div>
   </div> <!-- /Insights -->
+  {% endif %} {# /rol comunidad o admin #}
 
   <!-- Seguimiento (sólo Postventa/Admin) -->
   {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
@@ -304,25 +303,13 @@
   {% endif %} {# /alumno_info #}
 </div>
 {% endblock %}
-{# Datos generales: libres #}
-... generales ...
-
-{# Comunidad solo admin/comunidad #}
-{% if rol_usuario in ['admin','comunidad'] and comunidad %}
-  ... sección de insights de comunidad ...
-{% endif %}
-
-{# Postventa solo admin/postventa #}
-{% if rol_usuario in ['admin','postventa'] %}
-  ... sección de seguimiento de postventa ...
-{% endif %}
 
 {% block scripts %}
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-  // Gráfica de barras horizontal
+  // Gráfica de barras horizontal (solo se renderiza si existe el canvas, que solo está para admin/comunidad)
   (function(){
     const labels = {{ (chart_labels or []) | tojson }};
     const values = {{ (chart_values or []) | tojson }};
@@ -347,7 +334,7 @@
     });
   })();
 
-  // Guardar seguimiento
+  // Guardar seguimiento (solo aparece el form en postventa/admin)
   (function () {
     const form = document.getElementById('formSeguimiento');
     if (!form) return;
@@ -389,7 +376,7 @@
     });
   })();
 
-  // Kanban
+  // Kanban (solo corre si el rol lo permite, porque no existen las columnas si no)
   (function () {
     const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
     const rol = "{{ rol_usuario|default('',true)|lower }}";
