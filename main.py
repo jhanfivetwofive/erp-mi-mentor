@@ -580,9 +580,9 @@ def get_alumno_info(correo):
                     break
             
             except Exception as e:
-            # Si la vista no existe o está en otra región, no rompemos el panel
-            print("[WARN] Postventa no disponible:", e)
-            postventa = None
+                # Si la vista no existe o está en otra región, no rompemos el panel
+                print("[WARN] Postventa no disponible:", e)
+                postventa = None
 
 
         # -------------------------------------------------
