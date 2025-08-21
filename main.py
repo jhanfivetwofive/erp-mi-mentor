@@ -422,20 +422,18 @@ def nuevo_alumno():
         return redirect(url_for("alumnos_page"))
     return render_template("nuevo_alumno.html")
 
+
 # -------------------- Panel de alumno --------------------
-
-
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
         rol = current_user_role()  # ← rol del usuario en sesión
-        # ---- Parametrización compartida ----
+
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(
-                "correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
         )
 
-        # ---- 1) Info del alumno ----
+        # ---- 1) Info del alumno (se muestra a todos) ----
         query_alumno = """
             SELECT
               ID_ALUMNO,
@@ -449,8 +447,7 @@ def get_alumno_info(correo):
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             GROUP BY ID_ALUMNO, CORREO
         """
-        result_alumno = client.query(
-            query_alumno, job_config=job_config).result()
+        result_alumno = client.query(query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -463,7 +460,7 @@ def get_alumno_info(correo):
                 'PROGRAMA': row['PROGRAMA'],
                 'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA']
             }
-            break  # solo el primero (debería ser único)
+            break
 
         if not alumno_info:
             return render_template('panel_alumnos.html',
@@ -477,91 +474,88 @@ def get_alumno_info(correo):
                                    chart_values=[],
                                    rol_usuario=rol), 404
 
-        # ---- 2) Cursos Thinkific ----
-        query_cursos = """
-            WITH base AS (
+        # -------------------------------------------------
+        # 2) CURSOS & GRÁFICA  → SOLO admin/comunidad
+        # -------------------------------------------------
+        cursos_info, chart_labels, chart_values = [], [], []
+        if rol in ("admin", "comunidad"):
+            query_cursos = """
+                WITH base AS (
+                    SELECT
+                        COURSE_NAME,
+                        SAFE_CAST(REGEXP_REPLACE(CAST(PERCENTAGE_COMPLETED AS STRING), r'[%\\s]', '') AS FLOAT64) AS pct,
+                        STARTED_AT,
+                        UPDATED_AT,
+                        COMPLETED_AT
+                    FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
+                    WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
+                )
                 SELECT
                     COURSE_NAME,
-                    -- Limpia posibles '%' y espacios, y castea a número
-                    SAFE_CAST(REGEXP_REPLACE(CAST(PERCENTAGE_COMPLETED AS STRING), r'[%\\s]', '') AS FLOAT64) AS pct,
+                    CASE
+                        WHEN pct IS NULL THEN NULL
+                        WHEN pct <= 1.0 THEN ROUND(pct * 100, 2)
+                        ELSE ROUND(pct, 2)
+                    END AS PERCENTAGE_COMPLETED,
                     STARTED_AT,
                     UPDATED_AT,
                     COMPLETED_AT
-                FROM `fivetwofive-20.INSUMOS.DB_PROGRESO_AVANCE_EDUCATIVO_THINKIFIC`
-                WHERE LOWER(TRIM(user_email)) = LOWER(TRIM(@correo))
-            )
-            SELECT
-                COURSE_NAME,
-                CASE
-                    WHEN pct IS NULL THEN NULL
-                    WHEN pct <= 1.0 THEN ROUND(pct * 100, 2)
-                    ELSE ROUND(pct, 2)
-                END AS PERCENTAGE_COMPLETED,
-                STARTED_AT,
-                UPDATED_AT,
-                COMPLETED_AT
-            FROM base
-            ORDER BY UPDATED_AT DESC
-        """
-        result_cursos = client.query(
-            query_cursos, job_config=job_config).result()
+                FROM base
+                ORDER BY UPDATED_AT DESC
+            """
+            result_cursos = client.query(query_cursos, job_config=job_config).result()
 
-        cursos_info = []
-        for row in result_cursos:
-            cursos_info.append({
-                'COURSE_NAME': row['COURSE_NAME'],
-                'PERCENTAGE_COMPLETED': row['PERCENTAGE_COMPLETED'],
-                'STARTED_AT': row['STARTED_AT'],
-                'UPDATED_AT': row['UPDATED_AT'],
-                'COMPLETED_AT': row['COMPLETED_AT']
-            })
+            for row in result_cursos:
+                cursos_info.append({
+                    'COURSE_NAME': row['COURSE_NAME'],
+                    'PERCENTAGE_COMPLETED': row['PERCENTAGE_COMPLETED'],
+                    'STARTED_AT': row['STARTED_AT'],
+                    'UPDATED_AT': row['UPDATED_AT'],
+                    'COMPLETED_AT': row['COMPLETED_AT']
+                })
 
-        # Top 12 para gráfico
-        chart_labels, chart_values = [], []
-        try:
-            cursos_sorted = sorted(
-                cursos_info,
-                key=lambda r: (
-                    float(r.get('PERCENTAGE_COMPLETED') or 0),
-                    str(r.get('UPDATED_AT') or '')
-                ),
-                reverse=True
-            )
-            top = cursos_sorted[:12]
-            for r in top:
-                nombre = (r.get('COURSE_NAME') or '').strip()
-                if len(nombre) > 38:
-                    nombre = nombre[:35] + '…'
-                chart_labels.append(nombre or 'Curso')
-                chart_values.append(float(r.get('PERCENTAGE_COMPLETED') or 0))
-        except Exception as e:
-            print("WARN chart data:", e, flush=True)
+            try:
+                cursos_sorted = sorted(
+                    cursos_info,
+                    key=lambda r: (
+                        float(r.get('PERCENTAGE_COMPLETED') or 0),
+                        str(r.get('UPDATED_AT') or '')
+                    ),
+                    reverse=True
+                )
+                top = cursos_sorted[:12]
+                for r in top:
+                    nombre = (r.get('COURSE_NAME') or '').strip()
+                    if len(nombre) > 38:
+                        nombre = nombre[:35] + '…'
+                    chart_labels.append(nombre or 'Curso')
+                    chart_values.append(float(r.get('PERCENTAGE_COMPLETED') or 0))
+            except Exception as e:
+                print("WARN chart data:", e, flush=True)
 
-        # ---- 2.7) Webinars (detalle simple) ----
-        # Lo usamos como respaldo si NO hay comunidad o si el rol permite comunidad.
-        q_webs = """
-            SELECT DISTINCT webinar_topic
-            FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
-            WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
-            ORDER BY webinar_topic
-            LIMIT 100
-        """
+        # -------------------------------------------------
+        # 2.7) Webinars (fallback simple) → SOLO admin/comunidad
+        # -------------------------------------------------
         webinars = []
-        for r in client.query(q_webs, job_config=job_config).result():
-            webinars.append({"webinar_topic": r["webinar_topic"]})
+        if rol in ("admin", "comunidad"):
+            q_webs = """
+                SELECT DISTINCT webinar_topic
+                FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
+                WHERE LOWER(TRIM(participant_email)) = LOWER(TRIM(@correo))
+                ORDER BY webinar_topic
+                LIMIT 100
+            """
+            for r in client.query(q_webs, job_config=job_config).result():
+                webinars.append({"webinar_topic": r["webinar_topic"]})
 
-        # ---- 3) Seguimientos ----
+        # -------------------------------------------------
+        # 3) Seguimientos → SOLO admin/postventa
+        # -------------------------------------------------
         seguimientos = []
         if rol in ("admin", "postventa"):
             query_seg = """
                 SELECT
-                ID,
-                FECHA,
-                AUTOR,
-                ROL_AUTOR,
-                TIPO,
-                NOTA,
-                ESTADO
+                  ID, FECHA, AUTOR, ROL_AUTOR, TIPO, NOTA, ESTADO
                 FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
                 WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
                 ORDER BY FECHA DESC
@@ -578,52 +572,50 @@ def get_alumno_info(correo):
                     "ESTADO": row.get("ESTADO", "")
                 })
 
-        # ---- 4) KPIs de Comunidad (vista consolidada) ----
+        # -------------------------------------------------
+        # 4) Comunidad → SOLO admin/comunidad
+        # -------------------------------------------------
         comunidad = None
         webinar_topics = []
         if rol in ("admin", "comunidad"):
             q_comm = """
                 SELECT
-                MONTO_INVERTIDO_CURSOS,
-                MONTO_INVERTIDO_GALA,
-                MONTO_INVERTIDO_TOTAL,
-                NPS_FINAL,
-                CALIF_CALC_0_10,
-                CALIF_EXPECTATIVAS,
-                CALIF_TEMAS,
-                CALIF_CONTENIDO,
-                CALIF_CLASE,
-                TOTAL_CURSOS,
-                PROMEDIO_AVANCE,
-                PROGRAMAS_CURSOS,
-                GENERACION_PROGRAMAS,
-                COMENTARIOS,
-                TOTAL_ASISTENCIA_WEBINAR,
-                WEBINARS_ASISTIDOS
+                  MONTO_INVERTIDO_CURSOS,
+                  MONTO_INVERTIDO_GALA,
+                  MONTO_INVERTIDO_TOTAL,
+                  NPS_FINAL,
+                  CALIF_CALC_0_10,
+                  CALIF_EXPECTATIVAS,
+                  CALIF_TEMAS,
+                  CALIF_CONTENIDO,
+                  CALIF_CLASE,
+                  TOTAL_CURSOS,
+                  PROMEDIO_AVANCE,
+                  PROGRAMAS_CURSOS,
+                  GENERACION_PROGRAMAS,
+                  COMENTARIOS,
+                  TOTAL_ASISTENCIA_WEBINAR,
+                  WEBINARS_ASISTIDOS
                 FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
                 WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
                 LIMIT 1
             """
-
             for r in client.query(q_comm, job_config=job_config).result():
                 comunidad = dict(r)
                 break
 
-        # Normaliza nombres de webinars para el template
-        if comunidad:
-            raw = None
-            for key in ("WEBINARS_ASISTIDOS", "WEBINAR", "WEBINARS", "WEBINAR_TOPIC"):
-                if key in comunidad and comunidad[key]:
-                    raw = str(comunidad[key])
-                    break
-            if raw:
-                parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
-                webinar_topics = [p.strip() for p in parts if p and p.strip()]
-        # Si no hubo comunidad o rol no permitido, NO exponemos topics desde fallback.
-        # (así evitamos “filtrar” info de comunidad a postventa)
-        if not webinar_topics:
-            if rol in ("admin", "comunidad"):
-                # Solo como respaldo para admin/comunidad
+            if comunidad:
+                raw = None
+                for key in ("WEBINARS_ASISTIDOS", "WEBINAR", "WEBINARS", "WEBINAR_TOPIC"):
+                    if key in comunidad and comunidad[key]:
+                        raw = str(comunidad[key])
+                        break
+                if raw:
+                    parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
+                    webinar_topics = [p.strip() for p in parts if p and p.strip()]
+
+            # Fallback de topics solo si rol permite comunidad
+            if not webinar_topics and webinars:
                 webinar_topics = sorted({
                     (w.get("webinar_topic") or "").strip()
                     for w in webinars
@@ -633,20 +625,21 @@ def get_alumno_info(correo):
         return render_template(
             'panel_alumnos.html',
             alumno_info=alumno_info,
-            cursos_info=cursos_info,
-            seguimientos=seguimientos,
-            comunidad=comunidad,
-            webinars=webinars,
-            webinar_topics=webinar_topics,
-            chart_labels=chart_labels,
-            chart_values=chart_values,
-            rol_usuario=current_user_role()
+            cursos_info=cursos_info,          # vacío para postventa
+            seguimientos=seguimientos,        # vacío para comunidad
+            comunidad=comunidad,              # None para postventa
+            webinars=webinars,                # vacío para postventa
+            webinar_topics=webinar_topics,    # vacío para postventa
+            chart_labels=chart_labels,        # vacío para postventa
+            chart_values=chart_values,        # vacío para postventa
+            rol_usuario=rol
         )
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 # -------------------- Seguimientos (crear / mover / listar) --------------------
 
