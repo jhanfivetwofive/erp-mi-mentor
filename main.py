@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
 from authlib.integrations.flask_client import OAuth
 from google.cloud import bigquery
 import os
@@ -6,7 +6,7 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import time
 import json
-from functools import wraps  # Asegúrate de importar wraps
+from functools import wraps 
 from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
@@ -20,31 +20,63 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import re
 
+# --- Helpers de rol/sesión ---
+ROLES_VALIDOS = {"admin", "postventa", "comunidad", "adquisicion", "people", "invitado"}
+
+def normalize_email(s: str) -> str:
+    return (s or "").strip().lower()
+
+def get_user_from_session():
+    return session.get("user") or {}
+
 def current_user_role():
-    user = session.get("user") or {}
-    return user.get("rol")
+    u = get_user_from_session()
+    return (u.get("rol") or "").strip().lower()
+
+def fetch_role_from_bq(email_norm: str) -> str | None:
+    q = """
+      SELECT ANY_VALUE(rol) rol
+      FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
+      WHERE LOWER(TRIM(correo)) = @c
+      LIMIT 1
+    """
+    cfg = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("c","STRING", email_norm)]
+    )
+    rows = list(client.query(q, job_config=cfg).result())
+    if not rows:
+        return None
+    rol = (rows[0]["rol"] or "").strip().lower()
+    return rol if rol in ROLES_VALIDOS else "invitado"
+
+def login_required(f):
+    @wraps(f)
+    def _wrap(*args, **kwargs):
+        if "user" not in session:
+            return redirect(url_for("login_firebase_page"))  # GET del login
+        return f(*args, **kwargs)
+    return _wrap
+
+def role_required(*roles):
+    roles_norm = {r.strip().lower() for r in roles}
+    def deco(f):
+        @wraps(f)
+        def _wrap(*args, **kwargs):
+            if "user" not in session:
+                return redirect(url_for("login_firebase_page"))
+            r = (session.get("user", {}).get("rol") or "").strip().lower()
+            # admin siempre puede
+            if r == "admin" or r in roles_norm:
+                return f(*args, **kwargs)
+            return render_template("no_autorizado.html"), 403
+        return _wrap
+    return deco
 
 def get_firebase_credentials():
     client = secretmanager.SecretManagerServiceClient()
     name = "projects/fivetwofive-20/secrets/firebase-key/versions/latest"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data
-
-def get_user_from_session():
-    return session.get("user") or {}
-
-def fetch_rol_from_bq(correo):
-    q = """
-      SELECT ANY_VALUE(rol) rol
-      FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-      WHERE LOWER(correo)=LOWER(@c)
-    """
-    job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("c","STRING", correo)]
-    )
-    for row in client.query(q, job_config=job).result():
-        return (row["rol"] or "").strip().lower()
-    return ""
 
 ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 
@@ -79,6 +111,11 @@ app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
 # (opcional) si quieres que dure X horas si es permanente
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=True,   # requiere HTTPS
+)
 
 # Inicializa la extensión Flask-Session
 Session(app)
@@ -91,6 +128,8 @@ client = bigquery.Client()
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
 # Vista de comunidad consolidada de alumnos
 COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
+# Vista de usuarios
+DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 
 # Filtro para formatear moneda MXN en Jinja
 def mxn(value):
@@ -105,7 +144,27 @@ app.jinja_env.filters["mxn"] = mxn
 
 @app.route("/")
 def home():
+    if "user" in session:
+        return redirect(url_for("dashboard"))
     return redirect(url_for("login_firebase_page"))
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    # Puedes mostrar tarjetas según rol
+    return render_template("dashboard.html")
+
+# --- Comunidad (ya trabajando)
+@app.route("/comunidad/insights")
+@role_required("comunidad")
+def comunidad_insights():
+    return render_template("comunidad/insights.html")
+
+# --- Postventa (nuevo)
+@app.route("/postventa/insights")
+@role_required("postventa")
+def postventa_insights():
+    return render_template("postventa/insights.html")
 
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
@@ -114,58 +173,40 @@ def login_firebase_page():
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
     try:
-        data = request.get_json()
+        data = request.get_json(force=True)
         id_token = data.get("idToken")
+        decoded = firebase_auth.verify_id_token(id_token)
 
-        # 1. Verifica el token con Firebase
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        email = decoded_token["email"]
-        name = decoded_token.get("name", email.split("@")[0])
+        email = normalize_email(decoded["email"])
+        name  = decoded.get("name", email.split("@")[0])
+        uid   = decoded.get("uid", "")
 
-        # 2. Busca en BigQuery si ya existe
-        query = """
-            SELECT correo, nombre, rol
-            FROM `fivetwofive-20.INSUMOS.DB_USUARIO`
-            WHERE correo = @correo
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", email)]
-        )
-        result = client.query(query, job_config=job_config).result()
+        # 1) Rol desde BQ (normalizado)
+        role = fetch_role_from_bq(email)
 
-        user = None
-        for row in result:
-            user = {
-                "correo": row["correo"],
-                "nombre": row["nombre"],
-                "rol": row["rol"]
-            }
-
-        # 3. Si no existe, crearlo como "invitado"
-        if not user:
+        # 2) Si no existe en BQ, lo creamos como invitado
+        if role is None:
             table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
             rows_to_insert = [{
                 "correo": email,
                 "nombre": name,
-                "rol": "invitado",  # 👈 Rol por defecto
-                "firebase_uid": decoded_token["uid"]
+                "rol": "invitado",
+                "firebase_uid": uid
             }]
             errors = client.insert_rows_json(table_id, rows_to_insert)
             if errors:
-                print(f"Error insertando nuevo usuario: {errors}")
-            user = {
-                "correo": email,
-                "nombre": name,
-                "rol": "invitado"
-            }
+                print(f"[WARN] Error insertando usuario nuevo: {errors}")
+            role = "invitado"
 
-        # 4. Guardar en sesión
-        session["user"] = user
-        return jsonify({"message": "Login exitoso"}), 200
+        # 3) Guardar en sesión
+        session.clear()
+        session["user"] = {"correo": email, "nombre": name, "rol": role, "uid": uid}
+        session.permanent = False  # cookie de sesión: expira al cerrar navegador
+
+        return jsonify({"message": "Login exitoso", "role": role}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 401
-
 
 @app.route('/logout')
 def logout():
@@ -209,7 +250,7 @@ def panel_basico():
 def alumnos_page():
     if 'user' not in session:
         # Redirige si no hay sesión activa
-        return redirect(url_for('login_firebase'))
+        return redirect(url_for('login_firebase_page'))
     return render_template("alumnos.html")
 
 # --------- API alumnos (ya estaba OK) ----------
@@ -238,11 +279,13 @@ def api_alumnos():
             FROM fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL
             WHERE 1=1
         """
-
+    params = []
     if generacion:
         query += f" AND GENERACION_PROGRAMA = @generacion"
+        params.append(bigquery.ScalarQueryParameter("generacion", "STRING", generacion))
     if correo:
         query += f" AND LOWER(CORREO) = @correo"
+        params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo.lower()))
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[

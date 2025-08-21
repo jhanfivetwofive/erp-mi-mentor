@@ -63,25 +63,62 @@
       {% set user = session.get('user') or {} %}
       {% set rol = (user.get('rol') or '')|lower %}
 
-      <!-- Menú izquierdo -->
+      <!-- Menú izquierdo (condicionado por rol) -->
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         {% if user %}
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
-               href="{{ url_for('alumnos_page') }}">Alumnos</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
-               href="{{ url_for('catalogo_programas') }}">Programas</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
-               href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
-          </li>
+
+          {# =========================
+            ADMIN → TODO
+            ========================= #}
+          {% if rol == 'admin' %}
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
+                href="{{ url_for('alumnos_page') }}">Alumnos</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
+                href="{{ url_for('catalogo_programas') }}">Programas</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
+                href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) else '' }}"
+                href="{{ url_for('comunidad_insights') }}">Comunidad</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+                href="{{ url_for('postventa_insights') }}">Postventa</a>
+            </li>
+          {% endif %}
+
+          {# =========================
+            COMUNIDAD → solo Comunidad
+            ========================= #}
+          {% if rol == 'comunidad' %}
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('comunidad_insights')) else '' }}"
+                href="{{ url_for('comunidad_insights') }}">Comunidad</a>
+            </li>
+          {% endif %}
+
+          {# =========================
+            POSTVENTA → solo Postventa
+            ========================= #}
+          {% if rol == 'postventa' %}
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+                href="{{ url_for('postventa_insights') }}">Postventa</a>
+            </li>
+          {% endif %}
+
+          {# (Opcional) Otros roles como 'adquisicion'/'people' podrían ir aquí #}
+
         {% endif %}
       </ul>
 
-      <!-- Menú derecho -->
+      <!-- Menú derecho (usuario / logout) -->
       <ul class="navbar-nav ms-auto">
         {% if user %}
           <li class="nav-item d-flex align-items-center me-2">
@@ -95,7 +132,7 @@
         {% else %}
           <li class="nav-item">
             <a class="nav-link {{ 'active' if request.path.startswith(url_for('login_firebase_page')) else '' }}"
-               href="{{ url_for('login_firebase_page') }}">Iniciar sesión</a>
+              href="{{ url_for('login_firebase_page') }}">Iniciar sesión</a>
           </li>
         {% endif %}
       </ul>
