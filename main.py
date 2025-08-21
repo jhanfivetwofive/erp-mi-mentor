@@ -25,16 +25,19 @@ import re
 # =========================================================
 app = Flask(__name__)
 
+
 def load_secret(project_id: str, name: str, version: str = "latest") -> str:
     sm_client = secretmanager.SecretManagerServiceClient()
     resource = f"projects/{project_id}/secrets/{name}/versions/{version}"
     resp = sm_client.access_secret_version(request={"name": resource})
     return resp.payload.data.decode("utf-8")
 
+
 project_id = os.getenv("GCP_PROJECT_ID", "fivetwofive-20")
 
 # Secret key: primero ENV, si no, Secret Manager
-app.secret_key = os.getenv("FLASK_SECRET_KEY") or load_secret(project_id, "FLASK_SECRET_KEY")
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or load_secret(
+    project_id, "FLASK_SECRET_KEY")
 if not app.secret_key:
     raise RuntimeError("FLASK_SECRET_KEY no está configurado")
 
@@ -45,7 +48,8 @@ app.config['SESSION_COOKIE_NAME'] = 'mmi_sess'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # En Cloud Run producción (HTTPS) → True. En local http → False.
-app.config['SESSION_COOKIE_SECURE'] = False  # cambia a True en producción HTTPS
+# cambia a True en producción HTTPS
+app.config['SESSION_COOKIE_SECURE'] = False
 
 app.debug = True
 load_dotenv()
@@ -55,17 +59,22 @@ load_dotenv()
 # =========================================================
 
 # --- Helpers de rol/sesión ---
-ROLES_VALIDOS = {"admin", "postventa", "comunidad", "adquisicion", "people", "invitado"}
+ROLES_VALIDOS = {"admin", "postventa", "comunidad",
+                 "adquisicion", "people", "invitado"}
+
 
 def normalize_email(s: str) -> str:
     return (s or "").strip().lower()
 
+
 def get_user_from_session():
     return session.get("user") or {}
+
 
 def current_user_role():
     u = get_user_from_session()
     return (u.get("rol") or "").strip().lower()
+
 
 def fetch_role_from_bq(email_norm: str) -> str | None:
     q = """
@@ -75,13 +84,15 @@ def fetch_role_from_bq(email_norm: str) -> str | None:
       LIMIT 1
     """
     cfg = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("c","STRING", email_norm)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "c", "STRING", email_norm)]
     )
     rows = list(client.query(q, job_config=cfg).result())
     if not rows:
         return None
     rol = (rows[0]["rol"] or "").strip().lower()
     return rol if rol in ROLES_VALIDOS else "invitado"
+
 
 def login_required(f):
     @wraps(f)
@@ -91,8 +102,10 @@ def login_required(f):
         return f(*args, **kwargs)
     return _wrap
 
+
 def role_required(*roles):
     roles_norm = {r.strip().lower() for r in roles}
+
     def deco(f):
         @wraps(f)
         def _wrap(*args, **kwargs):
@@ -106,16 +119,20 @@ def role_required(*roles):
         return _wrap
     return deco
 
+
 def get_firebase_credentials():
     sm_client = secretmanager.SecretManagerServiceClient()
     name = "projects/fivetwofive-20/secrets/firebase-key/versions/latest"
     response = sm_client.access_secret_version(request={"name": name})
     return response.payload.data
 
+
 ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 
+
 def _now_iso_utc():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
 
 # --- Inicialización de Firebase (como ya la tenías) ---
 if not firebase_admin._apps:
@@ -136,6 +153,8 @@ COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 
 # Filtro para formatear moneda MXN en Jinja (SIN CAMBIOS)
+
+
 def mxn(value):
     try:
         if value is None or value == "":
@@ -144,17 +163,20 @@ def mxn(value):
     except Exception:
         return str(value)
 
+
 app.jinja_env.filters["mxn"] = mxn
 
 # =========================================================
 # 4) Rutas
 # =========================================================
 
+
 @app.route("/")
 def home():
     if "user" in session:
         return redirect(url_for("dashboard"))
     return redirect(url_for("login_firebase_page"))
+
 
 @app.route("/dashboard")
 @login_required
@@ -163,23 +185,31 @@ def dashboard():
     return render_template("dashboard.html")
 
 # --- Comunidad (ya trabajando)
+
+
 @app.route("/comunidad/insights")
 @role_required("comunidad")
 def comunidad_insights():
     return render_template("comunidad/insights.html")
 
 # --- Postventa (nuevo)
+
+
 @app.route("/postventa/insights")
 @role_required("postventa")
 def postventa_insights():
     return render_template("postventa/insights.html")
 
 # --- Login Firebase: GET (pantalla)
+
+
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
     return render_template("login_firebase.html")
 
 # --- Login Firebase: POST (verifica token, guarda sesión)
+
+
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
     try:
@@ -188,8 +218,8 @@ def login_firebase():
         decoded = firebase_auth.verify_id_token(id_token)
 
         email = normalize_email(decoded["email"])
-        name  = decoded.get("name", email.split("@")[0])
-        uid   = decoded.get("uid", "")
+        name = decoded.get("name", email.split("@")[0])
+        uid = decoded.get("uid", "")
 
         # 1) Rol desde BQ (normalizado)
         role = fetch_role_from_bq(email)
@@ -210,7 +240,8 @@ def login_firebase():
 
         # 3) Guardar en sesión
         session.clear()
-        session["user"] = {"correo": email, "nombre": name, "rol": role, "uid": uid}
+        session["user"] = {"correo": email,
+                           "nombre": name, "rol": role, "uid": uid}
         session.permanent = False  # cookie de sesión: expira al cerrar navegador
 
         return jsonify({"message": "Login exitoso", "role": role}), 200
@@ -218,18 +249,22 @@ def login_firebase():
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
+
 @app.route('/logout')
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase_page'))
 
 # -------------------- Alumnos y catálogos --------------------
+
+
 @app.route('/alumnos')
 def alumnos_page():
     if 'user' not in session:
         # Redirige si no hay sesión activa
         return redirect(url_for('login_firebase_page'))
     return render_template("alumnos.html")
+
 
 @app.route("/api/alumnos")
 def api_alumnos():
@@ -259,10 +294,12 @@ def api_alumnos():
     params = []
     if generacion:
         query += " AND GENERACION_PROGRAMA = @generacion"
-        params.append(bigquery.ScalarQueryParameter("generacion", "STRING", generacion))
+        params.append(bigquery.ScalarQueryParameter(
+            "generacion", "STRING", generacion))
     if correo:
         query += " AND LOWER(CORREO) = @correo"
-        params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo.lower()))
+        params.append(bigquery.ScalarQueryParameter(
+            "correo", "STRING", correo.lower()))
 
     job_config = bigquery.QueryJobConfig(query_parameters=params)
     df = client.query(query, job_config=job_config).to_dataframe()
@@ -271,7 +308,8 @@ def api_alumnos():
     # Convertir fechas de manera segura
     for col in df.select_dtypes(include=["datetime64[ns]", "object"]).columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else "")
+            df[col] = df[col].apply(lambda x: x.strftime(
+                '%Y-%m-%d') if pd.notnull(x) else "")
 
     # Rellenar valores vacíos en columnas tipo texto
     for col in df.select_dtypes(include=["object", "string"]).columns:
@@ -279,6 +317,7 @@ def api_alumnos():
 
     alumnos = df.to_dict(orient="records")
     return jsonify(alumnos)
+
 
 @app.route('/api/generaciones')
 def obtener_generaciones():
@@ -291,9 +330,11 @@ def obtener_generaciones():
     generaciones = client.query(query).result()
     return jsonify([row.GENERACION_PROGRAMA for row in generaciones])
 
+
 @app.route("/catalogo/<catalogo_id>")
 def catalogo_page(catalogo_id):
     return render_template(f"catalogo_{catalogo_id}.html", catalogo_id=catalogo_id)
+
 
 @app.route("/catalogo/programas")
 def catalogo_programas():
@@ -301,11 +342,13 @@ def catalogo_programas():
         return redirect(url_for('login_firebase_page'))
     return render_template("cat_programas.html")
 
+
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():
     if 'user' not in session:
         return redirect(url_for('login_firebase_page'))
     return render_template("cat_generacion_programas.html")
+
 
 @app.route('/api/catalogo/programas')
 def api_programas():
@@ -330,6 +373,7 @@ def api_programas():
         return jsonify(programas)
     except Exception as e:
         return jsonify({"error": f"Failed to load data: {str(e)}"}), 500
+
 
 @app.route('/api/catalogo/generaciones')
 def api_generaciones():
@@ -362,6 +406,8 @@ def api_generaciones():
         return jsonify({"error": f"Failed to load data: {str(e)}"}), 500
 
 # -------------------- Crear nuevo alumno (solo admin) --------------------
+
+
 @app.route("/alumnos/nuevo", methods=["GET", "POST"])
 @role_required("admin")
 def nuevo_alumno():
@@ -371,17 +417,22 @@ def nuevo_alumno():
         telefono = request.form.get("telefono")
         programa = request.form.get("programa")
         generacion = request.form.get("generacion")
-        print("Alumno recibido:", nombre, correo, telefono, programa, generacion)
+        print("Alumno recibido:", nombre, correo,
+              telefono, programa, generacion)
         return redirect(url_for("alumnos_page"))
     return render_template("nuevo_alumno.html")
 
 # -------------------- Panel de alumno --------------------
+
+
 @app.route('/alumno/<correo>', methods=['GET'])
 def get_alumno_info(correo):
     try:
+        rol = current_user_role()  # ← rol del usuario en sesión
         # ---- Parametrización compartida ----
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo)]
         )
 
         # ---- 1) Info del alumno ----
@@ -398,7 +449,8 @@ def get_alumno_info(correo):
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             GROUP BY ID_ALUMNO, CORREO
         """
-        result_alumno = client.query(query_alumno, job_config=job_config).result()
+        result_alumno = client.query(
+            query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -418,7 +470,12 @@ def get_alumno_info(correo):
                                    alumno_info=None,
                                    cursos_info=[],
                                    seguimientos=[],
-                                   rol_usuario=current_user_role()), 404
+                                   comunidad=None,
+                                   webinars=[],
+                                   webinar_topics=[],
+                                   chart_labels=[],
+                                   chart_values=[],
+                                   rol_usuario=rol), 404
 
         # ---- 2) Cursos Thinkific ----
         query_cursos = """
@@ -446,7 +503,8 @@ def get_alumno_info(correo):
             FROM base
             ORDER BY UPDATED_AT DESC
         """
-        result_cursos = client.query(query_cursos, job_config=job_config).result()
+        result_cursos = client.query(
+            query_cursos, job_config=job_config).result()
 
         cursos_info = []
         for row in result_cursos:
@@ -479,7 +537,8 @@ def get_alumno_info(correo):
         except Exception as e:
             print("WARN chart data:", e, flush=True)
 
-        # ---- 2.7) Webinars (detalle simple para fallback) ----
+        # ---- 2.7) Webinars (detalle simple) ----
+        # Lo usamos como respaldo si NO hay comunidad o si el rol permite comunidad.
         q_webs = """
             SELECT DISTINCT webinar_topic
             FROM `fivetwofive-20.INSUMOS.DB_ZOOM_WEBINARS_ASISTENCIA`
@@ -492,63 +551,65 @@ def get_alumno_info(correo):
             webinars.append({"webinar_topic": r["webinar_topic"]})
 
         # ---- 3) Seguimientos ----
-        query_seg = """
-            SELECT
-              ID,
-              FECHA,
-              AUTOR,
-              ROL_AUTOR,
-              TIPO,
-              NOTA,
-              ESTADO
-            FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
-            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-            ORDER BY FECHA DESC
-        """
-        result_seg = client.query(query_seg, job_config=job_config).result()
-
         seguimientos = []
-        for row in result_seg:
-            seguimientos.append({
-                "ID": row["ID"],
-                "FECHA": row["FECHA"],
-                "AUTOR": row["AUTOR"],
-                "ROL_AUTOR": row["ROL_AUTOR"],
-                "TIPO": row.get("TIPO", ""),
-                "NOTA": row.get("NOTA", ""),
-                "ESTADO": row.get("ESTADO", "")
-            })
+        if rol in ("admin", "postventa"):
+            query_seg = """
+                SELECT
+                ID,
+                FECHA,
+                AUTOR,
+                ROL_AUTOR,
+                TIPO,
+                NOTA,
+                ESTADO
+                FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+                WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+                ORDER BY FECHA DESC
+            """
+            result_seg = client.query(query_seg, job_config=job_config).result()
+            for row in result_seg:
+                seguimientos.append({
+                    "ID": row["ID"],
+                    "FECHA": row["FECHA"],
+                    "AUTOR": row["AUTOR"],
+                    "ROL_AUTOR": row["ROL_AUTOR"],
+                    "TIPO": row.get("TIPO", ""),
+                    "NOTA": row.get("NOTA", ""),
+                    "ESTADO": row.get("ESTADO", "")
+                })
 
         # ---- 4) KPIs de Comunidad (vista consolidada) ----
-        q_comm = """
-            SELECT
-              MONTO_INVERTIDO_CURSOS,
-              MONTO_INVERTIDO_GALA,
-              MONTO_INVERTIDO_TOTAL,
-              NPS_FINAL,
-              CALIF_CALC_0_10,
-              CALIF_EXPECTATIVAS,
-              CALIF_TEMAS,
-              CALIF_CONTENIDO,
-              CALIF_CLASE,
-              TOTAL_CURSOS,
-              PROMEDIO_AVANCE,
-              PROGRAMAS_CURSOS,
-              GENERACION_PROGRAMAS,
-              COMENTARIOS,
-              TOTAL_ASISTENCIA_WEBINAR,
-              WEBINARS_ASISTIDOS
-            FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
-            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-            LIMIT 1
-        """
         comunidad = None
-        for r in client.query(q_comm, job_config=job_config).result():
-            comunidad = dict(r)
-            break
+        webinar_topics = []
+        if rol in ("admin", "comunidad"):
+            q_comm = """
+                SELECT
+                MONTO_INVERTIDO_CURSOS,
+                MONTO_INVERTIDO_GALA,
+                MONTO_INVERTIDO_TOTAL,
+                NPS_FINAL,
+                CALIF_CALC_0_10,
+                CALIF_EXPECTATIVAS,
+                CALIF_TEMAS,
+                CALIF_CONTENIDO,
+                CALIF_CLASE,
+                TOTAL_CURSOS,
+                PROMEDIO_AVANCE,
+                PROGRAMAS_CURSOS,
+                GENERACION_PROGRAMAS,
+                COMENTARIOS,
+                TOTAL_ASISTENCIA_WEBINAR,
+                WEBINARS_ASISTIDOS
+                FROM `fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO`
+                WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+                LIMIT 1
+            """
+
+            for r in client.query(q_comm, job_config=job_config).result():
+                comunidad = dict(r)
+                break
 
         # Normaliza nombres de webinars para el template
-        webinar_topics = []
         if comunidad:
             raw = None
             for key in ("WEBINARS_ASISTIDOS", "WEBINAR", "WEBINARS", "WEBINAR_TOPIC"):
@@ -558,12 +619,16 @@ def get_alumno_info(correo):
             if raw:
                 parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
                 webinar_topics = [p.strip() for p in parts if p and p.strip()]
+        # Si no hubo comunidad o rol no permitido, NO exponemos topics desde fallback.
+        # (así evitamos “filtrar” info de comunidad a postventa)
         if not webinar_topics:
-            webinar_topics = sorted({
-                (w.get("webinar_topic") or "").strip()
-                for w in webinars
-                if (w.get("webinar_topic") or "").strip()
-            })
+            if rol in ("admin", "comunidad"):
+                # Solo como respaldo para admin/comunidad
+                webinar_topics = sorted({
+                    (w.get("webinar_topic") or "").strip()
+                    for w in webinars
+                    if (w.get("webinar_topic") or "").strip()
+                })
 
         return render_template(
             'panel_alumnos.html',
@@ -584,6 +649,8 @@ def get_alumno_info(correo):
         return jsonify({"error": str(e)}), 500
 
 # -------------------- Seguimientos (crear / mover / listar) --------------------
+
+
 @app.route("/api/seguimiento", methods=["POST"])
 def api_crear_seguimiento():
     try:
@@ -606,11 +673,11 @@ def api_crear_seguimiento():
 
         data = request.get_json() or {}
         correo = (data.get("correo") or "").strip().lower()
-        nota   = (data.get("nota")   or "").strip()
-        tipo   = (data.get("tipo")   or "").strip().lower() or "otro"
+        nota = (data.get("nota") or "").strip()
+        tipo = (data.get("tipo") or "").strip().lower() or "otro"
         estado = (data.get("estado") or "contactado").strip().lower()
 
-        ESTADOS_PERMITIDOS = {"contactado","en_proceso","cerrado"}
+        ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
         if not correo or not nota:
             return jsonify({"error": "Faltan datos (correo y nota)"}), 400
         if estado not in ESTADOS_PERMITIDOS:
@@ -625,7 +692,8 @@ def api_crear_seguimiento():
         res = client.query(
             query_id,
             job_config=bigquery.QueryJobConfig(
-                query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
+                query_parameters=[bigquery.ScalarQueryParameter(
+                    "correo", "STRING", correo)]
             )
         ).result()
         id_alumno = None
@@ -658,17 +726,18 @@ def api_crear_seguimiento():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/seguimiento/<seg_id>", methods=["PATCH"])
 def api_mover_seguimiento(seg_id):
     try:
         rol = (current_user_role() or "").strip().lower()
-        if rol not in ["postventa","admin"]:
-            return jsonify({"error":"No autorizado"}), 403
+        if rol not in ["postventa", "admin"]:
+            return jsonify({"error": "No autorizado"}), 403
 
         data = request.get_json() or {}
         nuevo_estado = (data.get("estado") or "").strip().lower()
-        if nuevo_estado not in {"contactado","en_proceso","cerrado"}:
-            return jsonify({"error":"Estado inválido"}), 400
+        if nuevo_estado not in {"contactado", "en_proceso", "cerrado"}:
+            return jsonify({"error": "Estado inválido"}), 400
 
         # 1) Traer contexto de la tarjeta (correo, id_alumno) por su ID
         q_ctx = """
@@ -679,7 +748,8 @@ def api_mover_seguimiento(seg_id):
           LIMIT 1
         """
         job_ctx = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("id","STRING", seg_id)]
+            query_parameters=[
+                bigquery.ScalarQueryParameter("id", "STRING", seg_id)]
         )
         correo = None
         id_alumno = None
@@ -687,7 +757,7 @@ def api_mover_seguimiento(seg_id):
             correo = (r["CORREO"] or "").strip().lower()
             id_alumno = r["ID_ALUMNO"]
         if not correo:
-            return jsonify({"error":"No se encontró el seguimiento a mover"}), 404
+            return jsonify({"error": "No se encontró el seguimiento a mover"}), 404
 
         # 2) Insertar un nuevo evento con MISMO ID y nuevo estado
         table_id = "fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO"
@@ -706,12 +776,13 @@ def api_mover_seguimiento(seg_id):
         if errors:
             return jsonify({"error": errors}), 500
 
-        return jsonify({"message":"Estado actualizado"}), 200
+        return jsonify({"message": "Estado actualizado"}), 200
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/seguimientos")
 def api_listar_seguimientos():
@@ -731,7 +802,8 @@ def api_listar_seguimientos():
       ORDER BY FECHA DESC
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("correo","STRING", correo)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "correo", "STRING", correo)]
     )
     rows = client.query(q, job_config=job).result()
 
@@ -749,10 +821,13 @@ def api_listar_seguimientos():
     return jsonify(out)
 
 # -------------------- Comunidad: Lista y Panel --------------------
+
+
 @app.route("/comunidad")
 @role_required("admin", "comunidad")
 def comunidad_list():
     return render_template("comunidad.html")
+
 
 @app.route("/api/comunidad")
 @role_required("admin", "comunidad")
@@ -768,7 +843,8 @@ def api_comunidad():
         """
         params = []
         if correo:
-            params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
+            params.append(bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo))
         job = bigquery.QueryJobConfig(query_parameters=params)
 
         df = client.query(q, job_config=job).to_dataframe()
@@ -777,24 +853,25 @@ def api_comunidad():
         df = df.convert_dtypes()
 
         float_cols = [
-            "MONTO_INVERTIDO_CURSOS","MONTO_INVERTIDO_GALA","MONTO_INVERTIDO_TOTAL",
-            "CALIF_EXPECTATIVAS","CALIF_TEMAS","CALIF_CONTENIDO","CALIF_CLASE",
-            "CALIF_CALC_0_10","NPS_FINAL","PROMEDIO_AVANCE"
+            "MONTO_INVERTIDO_CURSOS", "MONTO_INVERTIDO_GALA", "MONTO_INVERTIDO_TOTAL",
+            "CALIF_EXPECTATIVAS", "CALIF_TEMAS", "CALIF_CONTENIDO", "CALIF_CLASE",
+            "CALIF_CALC_0_10", "NPS_FINAL", "PROMEDIO_AVANCE"
         ]
         for c in float_cols:
             if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64").round(2)
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype(
+                    "Float64").round(2)
 
-        int_cols = ["TOTAL_CURSOS","TOTAL_ASISTENCIA_WEBINAR"]
+        int_cols = ["TOTAL_CURSOS", "TOTAL_ASISTENCIA_WEBINAR"]
         for c in int_cols:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
 
         text_cols = [
-            "NOMBRE_ALUMNO","CORREO","TELEFONO","FUENTE",
-            "PROGRAMAS_CURSOS","GENERACION_PROGRAMAS","PROGRAMAS_THINKIFIC",
-            "WEBINAR","WEBINARS","COMENTARIOS","GENERACION_GALA","PRODUCTO_GALA",
-            "PONENTE_GALA","PONENCIA_GALA","BANDERA_GALA"
+            "NOMBRE_ALUMNO", "CORREO", "TELEFONO", "FUENTE",
+            "PROGRAMAS_CURSOS", "GENERACION_PROGRAMAS", "PROGRAMAS_THINKIFIC",
+            "WEBINAR", "WEBINARS", "COMENTARIOS", "GENERACION_GALA", "PRODUCTO_GALA",
+            "PONENTE_GALA", "PONENCIA_GALA", "BANDERA_GALA"
         ]
         for c in text_cols:
             if c in df.columns:
@@ -808,6 +885,7 @@ def api_comunidad():
         app.logger.exception("Error en /api/comunidad: %s", e)
         return jsonify([]), 200
 
+
 @app.route("/comunidad/<correo>")
 @role_required("admin", "comunidad")
 def comunidad_panel(correo):
@@ -820,7 +898,8 @@ def comunidad_panel(correo):
       LIMIT 1
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("correo","STRING",correo)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "correo", "STRING", correo)]
     )
     row = None
     for r in client.query(q, job_config=job).result():

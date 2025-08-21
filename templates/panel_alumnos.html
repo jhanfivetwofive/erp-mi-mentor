@@ -304,6 +304,18 @@
   {% endif %} {# /alumno_info #}
 </div>
 {% endblock %}
+{# Datos generales: libres #}
+... generales ...
+
+{# Comunidad solo admin/comunidad #}
+{% if rol_usuario in ['admin','comunidad'] and comunidad %}
+  ... sección de insights de comunidad ...
+{% endif %}
+
+{# Postventa solo admin/postventa #}
+{% if rol_usuario in ['admin','postventa'] %}
+  ... sección de seguimiento de postventa ...
+{% endif %}
 
 {% block scripts %}
 <!-- Chart.js -->
