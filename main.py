@@ -750,12 +750,12 @@ def api_listar_seguimientos():
 
 # -------------------- Comunidad: Lista y Panel --------------------
 @app.route("/comunidad")
-@login_required
+@role_required("admin", "comunidad")
 def comunidad_list():
     return render_template("comunidad.html")
 
 @app.route("/api/comunidad")
-@login_required
+@role_required("admin", "comunidad")
 def api_comunidad():
     try:
         correo = (request.args.get("correo") or "").strip().lower()
@@ -809,7 +809,7 @@ def api_comunidad():
         return jsonify([]), 200
 
 @app.route("/comunidad/<correo>")
-@login_required
+@role_required("admin", "comunidad")
 def comunidad_panel(correo):
     correo = (correo or "").strip().lower()
 
