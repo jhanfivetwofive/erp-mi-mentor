@@ -70,6 +70,14 @@ git merge main
 git push origin dev
 
 
+log
+
+gcloud run services logs read mi-app-dev `
+>>   --project="fivetwofive-20" `
+>>   --region="us-central1" `
+>>   --limit=50
+
+
 🧰 Tip en VS Code
 Presiona:
 
