@@ -639,19 +639,21 @@ def get_alumno_info(correo):
         # -----------------------------------------------------------------
 
         whatsapp_url = None
-        if rol in ("admin", "postventa"):
-            # preferimos el teléfono “oficial” de postventa; si no, el de alumno
-            phone_raw = None
-            if isinstance(postventa, dict):
-                phone_raw = postventa.get("TELEFONO_OFICIAL") or postventa.get("TELEFONO") or None
-            if not phone_raw and isinstance(alumno_info, dict):
-                phone_raw = alumno_info.get("TELEFONO") or None
+        phone_raw = None
 
-            e164 = to_whatsapp_e164(phone_raw or "")
-            if e164:
-                alumno_nombre = (alumno_info.get("NOMBRE_ALUMNO") if isinstance(alumno_info, dict) else "") or ""
-                msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. Te contacto sobre tu seguimiento. ¿Tienes 2 minutos?"
-                whatsapp_url = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+        # Preferimos un teléfono “oficial” si existe en postventa; si no, el del alumno
+        if isinstance(postventa, dict):
+            phone_raw = postventa.get("TELEFONO_OFICIAL") or postventa.get("TELEFONO")
+
+        if not phone_raw and isinstance(alumno_info, dict):
+            phone_raw = alumno_info.get("TELEFONO")
+
+        e164 = to_whatsapp_e164(phone_raw or "")
+        if e164:
+            alumno_nombre = (alumno_info.get("NOMBRE_ALUMNO") if isinstance(alumno_info, dict) else "") or ""
+            msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?"
+            whatsapp_url = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+
 
 
         # -------------------------------------------------
