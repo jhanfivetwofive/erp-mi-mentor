@@ -19,6 +19,7 @@ from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone, timedelta
 import uuid
 import re
+import urllib.parse
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
@@ -162,6 +163,30 @@ def mxn(value):
         return f"${float(value):,.2f}"
     except Exception:
         return str(value)
+    
+# Helper para normalizar el telefono "MX = 52"
+
+def to_whatsapp_e164(phone_raw: str, default_cc: str = "52") -> str:
+    """Convierte un teléfono a formato para wa.me.
+    - Deja solo dígitos
+    - Si son 10 dígitos => antepone CC (por defecto MX 52)
+    - Si ya empieza con 52 y tiene 12–13 dígitos => lo deja
+    - Si venía con '00' => lo quita
+    - Si nada cuadra, regresa los dígitos limpios (mejor eso que nada)
+    """
+    if not phone_raw:
+        return ""
+    digits = re.sub(r"\D", "", str(phone_raw))
+    if not digits:
+        return ""
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith(default_cc) and 11 <= len(digits) <= 13:
+        return digits
+    if len(digits) == 10:
+        return default_cc + digits
+    return digits
+
 
 
 app.jinja_env.filters["mxn"] = mxn
@@ -609,6 +634,26 @@ def get_alumno_info(correo):
                     "ESTADO": row.get("ESTADO", "")
                 })
 
+        # -----------------------------------------------------------------
+        # --- URL de WhatsApp para el botón (solo para postventa/admin) ---
+        # -----------------------------------------------------------------
+
+        whatsapp_url = None
+        if rol in ("admin", "postventa"):
+            # preferimos el teléfono “oficial” de postventa; si no, el de alumno
+            phone_raw = None
+            if isinstance(postventa, dict):
+                phone_raw = postventa.get("TELEFONO_OFICIAL") or postventa.get("TELEFONO") or None
+            if not phone_raw and isinstance(alumno_info, dict):
+                phone_raw = alumno_info.get("TELEFONO") or None
+
+            e164 = to_whatsapp_e164(phone_raw or "")
+            if e164:
+                alumno_nombre = (alumno_info.get("NOMBRE_ALUMNO") if isinstance(alumno_info, dict) else "") or ""
+                msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. Te contacto sobre tu seguimiento. ¿Tienes 2 minutos?"
+                whatsapp_url = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+
+
         # -------------------------------------------------
         # 4) Comunidad → SOLO admin/comunidad
         # -------------------------------------------------
@@ -670,6 +715,7 @@ def get_alumno_info(correo):
             chart_labels=chart_labels,        # vacío para postventa
             chart_values=chart_values,        # vacío para postventa
             postventa=postventa,              # vacío para comunidad
+             whatsapp_url=whatsapp_url,       # vacío para postventa
             rol_usuario=rol
         )
 
