@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Postventa — Insights{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex align-items-center mb-3">
+    <h4 class="mb-0">Insights de Diagnóstico</h4>
+    <div class="ms-auto d-flex gap-2">
+      <a class="btn btn-sm btn-primary" href="{{ url_for('postventa_diagnostico') }}">Nuevo diagnóstico</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('postventa_diagnostico_list') }}">Ver listado</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="text-muted small">Total encuestas</div>
+          <div class="fs-4 fw-bold">{{ kpis.total or 0 }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="text-muted small">Calificación promedio</div>
+          <div class="fs-4 fw-bold">
+            {% if kpis.calif_prom is not none %}{{ '%.1f' % kpis.calif_prom }}{% else %}—{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="text-muted small">Viables</div>
+          <div class="fs-4 fw-bold text-success">{{ kpis.viable or 0 }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="text-muted small">Requiere ajuste</div>
+          <div class="fs-4 fw-bold text-warning">{{ kpis.requiere_ajuste or 0 }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="text-muted small">No viables</div>
+          <div class="fs-4 fw-bold text-danger">{{ kpis.no_viable or 0 }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mt-4">
+    <div class="card-header bg-light">
+      <strong>Últimos 20 diagnósticos</strong>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table id="tablaUltimos" class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>ID</th><th>Nombre</th><th>Gen</th>
+              <th>Calif</th><th>Estatus</th><th>Teléfono</th><th>Correo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in ultimos %}
+              <tr>
+                <td>{{ r.FECHA }}</td>
+                <td>{{ r.ID }}</td>
+                <td>{{ r.NOMBRE }}</td>
+                <td>{{ r.GENERACION }}</td>
+                <td class="fw-bold">{{ r.CALIFICACION }}</td>
+                <td>{{ r.ESTATUS_VENTA }}</td>
+                <td>{{ r.TELEFONO }}</td>
+                <td>{{ r.CORREO }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    if (window.jQuery && $("#tablaUltimos").DataTable) {
+      $("#tablaUltimos").DataTable({ pageLength: 10, order: [[0,'desc']] });
+    }
+  });
+</script>
+{% endblock %}
