@@ -178,6 +178,88 @@ DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 # ---- Postventa: constantes de tablas ----
 POSTVENTA_TABLA_BASE = "fivetwofive-20.POSTVENTA.DB_DIAGNOSTICO_POSTVENTA"
 
+# ---- Cuestionario Diagnóstico (opciones visibles) ----
+PREGUNTAS_DEF = {
+  "R1":  {"texto": "¿Tienes actualmente alguna fuente de ingreso activa?",
+          "opciones": [("3","Sí, ingresos estables mensuales."),
+                       ("2","Sí, pero son variables o inestables."),
+                       ("1","No tengo ingresos actualmente.")]},
+  "R2":  {"texto": "¿De cuanto son tus ingresos mensuales aproximadamente?",
+          "opciones": [("3","Más de $30,000 MXN."),
+                       ("2","Entre $10,000 y $30,000 MXN."),
+                       ("1","Menos de $10,000 MXN.")]},
+  "R3":  {"texto": "¿Tienes personas que dependan de ti?",
+          "opciones": [("3","Sí, y compartimos ingresos/responsabilidades."),
+                       ("2","Mi familia cercana depende de mí."),
+                       ("1","Aparte de mi familia cercana más personas dependen de mí.")]},
+  "R4":  {"texto": "¿Tu numero de libertad financiera es más, menos o igual de tus ingresos actuales ?",
+          "opciones": [("3","Mucho menos de lo que ingreso mensualmente"),
+                       ("2","Igual a lo que ingreso mensualmente"),
+                       ("1","Mucho más de lo que ingreso mensualmente")]},
+  "R5":  {"texto": "¿Cuánto puedes invertir mensualmente sin afectar tus gastos básicos?",
+          "opciones": [("3","Más de $5,000 MXN."),
+                       ("2","Entre $1,000 y $5,000 MXN."),
+                       ("1","Menos de $1,000 MXN o nada.")]},
+  "R6":  {"texto": "¿Tienes algún ahorro o capital disponible para invertir? ¿y cual sería el monto aproximado?",
+          "opciones": [("3","Más de $50,000 MXN."),
+                       ("2","Entre $10,000 y $50,000 MXN."),
+                       ("1","Menos de $10,000 MXN.")]},
+  "R7":  {"texto": "¿Tienes acceso a financiamiento?",
+          "opciones": [("3","Sí, y lo ha usado estratégicamente."),
+                       ("2","Sí, pero aún no lo usa."),
+                       ("1","No tiene acceso a crédito o lo usa mal.")]},
+  "R8":  {"texto": "¿Tienes alguna deuda activa actualmente?",
+          "opciones": [("3","No tengo deudas"),
+                       ("2","Algunas deudas pero manejables."),
+                       ("1","Muchas deudas o sin control.")]},
+  "R9":  {"texto": "¿Qué tan dispuesto estás a seguir un plan de acción con la guía de mentores?",
+          "opciones": [("3","Totalmente comprometido y abierto a cambios."),
+                       ("2","Interesado pero con algunas dudas."),
+                       ("1","No está seguro o le cuesta seguir procesos.")]},
+  "R10": {"texto": "Si hoy tuvieras una estrategia clara para invertir, ¿te comprometerías a ejecutarla?",
+          "opciones": [("3","Sí, inmediatamente."),
+                       ("2","Sí, pero necesita más seguridad."),
+                       ("1","No está seguro o le falta claridad.")]},
+  "R11": {"texto": "En una escala del 1 al 10, ¿qué tan importante es para ti lograr la libertad financiera?",
+          "opciones": [("3","9-10: Es su máxima prioridad."),
+                       ("2","7-8: Le interesa, pero aún tiene otras prioridades."),
+                       ("1","6 o menos: No está realmente comprometido.")]}
+}
+
+VENTA_MAP = {0: "Sin venta", 1: "Venta"}  # ajusta a tu semántica real
+
+def venta_text(v):
+    try:
+        return VENTA_MAP.get(int(v), str(v))
+    except Exception:
+        return str(v)
+
+def viabilidad_label(calif):
+    try:
+        c = int(calif)
+        if c < 20:
+            return ("NO VIABLE", "danger")
+        elif 20 <= c <= 25:
+            return ("REQUIERE AJUSTE", "warning")
+        else:
+            return ("VIABLE", "success")
+    except Exception:
+        return ("", "secondary")
+
+def score_to_label(key, val):
+    opts = (PREGUNTAS_DEF.get(key) or {}).get("opciones", [])
+    for code, label in opts:
+        if str(code) == str(val):
+            return label
+    return ""
+
+app.jinja_env.globals.update(
+    score_to_label=score_to_label,
+    viabilidad_label=viabilidad_label,
+    venta_text=venta_text
+)
+
+
 #--- SECCION DE HELPERS
 
 # Filtro para formatear moneda MXN en Jinja (SIN CAMBIOS)
@@ -1019,8 +1101,8 @@ def postventa_diagnostico():
             v = request.form.get(k)
             if v not in {"1", "2", "3"}:
                 return render_template("postventa_diagnostico_form.html",
-                                       preguntas=preguntas,
-                                       error=f"Falta o es inválido el campo {k} (1, 2 o 3)")
+                               preguntas=PREGUNTAS_DEF,
+                               error=f"Falta o es inválido el campo {k} (1, 2 o 3)")
             vals[k] = int(v)
 
         try:
@@ -1055,21 +1137,54 @@ def postventa_diagnostico():
         return redirect(url_for("postventa_diagnostico_list"))
 
     # GET
-    return render_template("postventa_diagnostico_form.html", preguntas=preguntas)
+    return render_template("postventa_diagnostico_form.html", preguntas=PREGUNTAS_DEF)
 
 
 @app.route("/postventa/diagnostico/list")
 @role_required("postventa", "admin")
 def postventa_diagnostico_list():
-    q = f"""
-      SELECT ID, FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO
-      FROM `{POSTVENTA_TABLA_BASE}`
-      ORDER BY FECHA DESC
+    q = """
+      SELECT
+        ID_ENCUESTA, FECHA_ENCUESTA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO,
+        R1, R1_DESC, R2, R2_DESC, R3, R3_DESC, R4, R4_DESC, R5, R5_DESC,
+        R6, R6_DESC, R7, R7_DESC, R8, R8_DESC, R9, R9_DESC, R10, R10_DESC, R11, R11_DESC,
+        ESTATUS_VIABLE
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+      ORDER BY FECHA_ENCUESTA DESC
       LIMIT 500
     """
     rows = list(client.query(q))
     data = [dict(r) for r in rows]
     return render_template("postventa_diagnostico_list.html", data=data)
+
+@app.route("/postventa/insights")
+@role_required("postventa", "admin")  # ← permite admin también
+def postventa_insights():
+    # KPIs rápidos
+    q = f"""
+      SELECT
+        COUNT(*) AS total,
+        AVG(CALIFICACION) AS calif_prom,
+        SUM(CASE WHEN CALIFICACION < 20 THEN 1 ELSE 0 END) AS no_viable,
+        SUM(CASE WHEN CALIFICACION BETWEEN 20 AND 25 THEN 1 ELSE 0 END) AS requiere_ajuste,
+        SUM(CASE WHEN CALIFICACION > 25 THEN 1 ELSE 0 END) AS viable
+      FROM `{POSTVENTA_TABLA_BASE}`
+    """
+    rows = list(client.query(q))
+    kpis = dict(rows[0]) if rows else {
+        "total": 0, "calif_prom": None, "no_viable": 0, "requiere_ajuste": 0, "viable": 0
+    }
+
+    # Últimos registros
+    q2 = f"""
+      SELECT ID, FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO
+      FROM `{POSTVENTA_TABLA_BASE}`
+      ORDER BY FECHA DESC
+      LIMIT 20
+    """
+    ultimos = [dict(r) for r in client.query(q2)]
+
+    return render_template("postventa/insights.html", kpis=kpis, ultimos=ultimos)
 
 
 # -------------------- Comunidad: Lista y Panel --------------------

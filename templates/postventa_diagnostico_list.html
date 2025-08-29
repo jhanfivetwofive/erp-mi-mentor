@@ -12,24 +12,50 @@
         <table id="tablaDiag" class="table table-striped table-hover align-middle" style="width:100%">
           <thead>
             <tr>
-              <th>ID</th><th>Fecha</th><th>Nombre</th><th>Generación</th>
-              <th>Calificación</th><th>Estatus</th><th>Teléfono</th><th>Correo</th><th>Acciones</th>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Nombre</th>
+              <th>Generación</th>
+              <th>Calificación</th>
+              <th>Viabilidad</th>
+              <th>Estatus Venta</th>
+              <th>Teléfono</th>
+              <th>Correo</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {% for r in data %}
+              {% set vtxt, vcolor = viabilidad_label(r.CALIFICACION) %}
               <tr>
                 <td>{{ r.ID }}</td>
                 <td>{{ r.FECHA }}</td>
                 <td>{{ r.NOMBRE }}</td>
                 <td>{{ r.GENERACION }}</td>
-                <td>{{ r.CALIFICACION }}</td>
-                <td>{{ r.ESTATUS_VENTA }}</td>
+                <td class="fw-bold">{{ r.CALIFICACION }}</td>
+                <td>
+                  {% if vtxt %}
+                    <span class="badge bg-{{ vcolor }}">{{ vtxt }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ venta_text(r.ESTATUS_VENTA) }}</td>
                 <td>{{ r.TELEFONO }}</td>
                 <td>{{ r.CORREO }}</td>
-                <td>
+                <td class="d-flex gap-1">
+                  {# WhatsApp #}
                   {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '') ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
                   <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">WhatsApp</a>
+
+                  {# Ver respuestas → Modal. Cargo la fila completa como JSON en data-attrs #}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary btn-ver"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modalRespuestas"
+                    data-reg='{{ r|tojson|safe }}'
+                  >
+                    Ver respuestas
+                  </button>
                 </td>
               </tr>
             {% endfor %}
@@ -39,11 +65,95 @@
     </div>
   </div>
 </div>
+
+{# Modal para mostrar respuestas #}
+<div class="modal fade" id="modalRespuestas" tabindex="-1" aria-labelledby="modalRespuestasLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalRespuestasLabel">Respuestas del diagnóstico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="respMeta" class="mb-3 small text-muted"></div>
+        <div id="respGrid" class="row row-cols-1 row-cols-md-2 g-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
+  // PREGUNTAS_DEF viene del backend
+  const PREGUNTAS_DEF = {{ preguntas|tojson }};
+
+  function scoreLabel(key, val) {
+    const def = PREGUNTAS_DEF[key];
+    if (!def) return '';
+    const found = (def.opciones || []).find(o => String(o[0]) === String(val));
+    return found ? found[1] : '';
+  }
+
   document.addEventListener('DOMContentLoaded', function(){
+    // DataTable con botones (si cargaste Buttons en base.html)
     if (window.jQuery && $("#tablaDiag").DataTable) {
-      $("#tablaDiag").DataTable({ pageLength: 25, order: [[1, 'desc']], stateSave: true });
+      $("#tablaDiag").DataTable({
+        pageLength: 25,
+        order: [[1, 'desc']],
+        stateSave: true,
+        dom: 'Bfrtip',
+        buttons: [
+          {extend:'excelHtml5', title:'diagnostico_postventa'},
+          {extend:'csvHtml5', title:'diagnostico_postventa'},
+          'print'
+        ]
+      });
     }
+
+    // Arma el modal al hacer clic en "Ver respuestas"
+    const modalEl = document.getElementById('modalRespuestas');
+    modalEl.addEventListener('show.bs.modal', function (ev) {
+      const btn = ev.relatedTarget;
+      const raw = btn?.getAttribute('data-reg');
+      if (!raw) return;
+      const r = JSON.parse(raw);
+
+      // Meta
+      const meta = `
+        <div><strong>ID:</strong> ${r.ID} · <strong>Fecha:</strong> ${r.FECHA || ''}</div>
+        <div><strong>Nombre:</strong> ${r.NOMBRE || ''} · <strong>Generación:</strong> ${r.GENERACION || ''}</div>
+        <div><strong>Calificación:</strong> ${r.CALIFICACION ?? ''} · <strong>Estatus venta:</strong> ${r.ESTATUS_VENTA ?? ''}</div>
+        <div><strong>Correo:</strong> ${r.CORREO || ''} · <strong>Teléfono:</strong> ${r.TELEFONO || ''}</div>
+      `;
+      document.getElementById('respMeta').innerHTML = meta;
+
+      // Grid de preguntas
+      const grid = document.getElementById('respGrid');
+      grid.innerHTML = '';
+      // Orden fijo R1..R11
+      const keys = ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10","R11"];
+      for (const k of keys) {
+        const val = r[k];
+        const txt = (PREGUNTAS_DEF[k] || {}).texto || k;
+        const lab = scoreLabel(k, val);
+        const card = document.createElement('div');
+        card.className = 'col';
+        card.innerHTML = `
+          <div class="card h-100">
+            <div class="card-header"><strong>${txt}</strong> <span class="badge bg-secondary ms-2">${k}</span></div>
+            <div class="card-body">
+              <div class="mb-2">
+                <span class="badge bg-primary me-2">${val ?? ''}</span>
+                <span>${lab}</span>
+              </div>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      }
+    });
   });
 </script>
 {% endblock %}

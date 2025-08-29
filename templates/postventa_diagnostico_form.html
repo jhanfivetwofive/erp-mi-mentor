@@ -38,25 +38,29 @@
           <hr>
         </div>
 
-        {% for key, texto in preguntas.items() %}
-        <div class="col-12">
-          <label class="form-label fw-semibold">{{ texto }}</label>
-          <div class="d-flex gap-3 align-items-center flex-wrap">
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_3" value="3" required>
-              <label class="form-check-label" for="{{ key }}_3">3</label>
+        {% for key, q in preguntas.items() %}
+        <div class="card mb-3">
+            <div class="card-header">
+            <strong>{{ q.texto }}</strong> <span class="badge bg-secondary">{{ key }}</span>
             </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_2" value="2">
-              <label class="form-check-label" for="{{ key }}_2">2</label>
+            <div class="card-body">
+            <div class="row row-cols-1 row-cols-md-3 g-3">
+                {% for val, label in q.opciones %}
+                <div class="col">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_{{ val }}" value="{{ val }}" required
+                        {% if request.form.get(key) == val %}checked{% endif %}>
+                    <label class="form-check-label" for="{{ key }}_{{ val }}">
+                    <span class="fw-semibold">{{ val }}</span> – {{ label }}
+                    </label>
+                </div>
+                </div>
+                {% endfor %}
             </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_1" value="1">
-              <label class="form-check-label" for="{{ key }}_1">1</label>
             </div>
-          </div>
         </div>
         {% endfor %}
+
 
         <div class="col-12 d-flex gap-2 mt-3">
           <button type="submit" class="btn btn-success">Guardar</button>
