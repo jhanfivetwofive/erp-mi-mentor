@@ -1,10 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="mt-4">
-  <h4 class="mb-3">Dashboard</h4>
-  <p>Bienvenido. Usa el menú para navegar.</p>
-  <a class="btn btn-primary btn-sm" href="{{ url_for('alumnos_page') }}">Ir a Alumnos</a>
-  <a class="btn btn-success btn-sm" href="{{ url_for('postventa_diagnostico_list') }}">Diagnósticos</a>
-</div>
+<h2>Dashboard</h2>
+<p>Bienvenido{{ session.user and (", " ~ session.user.nombre) or "" }}.</p>
 {% endblock %}
