@@ -6,8 +6,10 @@ WORKDIR /app
 
 # Copia los archivos de tu proyecto al contenedor
 COPY . /app
-COPY templates/ /app/templates/
-COPY static/ /app/static/
+COPY main.py .
+COPY templates/ templates/
+COPY static/ static/
+
 
 
 # Instala las dependencias de tu aplicación

@@ -339,6 +339,26 @@ def _postventa_next_id() -> str:
 
 app.jinja_env.filters["mxn"] = mxn
 app.jinja_env.globals.update(to_whatsapp_e164=to_whatsapp_e164)
+app.jinja_env.globals.update(PREGUNTAS_DEF=PREGUNTAS_DEF)
+
+# --- KPIs Postventa ---
+def _postventa_kpis():
+    q = """
+      SELECT
+        COUNT(1) AS total,
+        COUNTIF(ESTATUS_VENTA = 1) AS ventas,
+        COUNTIF(ESTATUS_VIABLE = 'VIABLE') AS viables,
+        COUNTIF(ESTATUS_VIABLE = 'REQUIERE AJUSTE') AS requiere_ajuste,
+        COUNTIF(ESTATUS_VIABLE = 'NO VIABLE') AS no_viable
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+    """
+    try:
+        row = next(iter(client.query(q).result()))
+        return {k: int(row[k] or 0) for k in
+                ("total","ventas","viables","requiere_ajuste","no_viable")}
+    except Exception:
+        return {"total": 0, "ventas": 0, "viables": 0,
+                "requiere_ajuste": 0, "no_viable": 0}
 
 # =========================================================
 # 4) Rutas
@@ -377,7 +397,9 @@ def comunidad_insights():
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
 def postventa_insights():
-    return render_template("postventa/insights.html")
+    kpis = _postventa_kpis()
+    return render_template("postventa/insights.html", kpis=kpis)
+
 
 
 # --- Login Firebase: GET (pantalla)
@@ -1175,7 +1197,8 @@ def postventa_diagnostico_list():
     """
     rows = list(client.query(q))
     data = [dict(r) for r in rows]
-    return render_template("postventa_diagnostico_list.html", data=data)
+    return render_template("postventa_diagnostico_list.html",
+                           data=data, preguntas=PREGUNTAS_DEF)
 
 # -------------------- Comunidad: Lista y Panel --------------------
 
