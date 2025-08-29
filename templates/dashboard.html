@@ -1,5 +1,0 @@
-{% extends "base.html" %}
-{% block content %}
-<h2>Dashboard</h2>
-<p>Bienvenido{{ session.user and (", " ~ session.user.nombre) or "" }}.</p>
-{% endblock %}

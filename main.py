@@ -368,7 +368,7 @@ def _postventa_kpis():
 @app.route("/")
 def home():
     if "user" in session:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("alumnos.html"))
     return redirect(url_for("login_firebase_page"))
 
 
@@ -381,7 +381,7 @@ def __health():
 @login_required
 def dashboard():
     # Puedes mostrar tarjetas según rol
-    return render_template("dashboard.html")
+    return render_template("alumnos.html")
 
 # --- Comunidad (ya trabajando)
 
@@ -1187,7 +1187,7 @@ def postventa_diagnostico():
 def postventa_diagnostico_list():
     q = """
       SELECT
-        ID_ENCUESTA, FECHA_ENCUESTA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO,
+        ID_ENCUESTA AS ID, FECHA_ENCUESTA AS FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO,
         R1, R1_DESC, R2, R2_DESC, R3, R3_DESC, R4, R4_DESC, R5, R5_DESC,
         R6, R6_DESC, R7, R7_DESC, R8, R8_DESC, R9, R9_DESC, R10, R10_DESC, R11, R11_DESC,
         ESTATUS_VIABLE
@@ -1197,6 +1197,13 @@ def postventa_diagnostico_list():
     """
     rows = list(client.query(q))
     data = [dict(r) for r in rows]
+
+     # Opcional: dejar FECHA amigable
+    for d in data:
+        f = d.get("FECHA")
+        if isinstance(f, datetime):
+            d["FECHA"] = f.strftime("%Y-%m-%d %H:%M")
+            
     return render_template("postventa_diagnostico_list.html",
                            data=data, preguntas=PREGUNTAS_DEF)
 
