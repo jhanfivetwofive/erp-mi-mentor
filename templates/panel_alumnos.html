@@ -46,6 +46,11 @@
           <input type="text" class="form-control text-end" value="{{ alumno_info.INGRESO | mxn }}" disabled>
         </div>
         <div class="col-md-6 mb-3">
+          <label class="form-label">Saldo (Ingreso − Gasto)</label>
+          <input type="text" class="form-control text-end"
+                value="{{ ((alumno_info.INGRESO or 0) - (alumno_info.GASTO or 0)) | mxn }}" disabled>
+        </div>
+        <div class="col-md-6 mb-3">
           <label class="form-label">Programas</label>
           <div>
             {% set programas = (alumno_info.PROGRAMA or '') %}
