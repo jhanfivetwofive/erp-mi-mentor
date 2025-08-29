@@ -58,6 +58,11 @@ const headersAmigables = {
     "FUENTE": "Fuente"
 };
 
+// 👉 Formateador MXN (es-MX)
+const mxnFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+// Campos que van como moneda
+const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO"]);  
+
 function cargarAlumnos(filtros = {}) {
     $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando alumnos...</div>');
 
@@ -80,13 +85,26 @@ function cargarAlumnos(filtros = {}) {
                 tbody += '<tr>';
                 columnas.forEach(col => {
                     let valor = row[col] ?? '';
+
+                    // Formato fecha yyyy-mm-dd (si aplica)
                     if (col.includes("FECHA") && valor) {
                         let fecha = new Date(valor);
                         if (!isNaN(fecha)) {
                             valor = fecha.toISOString().split('T')[0];
                         }
                     }
-                    tbody += `<td>${valor}</td>`;
+                    // 👉 Formato moneda MXN (y orden numérico correcto)
+                    if (currencyFields.has(col)) {
+                        const num = Number(row[col]);
+                        if (!isNaN(num)) {
+                            const pretty = mxnFmt.format(num);
+                            tbody += `<td class="text-end" data-order="${num}">${pretty}</td>`;
+                        } else {
+                            tbody += `<td class="text-end" data-order=""> </td>`;
+                        }
+                    } else {
+                        tbody += `<td>${valor}</td>`;
+                    }
                 });
                 tbody += `<td><a href="/alumno/${row.CORREO}" class="btn btn-info btn-sm"><i class="bi bi-person-lines-fill"></i> Ver Panel</a></td>`;
                 tbody += '</tr>';

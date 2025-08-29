@@ -332,6 +332,11 @@ def api_alumnos():
     df = client.query(query, job_config=job_config).to_dataframe()
     df = df.convert_dtypes()
 
+    # Asegurar numérico para MXN
+    for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64")
+
     # Convertir fechas de manera segura
     for col in df.select_dtypes(include=["datetime64[ns]", "object"]).columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
