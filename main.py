@@ -7,10 +7,11 @@ from pandas.api.types import is_numeric_dtype
 import time
 import json
 from functools import wraps
+from jinja2 import TemplateNotFound
 # from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
-# opcional, si generarás hashes también
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash
 from firebase_admin import credentials, auth
 import firebase_admin
@@ -20,11 +21,29 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import re
 import urllib.parse
+import traceback
+from flask import Response, request
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
 # =========================================================
 app = Flask(__name__)
+
+
+@app.errorhandler(Exception)
+def _handle_any_exc(e):
+    app.logger.exception("Unhandled exception on %s", request.path)
+    if isinstance(e, HTTPException):
+        # Respeta el código HTTP original para errores conocidos
+        return e
+    if request.args.get("debug") == "1":
+        import traceback
+        tb = traceback.format_exc()
+        return Response(f"<h3>Excepción:</h3><pre>{tb}</pre>", status=500, mimetype="text/html")
+    try:
+        return render_template("error_500.html", msg=str(e)), 500
+    except Exception:
+        return Response("Error interno del servidor", status=500, mimetype="text/plain")
 
 
 def load_secret(project_id: str, name: str, version: str = "latest") -> str:
@@ -146,16 +165,104 @@ client = bigquery.Client()
 # =========================================================
 # 3) Constantes de vistas / filtros
 # =========================================================
-# Vista de alumnos
+# ---- Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
-# Vista de comunidad consolidada de alumnos
+# ---- Vista de comunidad consolidada de alumnos
 COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
-# Vista de usuarios
+# ---- Vista de usuarios
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
+# ---- Postventa: constantes de tablas ----
+POSTVENTA_TABLA_BASE = "fivetwofive-20.POSTVENTA.DB_DIAGNOSTICO_POSTVENTA"
+
+# ---- Cuestionario Diagnóstico (opciones visibles) ----
+PREGUNTAS_DEF = {
+    "R1":  {"texto": "¿Tienes actualmente alguna fuente de ingreso activa?",
+            "opciones": [("3", "Sí, ingresos estables mensuales."),
+                         ("2", "Sí, pero son variables o inestables."),
+                         ("1", "No tengo ingresos actualmente.")]},
+    "R2":  {"texto": "¿De cuanto son tus ingresos mensuales aproximadamente?",
+            "opciones": [("3", "Más de $30,000 MXN."),
+                         ("2", "Entre $10,000 y $30,000 MXN."),
+                         ("1", "Menos de $10,000 MXN.")]},
+    "R3":  {"texto": "¿Tienes personas que dependan de ti?",
+            "opciones": [("3", "Sí, y compartimos ingresos/responsabilidades."),
+                         ("2", "Mi familia cercana depende de mí."),
+                         ("1", "Aparte de mi familia cercana más personas dependen de mí.")]},
+    "R4":  {"texto": "¿Tu numero de libertad financiera es más, menos o igual de tus ingresos actuales ?",
+            "opciones": [("3", "Mucho menos de lo que ingreso mensualmente"),
+                         ("2", "Igual a lo que ingreso mensualmente"),
+                         ("1", "Mucho más de lo que ingreso mensualmente")]},
+    "R5":  {"texto": "¿Cuánto puedes invertir mensualmente sin afectar tus gastos básicos?",
+            "opciones": [("3", "Más de $5,000 MXN."),
+                         ("2", "Entre $1,000 y $5,000 MXN."),
+                         ("1", "Menos de $1,000 MXN o nada.")]},
+    "R6":  {"texto": "¿Tienes algún ahorro o capital disponible para invertir? ¿y cual sería el monto aproximado?",
+            "opciones": [("3", "Más de $50,000 MXN."),
+                         ("2", "Entre $10,000 y $50,000 MXN."),
+                         ("1", "Menos de $10,000 MXN.")]},
+    "R7":  {"texto": "¿Tienes acceso a financiamiento?",
+            "opciones": [("3", "Sí, y lo ha usado estratégicamente."),
+                         ("2", "Sí, pero aún no lo usa."),
+                         ("1", "No tiene acceso a crédito o lo usa mal.")]},
+    "R8":  {"texto": "¿Tienes alguna deuda activa actualmente?",
+            "opciones": [("3", "No tengo deudas"),
+                         ("2", "Algunas deudas pero manejables."),
+                         ("1", "Muchas deudas o sin control.")]},
+    "R9":  {"texto": "¿Qué tan dispuesto estás a seguir un plan de acción con la guía de mentores?",
+            "opciones": [("3", "Totalmente comprometido y abierto a cambios."),
+                         ("2", "Interesado pero con algunas dudas."),
+                         ("1", "No está seguro o le cuesta seguir procesos.")]},
+    "R10": {"texto": "Si hoy tuvieras una estrategia clara para invertir, ¿te comprometerías a ejecutarla?",
+            "opciones": [("3", "Sí, inmediatamente."),
+                         ("2", "Sí, pero necesita más seguridad."),
+                         ("1", "No está seguro o le falta claridad.")]},
+    "R11": {"texto": "En una escala del 1 al 10, ¿qué tan importante es para ti lograr la libertad financiera?",
+            "opciones": [("3", "9-10: Es su máxima prioridad."),
+                         ("2", "7-8: Le interesa, pero aún tiene otras prioridades."),
+                         ("1", "6 o menos: No está realmente comprometido.")]}
+}
+
+VENTA_MAP = {0: "Sin venta", 1: "Venta"}  # ajusta a tu semántica real
+
+
+def venta_text(v):
+    try:
+        return VENTA_MAP.get(int(v), str(v))
+    except Exception:
+        return str(v)
+
+
+def viabilidad_label(calif):
+    try:
+        c = int(calif)
+        if c < 20:
+            return ("NO VIABLE", "danger")
+        elif 20 <= c <= 25:
+            return ("REQUIERE AJUSTE", "warning")
+        else:
+            return ("VIABLE", "success")
+    except Exception:
+        return ("", "secondary")
+
+
+def score_to_label(key, val):
+    opts = (PREGUNTAS_DEF.get(key) or {}).get("opciones", [])
+    for code, label in opts:
+        if str(code) == str(val):
+            return label
+    return ""
+
+
+app.jinja_env.globals.update(
+    score_to_label=score_to_label,
+    viabilidad_label=viabilidad_label,
+    venta_text=venta_text
+)
+
+
+# --- SECCION DE HELPERS
 
 # Filtro para formatear moneda MXN en Jinja (SIN CAMBIOS)
-
-
 def mxn(value):
     try:
         if value is None or value == "":
@@ -163,8 +270,9 @@ def mxn(value):
         return f"${float(value):,.2f}"
     except Exception:
         return str(value)
-    
+
 # Helper para normalizar el telefono "MX = 52"
+
 
 def to_whatsapp_e164(phone_raw: str, default_cc: str = "52") -> str:
     """Convierte un teléfono a formato para wa.me.
@@ -187,9 +295,70 @@ def to_whatsapp_e164(phone_raw: str, default_cc: str = "52") -> str:
         return default_cc + digits
     return digits
 
+# ---- Normalizadores sencillos ----
+
+
+def _normalize_phone(raw: str) -> str:
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", str(raw))
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _normalize_email(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def _format_generacion(raw: str) -> str:
+    if not raw:
+        return ""
+    m = re.search(r"(\d+)", str(raw))
+    if not m:
+        return ""
+    n = int(m.group(1))
+    if n < 1:
+        return ""
+    return f"G-{n:02d}"
+
+# ---- ID incremental estilo E00001 (simple; suficiente para baja concurrencia) ----
+
+
+def _postventa_next_id() -> str:
+    q = f"""
+      SELECT IFNULL(MAX(num), 0) AS max_id
+      FROM (
+        SELECT SAFE_CAST(REGEXP_EXTRACT(ID, r'\\d+$') AS INT64) AS num
+        FROM `{POSTVENTA_TABLA_BASE}`
+      )
+    """
+    rows = list(client.query(q))
+    nxt = (rows[0]["max_id"] if rows else 0) + 1
+    return f"E{nxt:05d}"
+
 
 
 app.jinja_env.filters["mxn"] = mxn
+app.jinja_env.globals.update(to_whatsapp_e164=to_whatsapp_e164)
+app.jinja_env.globals.update(PREGUNTAS_DEF=PREGUNTAS_DEF)
+
+# --- KPIs Postventa ---
+def _postventa_kpis():
+    q = """
+      SELECT
+        COUNT(1) AS total,
+        COUNTIF(ESTATUS_VENTA = 1) AS ventas,
+        COUNTIF(ESTATUS_VIABLE = 'VIABLE') AS viables,
+        COUNTIF(ESTATUS_VIABLE = 'REQUIERE AJUSTE') AS requiere_ajuste,
+        COUNTIF(ESTATUS_VIABLE = 'NO VIABLE') AS no_viable
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+    """
+    try:
+        row = next(iter(client.query(q).result()))
+        return {k: int(row[k] or 0) for k in
+                ("total","ventas","viables","requiere_ajuste","no_viable")}
+    except Exception:
+        return {"total": 0, "ventas": 0, "viables": 0,
+                "requiere_ajuste": 0, "no_viable": 0}
 
 # =========================================================
 # 4) Rutas
@@ -199,15 +368,20 @@ app.jinja_env.filters["mxn"] = mxn
 @app.route("/")
 def home():
     if "user" in session:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("alumnos_page"))
     return redirect(url_for("login_firebase_page"))
+
+
+@app.route("/__health")
+def __health():
+    return "ok", 200
 
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
     # Puedes mostrar tarjetas según rol
-    return render_template("dashboard.html")
+    return render_template("alumnos_page")
 
 # --- Comunidad (ya trabajando)
 
@@ -221,16 +395,31 @@ def comunidad_insights():
 
 
 @app.route("/postventa/insights")
-@role_required("postventa")
+@role_required("postventa", "admin")
 def postventa_insights():
-    return render_template("postventa/insights.html")
+    #kpis = _postventa_kpis()
+    return redirect(url_for("alumnos_page"))
+    #return render_template("postventa/insights.html", kpis=kpis)
+
+
 
 # --- Login Firebase: GET (pantalla)
 
 
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
-    return render_template("login_firebase.html")
+    try:
+        return render_template("login_firebase.html")
+    except TemplateNotFound:
+        # Fallback minimal para confirmar que la ruta funciona
+        return """
+        <html><body style="font-family: system-ui">
+          <h3>Login Firebase</h3>
+          <p>No se encontró <code>templates/login_firebase.html</code> en la imagen.</p>
+          <p>Verifica el COPY en Dockerfile: <code>COPY templates/ templates/</code></p>
+        </body></html>
+        """, 200
+
 
 # --- Login Firebase: POST (verifica token, guarda sesión)
 
@@ -462,7 +651,8 @@ def get_alumno_info(correo):
         rol = current_user_role()  # ← rol del usuario en sesión
 
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo)]
         )
 
         # ---- 1) Info del alumno (se muestra a todos) ----
@@ -481,7 +671,8 @@ def get_alumno_info(correo):
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             GROUP BY ID_ALUMNO, CORREO
         """
-        result_alumno = client.query(query_alumno, job_config=job_config).result()
+        result_alumno = client.query(
+            query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -539,7 +730,8 @@ def get_alumno_info(correo):
                 FROM base
                 ORDER BY UPDATED_AT DESC
             """
-            result_cursos = client.query(query_cursos, job_config=job_config).result()
+            result_cursos = client.query(
+                query_cursos, job_config=job_config).result()
 
             for row in result_cursos:
                 cursos_info.append({
@@ -565,7 +757,8 @@ def get_alumno_info(correo):
                     if len(nombre) > 38:
                         nombre = nombre[:35] + '…'
                     chart_labels.append(nombre or 'Curso')
-                    chart_values.append(float(r.get('PERCENTAGE_COMPLETED') or 0))
+                    chart_values.append(
+                        float(r.get('PERCENTAGE_COMPLETED') or 0))
             except Exception as e:
                 print("WARN chart data:", e, flush=True)
 
@@ -583,7 +776,7 @@ def get_alumno_info(correo):
             """
             for r in client.query(q_webs, job_config=job_config).result():
                 webinars.append({"webinar_topic": r["webinar_topic"]})
-        
+
         # -------------------------------------------------------
         # ---- 2.9) KPIs de Postventa (solo admin/postventa) ----
         # -------------------------------------------------------
@@ -614,12 +807,11 @@ def get_alumno_info(correo):
                 for r in client.query(q_post, job_config=job_config).result():
                     postventa = dict(r)
                     break
-            
+
             except Exception as e:
                 # Si la vista no existe o está en otra región, no rompemos el panel
                 print("[WARN] Postventa no disponible:", e)
                 postventa = None
-
 
         # -------------------------------------------------
         # 3) Seguimientos → SOLO admin/postventa
@@ -633,7 +825,8 @@ def get_alumno_info(correo):
                 WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
                 ORDER BY FECHA DESC
             """
-            result_seg = client.query(query_seg, job_config=job_config).result()
+            result_seg = client.query(
+                query_seg, job_config=job_config).result()
             for row in result_seg:
                 seguimientos.append({
                     "ID": row["ID"],
@@ -654,18 +847,19 @@ def get_alumno_info(correo):
 
         # Preferimos un teléfono “oficial” si existe en postventa; si no, el del alumno
         if isinstance(postventa, dict):
-            phone_raw = postventa.get("TELEFONO_OFICIAL") or postventa.get("TELEFONO")
+            phone_raw = postventa.get(
+                "TELEFONO_OFICIAL") or postventa.get("TELEFONO")
 
         if not phone_raw and isinstance(alumno_info, dict):
             phone_raw = alumno_info.get("TELEFONO")
 
         e164 = to_whatsapp_e164(phone_raw or "")
         if e164:
-            alumno_nombre = (alumno_info.get("NOMBRE_ALUMNO") if isinstance(alumno_info, dict) else "") or ""
+            alumno_nombre = (alumno_info.get("NOMBRE_ALUMNO")
+                             if isinstance(alumno_info, dict) else "") or ""
             msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?"
-            whatsapp_url = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
-
-
+            whatsapp_url = f"https://wa.me/{e164}?text=" + \
+                urllib.parse.quote(msg)
 
         # -------------------------------------------------
         # 4) Comunidad → SOLO admin/comunidad
@@ -707,7 +901,8 @@ def get_alumno_info(correo):
                         break
                 if raw:
                     parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
-                    webinar_topics = [p.strip() for p in parts if p and p.strip()]
+                    webinar_topics = [p.strip()
+                                      for p in parts if p and p.strip()]
 
             # Fallback de topics solo si rol permite comunidad
             if not webinar_topics and webinars:
@@ -728,7 +923,7 @@ def get_alumno_info(correo):
             chart_labels=chart_labels,        # vacío para postventa
             chart_values=chart_values,        # vacío para postventa
             postventa=postventa,              # vacío para comunidad
-             whatsapp_url=whatsapp_url,       # vacío para postventa
+            whatsapp_url=whatsapp_url,       # vacío para postventa
             rol_usuario=rol
         )
 
@@ -909,6 +1104,109 @@ def api_listar_seguimientos():
             "ESTADO": r["ESTADO"],
         })
     return jsonify(out)
+
+# -------------------- Postventa: Diagnóstico (form + list) --------------------
+
+
+@app.route("/postventa/diagnostico", methods=["GET", "POST"])
+@role_required("postventa", "admin")
+def postventa_diagnostico():
+    preguntas = {
+        "R1":  "¿Tienes actualmente alguna fuente de ingreso activa?",
+        "R2":  "¿De cuanto son tus ingresos mensuales aproximadamente?",
+        "R3":  "¿Tienes personas que dependan de ti?",
+        "R4":  "¿Tu numero de libertad financiera es mas, menos o igual de tus ingresos actuales ?",
+        "R5":  "¿Cuánto puedes invertir mensualmente sin afectar tus gastos básicos?",
+        "R6":  "¿Tienes algún ahorro o capital disponible para invertir? ¿y cual seria el monto aproximado?",
+        "R7":  "¿Tienes acceso a financiamiento?",
+        "R8":  "¿Tienes alguna deuda activa actualmente?",
+        "R9":  "¿Qué tan dispuesto estás a seguir un plan de acción con la guía de mentores?",
+        "R10": "Si hoy tuvieras una estrategia clara para invertir, ¿te comprometerías a ejecutarla?",
+        "R11": "En una escala del 1 al 10, ¿qué tan importante es para ti lograr la libertad financiera?",
+    }
+
+    if request.method == "POST":
+        nombre = (request.form.get("nombre") or "").strip()
+        telefono = _normalize_phone(request.form.get("telefono"))
+        correo = _normalize_email(request.form.get("correo"))
+        generacion = _format_generacion(request.form.get("generacion"))
+        estatus_venta = request.form.get("estatus_venta") or "0"
+
+        # Validación básica
+        if not nombre or not telefono or not correo or not generacion:
+            return render_template("postventa_diagnostico_form.html",
+                                   preguntas=preguntas,
+                                   error="Completa nombre, teléfono, correo y generación.")
+
+        # Scores 1..3
+        vals = {}
+        for k in preguntas.keys():
+            v = request.form.get(k)
+            if v not in {"1", "2", "3"}:
+                return render_template("postventa_diagnostico_form.html",
+                                       preguntas=PREGUNTAS_DEF,
+                                       error=f"Falta o es inválido el campo {k} (1, 2 o 3)")
+            vals[k] = int(v)
+
+        try:
+            estatus_venta = int(estatus_venta)
+        except ValueError:
+            estatus_venta = 0
+
+        nuevo_id = _postventa_next_id()
+        calificacion = sum(vals.values())
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        row = {
+            "ID": nuevo_id,
+            "NOMBRE": nombre,
+            "TELEFONO": telefono,
+            "CORREO": correo,
+            "GENERACION": generacion,
+            "FECHA": now_iso,
+            "R1": vals["R1"], "R2": vals["R2"], "R3": vals["R3"],
+            "R4": vals["R4"], "R5": vals["R5"], "R6": vals["R6"],
+            "R7": vals["R7"], "R8": vals["R8"], "R9": vals["R9"],
+            "R10": vals["R10"], "R11": vals["R11"],
+            "CALIFICACION": calificacion,
+            "ESTATUS_VENTA": estatus_venta,
+        }
+
+        errors = client.insert_rows_json(POSTVENTA_TABLA_BASE, [row])
+        if errors:
+            return render_template("postventa_diagnostico_form.html",
+                                   preguntas=preguntas,
+                                   error=f"Error al guardar en BigQuery: {errors}")
+        return redirect(url_for("postventa_diagnostico_list"))
+
+    # GET
+    return render_template("postventa_diagnostico_form.html", preguntas=PREGUNTAS_DEF)
+
+
+@app.route("/postventa/diagnostico/list")
+@role_required("postventa", "admin")
+def postventa_diagnostico_list():
+    q = """
+      SELECT
+        ID_ENCUESTA AS ID, FECHA_ENCUESTA AS FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO,
+        R1, R1_DESC, R2, R2_DESC, R3, R3_DESC, R4, R4_DESC, R5, R5_DESC,
+        R6, R6_DESC, R7, R7_DESC, R8, R8_DESC, R9, R9_DESC, R10, R10_DESC, R11, R11_DESC,
+        ESTATUS_VIABLE
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+      ORDER BY FECHA_ENCUESTA DESC
+      LIMIT 500
+    """
+    rows = list(client.query(q))
+    data = [dict(r) for r in rows]
+
+     # Opcional: dejar FECHA amigable
+    for d in data:
+        f = d.get("FECHA")
+        if isinstance(f, datetime):
+            d["FECHA"] = f.strftime("%Y-%m-%d %H:%M")
+
+    return render_template("postventa_diagnostico_list.html",
+                           data=data, preguntas=PREGUNTAS_DEF)
 
 # -------------------- Comunidad: Lista y Panel --------------------
 

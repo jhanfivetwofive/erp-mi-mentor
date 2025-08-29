@@ -49,7 +49,7 @@ gcloud run deploy mi-app-dev `
 
 git checkout main
 git pull origin main          # actualiza main
-git merge dev                 # trae cambios de dev a main
+git merge dev --no-edit       # trae cambios de dev a main
 # si hay conflictos: resuélvelos, luego:
 git add .
 git commit -m "Merge dev into main (release prod)"
@@ -64,7 +64,7 @@ gcloud run deploy mi-app-prod `
 3.- regresar a dev
 
 git checkout dev
-git pull origin dev
+git 
 # (opcional) sincronizar dev con lo último de main:
 git merge main
 git push origin dev

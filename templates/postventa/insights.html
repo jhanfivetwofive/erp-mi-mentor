@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-3">Postventa · Insights</h2>
+
+<div class="row g-3">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="text-muted small">Total encuestas</div>
+      <div class="fs-4 fw-bold">{{ kpis.total|default(0) }}</div>
+    </div></div>
+  </div>
+
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="text-muted small">Ventas</div>
+      <div class="fs-4 fw-bold">{{ kpis.ventas|default(0) }}</div>
+    </div></div>
+  </div>
+
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="text-muted small">Viables</div>
+      <div class="fs-4 fw-bold">{{ kpis.viables|default(0) }}</div>
+    </div></div>
+  </div>
+
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="text-muted small">Requiere ajuste</div>
+      <div class="fs-4 fw-bold">{{ kpis.requiere_ajuste|default(0) }}</div>
+    </div></div>
+  </div>
+
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="text-muted small">No viable</div>
+      <div class="fs-4 fw-bold">{{ kpis.no_viable|default(0) }}</div>
+    </div></div>
+  </div>
+</div>
+{% endblock %}
