@@ -7,6 +7,7 @@ from pandas.api.types import is_numeric_dtype
 import time
 import json
 from functools import wraps
+from jinja2 import TemplateNotFound
 # from flask_session import Session
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
@@ -20,11 +21,33 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import re
 import urllib.parse
+import traceback
+from flask import Response, request
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
 # =========================================================
 app = Flask(__name__)
+
+@app.errorhandler(Exception)
+def _handle_any_exc(e):
+    # Si es un HTTPException (404/403/redirect, etc.) deja que Flask lo maneje normal
+    if isinstance(e, HTTPException):
+        return e
+
+    # Log completo
+    app.logger.exception("Unhandled exception on %s", request.path)
+
+    # Traza visible solo con ?debug=1
+    if request.args.get("debug") == "1":
+        tb = traceback.format_exc()
+        return Response(f"<h3>Excepción:</h3><pre>{tb}</pre>", status=500, mimetype="text/html")
+
+    # Fallback normal
+    try:
+        return render_template("error_500.html", msg=str(e)), 500
+    except Exception:
+        return Response("Error interno del servidor", status=500, mimetype="text/plain")
 
 
 def load_secret(project_id: str, name: str, version: str = "latest") -> str:
@@ -234,6 +257,10 @@ def home():
         return redirect(url_for("dashboard"))
     return redirect(url_for("login_firebase_page"))
 
+@app.route("/__health")
+def __health():
+    return "ok", 200
+
 
 @app.route("/dashboard")
 @login_required
@@ -260,9 +287,22 @@ def postventa_insights():
 # --- Login Firebase: GET (pantalla)
 
 
+from jinja2 import TemplateNotFound
+
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
-    return render_template("login_firebase.html")
+    try:
+        return render_template("login_firebase.html")
+    except TemplateNotFound:
+        # Fallback minimal para confirmar que la ruta funciona
+        return """
+        <html><body style="font-family: system-ui">
+          <h3>Login Firebase</h3>
+          <p>No se encontró <code>templates/login_firebase.html</code> en la imagen.</p>
+          <p>Verifica el COPY en Dockerfile: <code>COPY templates/ templates/</code></p>
+        </body></html>
+        """, 200
+
 
 # --- Login Firebase: POST (verifica token, guarda sesión)
 
