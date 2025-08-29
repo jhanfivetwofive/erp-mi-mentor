@@ -368,7 +368,7 @@ def _postventa_kpis():
 @app.route("/")
 def home():
     if "user" in session:
-        return redirect(url_for("alumnos.html"))
+        return redirect(url_for("alumnos_page"))
     return redirect(url_for("login_firebase_page"))
 
 
@@ -381,7 +381,7 @@ def __health():
 @login_required
 def dashboard():
     # Puedes mostrar tarjetas según rol
-    return render_template("alumnos.html")
+    return render_template("alumnos_page")
 
 # --- Comunidad (ya trabajando)
 
@@ -397,8 +397,9 @@ def comunidad_insights():
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
 def postventa_insights():
-    kpis = _postventa_kpis()
-    return render_template("postventa/insights.html", kpis=kpis)
+    #kpis = _postventa_kpis()
+    return redirect(url_for("alumnos_page"))
+    #return render_template("postventa/insights.html", kpis=kpis)
 
 
 
@@ -1203,7 +1204,7 @@ def postventa_diagnostico_list():
         f = d.get("FECHA")
         if isinstance(f, datetime):
             d["FECHA"] = f.strftime("%Y-%m-%d %H:%M")
-            
+
     return render_template("postventa_diagnostico_list.html",
                            data=data, preguntas=PREGUNTAS_DEF)
 
