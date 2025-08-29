@@ -312,7 +312,9 @@ def api_alumnos():
             ID_GENERACION_PROGRAMA,
             GENERACION_PROGRAMA,
             FUENTE,
-            PRECIO_GENERACION
+            PRECIO_GENERACION,
+            GASTO,
+            INGRESO
         FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
         WHERE 1=1
     """
@@ -329,6 +331,11 @@ def api_alumnos():
     job_config = bigquery.QueryJobConfig(query_parameters=params)
     df = client.query(query, job_config=job_config).to_dataframe()
     df = df.convert_dtypes()
+
+    # Asegurar numérico para MXN
+    for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64")
 
     # Convertir fechas de manera segura
     for col in df.select_dtypes(include=["datetime64[ns]", "object"]).columns:
@@ -467,7 +474,9 @@ def get_alumno_info(correo):
               STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
               MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
               MAX(TELEFONO) AS TELEFONO,
-              MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION
+              MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION,
+              MAX(GASTO) AS GASTO,
+              MAX(INGRESO) AS INGRESO
             FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
             WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
             GROUP BY ID_ALUMNO, CORREO
@@ -483,7 +492,9 @@ def get_alumno_info(correo):
                 'TELEFONO': row['TELEFONO'],
                 'FECHA_INSCRIPCION': row['FECHA_INSCRIPCION'],
                 'PROGRAMA': row['PROGRAMA'],
-                'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA']
+                'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA'],
+                'GASTO': row['GASTO'],
+                'INGRESO': row['INGRESO']
             }
             break
 
