@@ -107,6 +107,35 @@
           {# (opcionales) otros roles como 'adquisicion', 'people' aquí... #}
 
         {% endif %}
+        {% if rol in ['admin', 'postventa'] %}
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle {{ 'active' if request.path.startswith('/postventa/') else '' }}"
+              href="#" id="navPostventa" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Postventa
+            </a>
+            <ul class="dropdown-menu" aria-labelledby="navPostventa">
+              <li>
+                <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico') else '' }}"
+                  href="{{ url_for('postventa_diagnostico') }}">
+                  Diagnóstico (nuevo)
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico_list') else '' }}"
+                  href="{{ url_for('postventa_diagnostico_list') }}">
+                  Diagnóstico (listado)
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+                  href="{{ url_for('postventa_insights') }}">
+                  Insights
+                </a>
+              </li>
+            </ul>
+          </li>
+        {% endif %}
+
       </ul>
 
       <!-- Menú derecho -->

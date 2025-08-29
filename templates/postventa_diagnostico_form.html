@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Diagnóstico Postventa{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="card shadow-sm">
+    <div class="card-header bg-success text-white d-flex align-items-center">
+      <h5 class="mb-0">Diagnóstico Postventa</h5>
+      <span class="ms-auto">Calificación: <strong id="scoreTotal">0</strong></span>
+    </div>
+    <div class="card-body">
+      {% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+      <form method="post" class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">¿Cuál es tu nombre completo?</label>
+          <input name="nombre" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">¿Cuál es tu Teléfono/Celular?</label>
+          <input name="telefono" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">¿Cuál es tu Correo?</label>
+          <input name="correo" type="email" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Número de Generación</label>
+          <input name="generacion" class="form-control" placeholder="ej. 3 o G-03" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Estatus de Venta</label>
+          <select name="estatus_venta" class="form-select">
+            <option value="0">0 — En proceso / No compra</option>
+            <option value="1">1 — Compra / Cierre</option>
+          </select>
+        </div>
+
+        <div class="col-12">
+          <hr>
+        </div>
+
+        {% for key, texto in preguntas.items() %}
+        <div class="col-12">
+          <label class="form-label fw-semibold">{{ texto }}</label>
+          <div class="d-flex gap-3 align-items-center flex-wrap">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_3" value="3" required>
+              <label class="form-check-label" for="{{ key }}_3">3</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_2" value="2">
+              <label class="form-check-label" for="{{ key }}_2">2</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_1" value="1">
+              <label class="form-check-label" for="{{ key }}_1">1</label>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+
+        <div class="col-12 d-flex gap-2 mt-3">
+          <button type="submit" class="btn btn-success">Guardar</button>
+          <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">Ver listado</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  function updateScore() {
+    let total = 0;
+    document.querySelectorAll('input[type=radio]:checked').forEach(r => {
+      const v = parseInt(r.value, 10);
+      if ([1, 2, 3].includes(v)) total += v;
+    });
+    document.getElementById('scoreTotal').textContent = total;
+  }
+  document.querySelectorAll('input[type=radio]').forEach(r => r.addEventListener('change', updateScore));
+</script>
+{% endblock %}

@@ -146,16 +146,18 @@ client = bigquery.Client()
 # =========================================================
 # 3) Constantes de vistas / filtros
 # =========================================================
-# Vista de alumnos
+# ---- Vista de alumnos
 BQ_VIEW = "fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL"
-# Vista de comunidad consolidada de alumnos
+# ---- Vista de comunidad consolidada de alumnos
 COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
-# Vista de usuarios
+# ---- Vista de usuarios
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
+# ---- Postventa: constantes de tablas ----
+POSTVENTA_TABLA_BASE = "fivetwofive-20.POSTVENTA.DB_DIAGNOSTICO_POSTVENTA"
+
+#--- SECCION DE HELPERS
 
 # Filtro para formatear moneda MXN en Jinja (SIN CAMBIOS)
-
-
 def mxn(value):
     try:
         if value is None or value == "":
@@ -165,7 +167,6 @@ def mxn(value):
         return str(value)
     
 # Helper para normalizar el telefono "MX = 52"
-
 def to_whatsapp_e164(phone_raw: str, default_cc: str = "52") -> str:
     """Convierte un teléfono a formato para wa.me.
     - Deja solo dígitos
@@ -187,9 +188,40 @@ def to_whatsapp_e164(phone_raw: str, default_cc: str = "52") -> str:
         return default_cc + digits
     return digits
 
+# ---- Normalizadores sencillos ----
+def _normalize_phone(raw: str) -> str:
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", str(raw))
+    return digits[-10:] if len(digits) >= 10 else digits
+
+def _normalize_email(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+def _format_generacion(raw: str) -> str:
+    if not raw:
+        return ""
+    m = re.search(r"(\d+)", str(raw))
+    if not m:
+        return ""
+    n = int(m.group(1))
+    if n < 1:
+        return ""
+    return f"G-{n:02d}"
+
+# ---- ID incremental estilo E00001 (simple; suficiente para baja concurrencia) ----
+def _postventa_next_id() -> str:
+    q = f"""
+      SELECT IFNULL(MAX(CAST(SUBSTR(ID, 2) AS INT64)), 0) AS max_id
+      FROM `{POSTVENTA_TABLA_BASE}`
+    """
+    rows = list(client.query(q))
+    nxt = (rows[0]["max_id"] if rows else 0) + 1
+    return f"E{nxt:05d}"
 
 
 app.jinja_env.filters["mxn"] = mxn
+app.jinja_env.globals.update(to_whatsapp_e164=to_whatsapp_e164)
 
 # =========================================================
 # 4) Rutas
@@ -909,6 +941,96 @@ def api_listar_seguimientos():
             "ESTADO": r["ESTADO"],
         })
     return jsonify(out)
+
+# -------------------- Postventa: Diagnóstico (form + list) --------------------
+@app.route("/postventa/diagnostico", methods=["GET", "POST"])
+@role_required("postventa", "admin")
+def postventa_diagnostico():
+    preguntas = {
+        "R1":  "¿Tienes actualmente alguna fuente de ingreso activa?",
+        "R2":  "¿De cuanto son tus ingresos mensuales aproximadamente?",
+        "R3":  "¿Tienes personas que dependan de ti?",
+        "R4":  "¿Tu numero de libertad financiera es mas, menos o igual de tus ingresos actuales ?",
+        "R5":  "¿Cuánto puedes invertir mensualmente sin afectar tus gastos básicos?",
+        "R6":  "¿Tienes algún ahorro o capital disponible para invertir? ¿y cual seria el monto aproximado?",
+        "R7":  "¿Tienes acceso a financiamiento?",
+        "R8":  "¿Tienes alguna deuda activa actualmente?",
+        "R9":  "¿Qué tan dispuesto estás a seguir un plan de acción con la guía de mentores?",
+        "R10": "Si hoy tuvieras una estrategia clara para invertir, ¿te comprometerías a ejecutarla?",
+        "R11": "En una escala del 1 al 10, ¿qué tan importante es para ti lograr la libertad financiera?",
+    }
+
+    if request.method == "POST":
+        nombre = (request.form.get("nombre") or "").strip()
+        telefono = _normalize_phone(request.form.get("telefono"))
+        correo = _normalize_email(request.form.get("correo"))
+        generacion = _format_generacion(request.form.get("generacion"))
+        estatus_venta = request.form.get("estatus_venta") or "0"
+
+        # Validación básica
+        if not nombre or not telefono or not correo or not generacion:
+            return render_template("postventa_diagnostico_form.html",
+                                   preguntas=preguntas,
+                                   error="Completa nombre, teléfono, correo y generación.")
+
+        # Scores 1..3
+        vals = {}
+        for k in preguntas.keys():
+            v = request.form.get(k)
+            if v not in {"1", "2", "3"}:
+                return render_template("postventa_diagnostico_form.html",
+                                       preguntas=preguntas,
+                                       error=f"Falta o es inválido el campo {k} (1, 2 o 3)")
+            vals[k] = int(v)
+
+        try:
+            estatus_venta = int(estatus_venta)
+        except ValueError:
+            estatus_venta = 0
+
+        nuevo_id = _postventa_next_id()
+        calificacion = sum(vals.values())
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        row = {
+            "ID": nuevo_id,
+            "NOMBRE": nombre,
+            "TELEFONO": telefono,
+            "CORREO": correo,
+            "GENERACION": generacion,
+            "FECHA": now_iso,
+            "R1": vals["R1"], "R2": vals["R2"], "R3": vals["R3"],
+            "R4": vals["R4"], "R5": vals["R5"], "R6": vals["R6"],
+            "R7": vals["R7"], "R8": vals["R8"], "R9": vals["R9"],
+            "R10": vals["R10"], "R11": vals["R11"],
+            "CALIFICACION": calificacion,
+            "ESTATUS_VENTA": estatus_venta,
+        }
+
+        errors = client.insert_rows_json(POSTVENTA_TABLA_BASE, [row])
+        if errors:
+            return render_template("postventa_diagnostico_form.html",
+                                   preguntas=preguntas,
+                                   error=f"Error al guardar en BigQuery: {errors}")
+        return redirect(url_for("postventa_diagnostico_list"))
+
+    # GET
+    return render_template("postventa_diagnostico_form.html", preguntas=preguntas)
+
+
+@app.route("/postventa/diagnostico/list")
+@role_required("postventa", "admin")
+def postventa_diagnostico_list():
+    q = f"""
+      SELECT ID, FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO
+      FROM `{POSTVENTA_TABLA_BASE}`
+      ORDER BY FECHA DESC
+      LIMIT 500
+    """
+    rows = list(client.query(q))
+    data = [dict(r) for r in rows]
+    return render_template("postventa_diagnostico_list.html", data=data)
+
 
 # -------------------- Comunidad: Lista y Panel --------------------
 

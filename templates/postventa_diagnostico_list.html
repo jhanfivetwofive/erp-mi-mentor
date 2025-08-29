@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Diagnóstico Postventa — Listado{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="card shadow-sm">
+    <div class="card-header bg-success text-white d-flex align-items-center">
+      <h5 class="mb-0">Registros de Diagnóstico</h5>
+      <a class="btn btn-light btn-sm ms-auto" href="{{ url_for('postventa_diagnostico') }}">Nuevo</a>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table id="tablaDiag" class="table table-striped table-hover align-middle" style="width:100%">
+          <thead>
+            <tr>
+              <th>ID</th><th>Fecha</th><th>Nombre</th><th>Generación</th>
+              <th>Calificación</th><th>Estatus</th><th>Teléfono</th><th>Correo</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in data %}
+              <tr>
+                <td>{{ r.ID }}</td>
+                <td>{{ r.FECHA }}</td>
+                <td>{{ r.NOMBRE }}</td>
+                <td>{{ r.GENERACION }}</td>
+                <td>{{ r.CALIFICACION }}</td>
+                <td>{{ r.ESTATUS_VENTA }}</td>
+                <td>{{ r.TELEFONO }}</td>
+                <td>{{ r.CORREO }}</td>
+                <td>
+                  {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '') ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
+                  <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">WhatsApp</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    if (window.jQuery && $("#tablaDiag").DataTable) {
+      $("#tablaDiag").DataTable({ pageLength: 25, order: [[1, 'desc']], stateSave: true });
+    }
+  });
+</script>
+{% endblock %}
