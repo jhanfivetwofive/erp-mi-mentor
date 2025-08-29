@@ -336,6 +336,7 @@ def _postventa_next_id() -> str:
     return f"E{nxt:05d}"
 
 
+
 app.jinja_env.filters["mxn"] = mxn
 app.jinja_env.globals.update(to_whatsapp_e164=to_whatsapp_e164)
 
@@ -1175,37 +1176,6 @@ def postventa_diagnostico_list():
     rows = list(client.query(q))
     data = [dict(r) for r in rows]
     return render_template("postventa_diagnostico_list.html", data=data)
-
-
-@app.route("/postventa/insights")
-@role_required("postventa", "admin")  # ← permite admin también
-def postventa_insights():
-    # KPIs rápidos
-    q = f"""
-      SELECT
-        COUNT(*) AS total,
-        AVG(CALIFICACION) AS calif_prom,
-        SUM(CASE WHEN CALIFICACION < 20 THEN 1 ELSE 0 END) AS no_viable,
-        SUM(CASE WHEN CALIFICACION BETWEEN 20 AND 25 THEN 1 ELSE 0 END) AS requiere_ajuste,
-        SUM(CASE WHEN CALIFICACION > 25 THEN 1 ELSE 0 END) AS viable
-      FROM `{POSTVENTA_TABLA_BASE}`
-    """
-    rows = list(client.query(q))
-    kpis = dict(rows[0]) if rows else {
-        "total": 0, "calif_prom": None, "no_viable": 0, "requiere_ajuste": 0, "viable": 0
-    }
-
-    # Últimos registros
-    q2 = f"""
-      SELECT ID, FECHA, NOMBRE, GENERACION, CALIFICACION, ESTATUS_VENTA, TELEFONO, CORREO
-      FROM `{POSTVENTA_TABLA_BASE}`
-      ORDER BY FECHA DESC
-      LIMIT 20
-    """
-    ultimos = [dict(r) for r in client.query(q2)]
-
-    return render_template("postventa/insights.html", kpis=kpis, ultimos=ultimos)
-
 
 # -------------------- Comunidad: Lista y Panel --------------------
 
