@@ -37,7 +37,14 @@
           <label class="form-label">Fecha de Inscripción</label>
           <input type="text" class="form-control" value="{{ alumno_info.FECHA_INSCRIPCION|default('') }}" disabled>
         </div>
-
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Gasto</label>
+          <input type="text" class="form-control" value="{{ alumno_info.GASTO|default('') }}" disabled>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Ingreso</label>
+          <input type="text" class="form-control" value="{{ alumno_info.INGRESO|default('') }}" disabled>
+        </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">Programas</label>
           <div>
