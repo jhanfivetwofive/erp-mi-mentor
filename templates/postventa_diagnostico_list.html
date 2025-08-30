@@ -1,72 +1,114 @@
 {% extends "base.html" %}
 {% block title %}Diagnóstico Postventa — Listado{% endblock %}
-{% block content %}
-<div class="container mt-4">
-  <div class="card shadow-sm">
-    <div class="card-header bg-success text-white d-flex align-items-center">
-      <h5 class="mb-0">Registros de Diagnóstico</h5>
-      <a class="btn btn-light btn-sm ms-auto" href="{{ url_for('postventa_diagnostico') }}">Nuevo</a>
-    </div>
-    <div class="card-body">
-      <div class="table-responsive">
-        <table id="tablaDiag" class="table table-striped table-hover align-middle" style="width:100%">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Fecha</th>
-              <th>Nombre</th>
-              <th>Generación</th>
-              <th>Calificación</th>
-              <th>Viabilidad</th>
-              <th>Estatus Venta</th>
-              <th>Teléfono</th>
-              <th>Correo</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in data %}
-              {% set vtxt, vcolor = viabilidad_label(r.CALIFICACION) %}
-              <tr>
-                <td>{{ r.ID }}</td>
-                <td>{{ r.FECHA }}</td>
-                <td>{{ r.NOMBRE }}</td>
-                <td>{{ r.GENERACION }}</td>
-                <td class="fw-bold">{{ r.CALIFICACION }}</td>
-                <td>
-                  {% if vtxt %}
-                    <span class="badge bg-{{ vcolor }}">{{ vtxt }}</span>
-                  {% endif %}
-                </td>
-                <td>{{ venta_text(r.ESTATUS_VENTA) }}</td>
-                <td>{{ r.TELEFONO }}</td>
-                <td>{{ r.CORREO }}</td>
-                <td class="d-flex gap-1">
-                  {# WhatsApp #}
-                  {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '') ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
-                  <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">WhatsApp</a>
 
-                  {# Ver respuestas → Modal. Cargo la fila completa como JSON en data-attrs #}
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-primary btn-ver"
-                    data-bs-toggle="modal"
-                    data-bs-target="#modalRespuestas"
-                    data-reg='{{ r|tojson|safe }}'
-                  >
-                    Ver respuestas
-                  </button>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-header bg-white border-0 py-3">
+    <div class="d-flex align-items-center">
+      <div>
+        <h4 class="mb-0">Registros de Diagnóstico</h4>
+        <small class="text-muted">Listado de capturas con calificación y viabilidad</small>
       </div>
+      <a class="btn btn-success ms-auto" href="{{ url_for('postventa_diagnostico') }}">
+        <i class="bi bi-plus-lg me-1"></i> Nuevo
+      </a>
+    </div>
+  </div>
+
+  <div class="card-body pt-0">
+    <div class="table-responsive">
+      <table id="tablaDiag" class="table table-hover align-middle w-100">
+        <thead class="table-light">
+          <tr>
+            <th style="width:120px;">ID</th>
+            <th style="width:160px;">Fecha</th>
+            <th>Nombre</th>
+            <th style="width:110px;">Generación</th>
+            <th style="width:130px;">Calificación</th>
+            <th style="width:140px;">Viabilidad</th>
+            <th style="width:120px;">Venta</th>
+            <th style="width:130px;">Teléfono</th>
+            <th>Correo</th>
+            <th style="width:170px;">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in data %}
+            {# Viabilidad desde la vista DM (más fiable) #}
+            {% set vtxt = (r.ESTATUS_VIABLE or '') %}
+            {% set vcolor = 'success' if vtxt == 'VIABLE'
+                            else 'warning' if vtxt == 'REQUIERE AJUSTE'
+                            else 'danger' if vtxt == 'NO VIABLE'
+                            else 'secondary' %}
+            {% set es_venta = (r.ESTATUS_VENTA or 0)|int %}
+            {% set fecha = r.FECHA_ENCUESTA %}
+            <tr>
+              <td class="text-nowrap">
+                <span class="badge bg-light text-dark fw-semibold font-monospace">{{ r.ID_ENCUESTA }}</span>
+              </td>
+              <td class="text-nowrap"
+                  data-order="{{ fecha.isoformat() if fecha }}">
+                {{ fecha.strftime('%Y-%m-%d %H:%M') if fecha }}
+              </td>
+              <td>{{ r.NOMBRE }}</td>
+              <td class="text-nowrap">{{ r.GENERACION }}</td>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <strong>{{ r.CALIFICACION }}</strong>
+                  <div class="progress flex-grow-1" style="height:8px; max-width:120px;">
+                    <div class="progress-bar"
+                         role="progressbar"
+                         style="width: {{ ((r.CALIFICACION or 0) / 33.0 * 100) | round(0) }}%;"></div>
+                  </div>
+                </div>
+              </td>
+              <td>
+                {% if vtxt %}
+                  <span class="badge bg-{{ vcolor }}">{{ vtxt }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge {{ 'bg-success' if es_venta == 1 else 'bg-secondary' }}">
+                  {{ venta_text(r.ESTATUS_VENTA) }}
+                </span>
+              </td>
+              <td class="text-nowrap">
+                {% set t = r.TELEFONO or '' %}
+                {% if t %}
+                  <a href="tel:+52{{ to_whatsapp_e164(t)|replace('52','',1) }}" class="link-underline link-underline-opacity-0">
+                    {{ t }}
+                  </a>
+                {% endif %}
+              </td>
+              <td class="text-nowrap">
+                {% if r.CORREO %}
+                  <a href="mailto:{{ r.CORREO }}" class="link-underline link-underline-opacity-0">{{ r.CORREO }}</a>
+                {% endif %}
+              </td>
+              <td class="text-nowrap d-flex gap-1">
+                {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '') ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
+                <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">
+                  <i class="bi bi-whatsapp me-1"></i> WhatsApp
+                </a>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-primary btn-ver"
+                  data-bs-toggle="modal"
+                  data-bs-target="#modalRespuestas"
+                  data-reg='{{ r|tojson|safe }}'
+                >
+                  <i class="bi bi-card-checklist me-1"></i> Respuestas
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
 
-{# Modal para mostrar respuestas #}
+{# Modal de respuestas #}
 <div class="modal fade" id="modalRespuestas" tabindex="-1" aria-labelledby="modalRespuestasLabel" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -85,34 +127,34 @@
   </div>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
 <script>
-  // PREGUNTAS_DEF viene del backend
-  const PREGUNTAS_DEF = {{ preguntas|tojson }};
-
-  function scoreLabel(key, val) {
-    const def = PREGUNTAS_DEF[key];
-    if (!def) return '';
-    const found = (def.opciones || []).find(o => String(o[0]) === String(val));
-    return found ? found[1] : '';
-  }
-
-  document.addEventListener('DOMContentLoaded', function(){
-    // DataTable con botones (si cargaste Buttons en base.html)
+  document.addEventListener('DOMContentLoaded', function () {
+    // DataTable sin botones de exportación
     if (window.jQuery && $("#tablaDiag").DataTable) {
       $("#tablaDiag").DataTable({
         pageLength: 25,
-        order: [[1, 'desc']],
+        order: [[1, 'desc']],           // por Fecha
         stateSave: true,
-        dom: 'Bfrtip',
-        buttons: [
-          {extend:'excelHtml5', title:'diagnostico_postventa'},
-          {extend:'csvHtml5', title:'diagnostico_postventa'},
-          'print'
-        ]
+        fixedHeader: true,
+        dom: '<"row align-items-center mb-3"<"col-sm-6"l><"col-sm-6 text-end"f>>' +
+             't' +
+             '<"row mt-3"<"col-sm-6"i><"col-sm-6 text-end"p>>',
+        language: {
+          lengthMenu: "Mostrar _MENU_ registros",
+          search: "Buscar:",
+          info: "Mostrando _START_–_END_ de _TOTAL_",
+          infoEmpty: "Sin registros",
+          infoFiltered: "(filtrado de _MAX_ en total)",
+          zeroRecords: "No se encontraron coincidencias",
+          paginate: { previous: "‹", next: "›" }
+        }
       });
     }
 
-    // Arma el modal al hacer clic en "Ver respuestas"
+    // Modal: muestra respuestas usando columnas R1..R11 y R1_DESC..R11_DESC
     const modalEl = document.getElementById('modalRespuestas');
     modalEl.addEventListener('show.bs.modal', function (ev) {
       const btn = ev.relatedTarget;
@@ -120,38 +162,35 @@
       if (!raw) return;
       const r = JSON.parse(raw);
 
-      // Meta
       const meta = `
-        <div><strong>ID:</strong> ${r.ID} · <strong>Fecha:</strong> ${r.FECHA || ''}</div>
-        <div><strong>Nombre:</strong> ${r.NOMBRE || ''} · <strong>Generación:</strong> ${r.GENERACION || ''}</div>
-        <div><strong>Calificación:</strong> ${r.CALIFICACION ?? ''} · <strong>Estatus venta:</strong> ${r.ESTATUS_VENTA ?? ''}</div>
-        <div><strong>Correo:</strong> ${r.CORREO || ''} · <strong>Teléfono:</strong> ${r.TELEFONO || ''}</div>
+        <div><strong>ID:</strong> ${r.ID_ENCUESTA ?? ''} · <strong>Fecha:</strong> ${r.FECHA_ENCUESTA ?? ''}</div>
+        <div><strong>Nombre:</strong> ${r.NOMBRE ?? ''} · <strong>Generación:</strong> ${r.GENERACION ?? ''}</div>
+        <div><strong>Calificación:</strong> ${r.CALIFICACION ?? ''} · <strong>Venta:</strong> ${r.ESTATUS_VENTA ?? ''}</div>
+        <div><strong>Correo:</strong> ${r.CORREO ?? ''} · <strong>Teléfono:</strong> ${r.TELEFONO ?? ''}</div>
       `;
       document.getElementById('respMeta').innerHTML = meta;
 
-      // Grid de preguntas
-      const grid = document.getElementById('respGrid');
-      grid.innerHTML = '';
-      // Orden fijo R1..R11
       const keys = ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10","R11"];
+      const grid = document.getElementById('respGrid');
+      grid.innerHTML = "";
+
       for (const k of keys) {
         const val = r[k];
-        const txt = (PREGUNTAS_DEF[k] || {}).texto || k;
-        const lab = scoreLabel(k, val);
-        const card = document.createElement('div');
-        card.className = 'col';
-        card.innerHTML = `
+        const desc = r[`${k}_DESC`] || "";
+        const col = document.createElement('div');
+        col.className = 'col';
+        col.innerHTML = `
           <div class="card h-100">
-            <div class="card-header"><strong>${txt}</strong> <span class="badge bg-secondary ms-2">${k}</span></div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span><strong>${k}</strong></span>
+              <span class="badge bg-primary">${val ?? ''}</span>
+            </div>
             <div class="card-body">
-              <div class="mb-2">
-                <span class="badge bg-primary me-2">${val ?? ''}</span>
-                <span>${lab}</span>
-              </div>
+              <div>${desc}</div>
             </div>
           </div>
         `;
-        grid.appendChild(card);
+        grid.appendChild(col);
       }
     });
   });
