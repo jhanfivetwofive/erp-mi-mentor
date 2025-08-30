@@ -50,8 +50,12 @@
             <td class="text-nowrap">
               <span class="badge bg-light text-dark fw-semibold font-monospace">{{ id_val }}</span>
             </td>
-            <td class="text-nowrap" data-order="{{ fecha_val.isoformat() if fecha_val }}">
-              {{ fecha_val.strftime('%Y-%m-%d %H:%M') if fecha_val }}
+            {# Resuelve la fecha y pásala a texto YYYY-MM-DD #}
+            {% set raw_fecha = r.FECHA_ENCUESTA or r.FECHA %}
+            {% set fecha_txt = (raw_fecha|string)[:10] %}
+
+            <td class="text-nowrap" data-order="{{ fecha_txt }}">
+              {{ fecha_txt }}
             </td>
             <td>{{ r.NOMBRE }}</td>
             <td class="text-nowrap">{{ r.GENERACION }}</td>
@@ -161,11 +165,11 @@
       if (!raw) return;
       const r = JSON.parse(raw);
       const id = r.ID_ENCUESTA ?? r.ID ?? '';
-      const fecha = r.FECHA_ENCUESTA ?? r.FECHA ?? '';
-
+      const rawFecha = r.FECHA_ENCUESTA ?? r.FECHA ?? '';
+      const fechaTxt = String(rawFecha).slice(0, 10); // YYYY-MM-DD
 
       const meta = `
-        <div><strong>ID:</strong> ${id} · <strong>Fecha:</strong> ${fecha || ''}</div>
+        <div><strong>ID:</strong> ${id} · <strong>Fecha:</strong> ${fechaTxt}</div>
         <div><strong>Nombre:</strong> ${r.NOMBRE ?? ''} · <strong>Generación:</strong> ${r.GENERACION ?? ''}</div>
         <div><strong>Calificación:</strong> ${r.CALIFICACION ?? ''} · <strong>Venta:</strong> ${r.ESTATUS_VENTA ?? ''}</div>
         <div><strong>Correo:</strong> ${r.CORREO ?? ''} · <strong>Teléfono:</strong> ${r.TELEFONO ?? ''}</div>
