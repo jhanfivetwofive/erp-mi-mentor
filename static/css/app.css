@@ -1,0 +1,38 @@
+/* static/css/app.css */
+:root {
+  --radius-xl: 1rem;
+}
+
+body {
+  background: #f7f8fb;
+}
+
+.page-header h2 { letter-spacing: .2px; }
+
+.card-glass {
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 6px 24px rgba(20, 20, 43, .06);
+}
+
+.card-sticky {
+  position: sticky;
+  top: 1rem;
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 6px 24px rgba(20, 20, 43, .06);
+}
+
+.question-block {
+  border-color: #eef0f4 !important;
+}
+
+.legend {
+  display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:.4rem;
+}
+.legend-success { background:#198754; }
+.legend-warning { background:#ffc107; }
+.legend-danger  { background:#dc3545; }
+
+/* Floating labels: mejor contraste */
+.form-floating > label { color: #6c757d; }

@@ -1,84 +1,214 @@
 {% extends "base.html" %}
-{% block title %}Diagnóstico Postventa{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <div class="card shadow-sm">
-    <div class="card-header bg-success text-white d-flex align-items-center">
-      <h5 class="mb-0">Diagnóstico Postventa</h5>
-      <span class="ms-auto">Calificación: <strong id="scoreTotal">0</strong></span>
+
+<div class="py-1">
+  <!-- Encabezado -->
+  <div class="page-header d-flex align-items-center justify-content-between mb-4">
+    <div>
+      <h2 class="mb-1">Diagnóstico Postventa</h2>
+      <div class="text-muted">Captura inicial para evaluar viabilidad y plan de acción</div>
     </div>
-    <div class="card-body">
-      {% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
-      <form method="post" class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label">¿Cuál es tu nombre completo?</label>
-          <input name="nombre" class="form-control" required>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">¿Cuál es tu Teléfono/Celular?</label>
-          <input name="telefono" class="form-control" required>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">¿Cuál es tu Correo?</label>
-          <input name="correo" type="email" class="form-control" required>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Número de Generación</label>
-          <input name="generacion" class="form-control" placeholder="ej. 3 o G-03" required>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Estatus de Venta</label>
-          <select name="estatus_venta" class="form-select">
-            <option value="0">0 — En proceso / No compra</option>
-            <option value="1">1 — Compra / Cierre</option>
-          </select>
-        </div>
-
-        <div class="col-12">
-          <hr>
-        </div>
-
-        {% for key, q in preguntas.items() %}
-        <div class="card mb-3">
-            <div class="card-header">
-            <strong>{{ q.texto }}</strong> <span class="badge bg-secondary">{{ key }}</span>
-            </div>
-            <div class="card-body">
-            <div class="row row-cols-1 row-cols-md-3 g-3">
-                {% for val, label in q.opciones %}
-                <div class="col">
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="{{ key }}" id="{{ key }}_{{ val }}" value="{{ val }}" required
-                        {% if request.form.get(key) == val %}checked{% endif %}>
-                    <label class="form-check-label" for="{{ key }}_{{ val }}">
-                    <span class="fw-semibold">{{ val }}</span> – {{ label }}
-                    </label>
-                </div>
-                </div>
-                {% endfor %}
-            </div>
-            </div>
-        </div>
-        {% endfor %}
-
-
-        <div class="col-12 d-flex gap-2 mt-3">
-          <button type="submit" class="btn btn-success">Guardar</button>
-          <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">Ver listado</a>
-        </div>
-      </form>
-    </div>
+    <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">
+      Ver lista
+    </a>
   </div>
+
+  {% if error %}
+  <div class="alert alert-danger shadow-sm">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST" id="formDiag" novalidate>
+    <div class="row g-4">
+      <!-- Columna izquierda: datos y preguntas -->
+      <div class="col-lg-8">
+        <!-- Card datos del alumno -->
+        <div class="card card-glass mb-4">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Datos del alumno</h5>
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <div class="form-floating">
+                  <input type="text" class="form-control" id="nombre" name="nombre" placeholder="Nombre completo" required>
+                  <label for="nombre">Nombre completo *</label>
+                  <div class="invalid-feedback">Ingresa el nombre</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="form-floating">
+                  <input type="email" class="form-control" id="correo" name="correo" placeholder="correo@dominio.com" required>
+                  <label for="correo">Correo *</label>
+                  <div class="invalid-feedback">Ingresa un correo válido</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Teléfono *</label>
+                <div class="input-group">
+                  <span class="input-group-text">+52</span>
+                  <input type="tel" class="form-control" id="telefono" name="telefono" inputmode="numeric" pattern="\d{10}" placeholder="10 dígitos" required>
+                  <div class="invalid-feedback">Ingresa 10 dígitos</div>
+                </div>
+                <div class="form-text">Solo números, sin espacios</div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="form-floating">
+                  <input type="text" class="form-control" id="generacion" name="generacion" placeholder="G-01" required>
+                  <label for="generacion">Generación (ej. G-01) *</label>
+                  <div class="invalid-feedback">Indica la generación</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Estatus de venta</label>
+                <select class="form-select" name="estatus_venta" id="estatus_venta">
+                  <option value="0" selected>Sin venta</option>
+                  <option value="1">Venta</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card preguntas -->
+        <div class="card card-glass">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Cuestionario</h5>
+
+            <div class="vstack gap-3">
+              {% for key, q in preguntas.items() %}
+              <div class="question-block p-3 rounded-3 border bg-white">
+                <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+                  <label class="fw-semibold" for="{{ key }}">{{ key }}. {{ q.texto }}</label>
+                  <small class="text-muted">
+                    Puntos:
+                    <span class="badge bg-light text-dark" data-score-for="{{ key }}">0</span>
+                  </small>
+                </div>
+
+                <div class="btn-group mt-2" role="group" aria-label="{{ key }}">
+                  {% for val, label in q.opciones %}
+                  <!-- Bootstrap 5 toggle radios -->
+                  <input type="radio" class="btn-check" name="{{ key }}" id="{{ key }}_{{ val }}" value="{{ val }}" autocomplete="off" required>
+                  <label class="btn btn-outline-primary" for="{{ key }}_{{ val }}">{{ label }}</label>
+                  {% endfor %}
+                </div>
+
+                <div class="invalid-feedback d-block" style="display:none" data-invalid-for="{{ key }}">
+                  Selecciona una opción
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Columna derecha: resumen -->
+      <div class="col-lg-4">
+        <div class="card card-sticky">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Resumen</h5>
+
+            <div class="d-flex align-items-center justify-content-between mb-3">
+              <span class="text-muted">Puntaje (0–33)</span>
+              <span class="fs-4 fw-bold" id="scoreTotal">0</span>
+            </div>
+
+            <div class="progress mb-2" style="height: 10px;">
+              <div class="progress-bar" id="scoreBar" role="progressbar" style="width: 0%;"></div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span class="text-muted">Viabilidad</span>
+              <span class="badge bg-secondary" id="viabPill">—</span>
+            </div>
+
+            <ul class="list-unstyled small text-muted mb-4">
+              <li><span class="legend legend-success"></span> Viable: 26 – 33</li>
+              <li><span class="legend legend-warning"></span> Requiere ajuste: 20 – 25</li>
+              <li><span class="legend legend-danger"></span> No viable: &lt; 20</li>
+            </ul>
+
+            <div class="d-grid gap-2">
+              <button type="submit" class="btn btn-primary btn-lg" id="btnGuardar">Guardar diagnóstico</button>
+              <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">Cancelar</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="small text-muted mt-3">
+          * Todos los campos marcados con asterisco son obligatorios.
+        </div>
+      </div>
+    </div>
+  </form>
 </div>
+
+<!-- Scripts de página -->
 <script>
-  function updateScore() {
-    let total = 0;
-    document.querySelectorAll('input[type=radio]:checked').forEach(r => {
-      const v = parseInt(r.value, 10);
-      if ([1, 2, 3].includes(v)) total += v;
-    });
-    document.getElementById('scoreTotal').textContent = total;
+(function () {
+  const form = document.getElementById('formDiag');
+  const scoreTotal = document.getElementById('scoreTotal');
+  const scoreBar = document.getElementById('scoreBar');
+  const viabPill = document.getElementById('viabPill');
+  const btnGuardar = document.getElementById('btnGuardar');
+
+  function calcScore() {
+    let sum = 0, answered = 0;
+    const totalQs = {{ preguntas|length }};
+
+    {% for key, q in preguntas.items() %}
+    const sel_{{ key }} = form.querySelector('input[name="{{ key }}"]:checked');
+    if (sel_{{ key }}) {
+      const val = parseInt(sel_{{ key }}.value);
+      sum += isNaN(val) ? 0 : val;
+      answered++;
+      form.querySelector('[data-score-for="{{ key }}"]').textContent = val || 0;
+      form.querySelector('[data-invalid-for="{{ key }}"]').style.display = 'none';
+    } else {
+      form.querySelector('[data-score-for="{{ key }}"]').textContent = '0';
+    }
+    {% endfor %}
+
+    scoreTotal.textContent = sum;
+    const pct = Math.round((sum / (totalQs * 3)) * 100);
+    scoreBar.style.width = pct + '%';
+
+    // Semáforo (mismo criterio del backend)
+    let label = '—', cls = 'bg-secondary';
+    if (sum < 20) { label = 'NO VIABLE'; cls = 'bg-danger'; }
+    else if (sum <= 25) { label = 'REQUIERE AJUSTE'; cls = 'bg-warning text-dark'; }
+    else { label = 'VIABLE'; cls = 'bg-success'; }
+    viabPill.className = 'badge ' + cls;
+    viabPill.textContent = label;
+
+    // Habilitar guardar solo si todo está contestado y datos requeridos válidos
+    btnGuardar.disabled = !(answered === totalQs && form.checkValidity());
   }
-  document.querySelectorAll('input[type=radio]').forEach(r => r.addEventListener('change', updateScore));
+
+  // Listeners de cambio para preguntas y campos requeridos
+  form.addEventListener('change', calcScore);
+  form.addEventListener('input', calcScore);
+
+  // Validación Bootstrap + mensajes de preguntas
+  form.addEventListener('submit', function (e) {
+    {% for key, q in preguntas.items() %}
+    const sel_{{ key }} = form.querySelector('input[name="{{ key }}"]:checked');
+    form.querySelector('[data-invalid-for="{{ key }}"]').style.display = sel_{{ key }} ? 'none' : 'block';
+    {% endfor %}
+
+    if (!form.checkValidity()) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    form.classList.add('was-validated');
+  });
+
+  // Init
+  calcScore();
+})();
 </script>
+
 {% endblock %}

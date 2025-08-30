@@ -1,113 +1,113 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
-    <meta charset="UTF-8">
-    <title>{% block title %}Mi Mentor de Inversión{% endblock %}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <title>{% block title %}Mi Mentor de Inversión{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <!-- Bootstrap -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- DataTables -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/fixedheader/3.4.0/css/fixedHeader.dataTables.min.css">
+  <!-- DataTables -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/fixedheader/3.4.0/css/fixedHeader.dataTables.min.css">
 
-    <!-- Iconos Bootstrap -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+  <!-- Iconos Bootstrap -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
 
-    <!-- Estilo personalizado -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Estilo personalizado legacy (si lo usas) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
-    <!-- Scripts -->
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+  <!-- Estilos nuevos del app: AL FINAL -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 
-    {% block head %}{% endblock %}
+
+  <!-- Scripts -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+
+  {% block head %}{% endblock %}
 </head>
 
 <body class="bg-light">
 
-{% set current_user = session.get('user') %}
-{% set rol = (current_user or {}).get('rol') %}
+  {% set current_user = session.get('user') %}
+  {% set rol = (current_user or {}).get('rol') %}
 
-{% if current_user %}
-<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
-  <div class="container-fluid">
-    <!-- Brand con logo -->
-    <a class="navbar-brand d-flex align-items-center" href="{{ url_for('alumnos_page') }}">
-      <img
-        src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}"
-        alt="Mi Mentor de Inversión"
-        height="28"
-        class="me-2"
-        style="object-fit:contain"
-      />
-      <span class="fw-semibold">Mi Mentor de Inversión</span>
-    </a>
+  {% if current_user %}
+  <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm sticky-top">
 
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav"
-      aria-controls="topNav" aria-expanded="false" aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
-    </button>
+    <div class="container-fluid">
+      <!-- Brand con logo -->
+      <a class="navbar-brand d-flex align-items-center" href="{{ url_for('alumnos_page') }}">
+        <img src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}" alt="Mi Mentor de Inversión" height="28"
+          class="me-2" style="object-fit:contain" />
+        <span class="fw-semibold">Mi Mentor de Inversión</span>
+      </a>
 
-    <div class="collapse navbar-collapse" id="topNav">
-      {% set user = session.get('user') or {} %}
-      {% set rol  = (user.get('rol') or '')|lower %}
-      {% set path = request.path %}
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav"
+        aria-controls="topNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
 
-      {# -------- Resuelve back_url contextual -------- #}
-      {% set back_url = None %}
-      {% if path.startswith('/comunidad/') %}
+      <div class="collapse navbar-collapse" id="topNav">
+        {% set user = session.get('user') or {} %}
+        {% set rol = (user.get('rol') or '')|lower %}
+        {% set path = request.path %}
+
+        {# -------- Resuelve back_url contextual -------- #}
+        {% set back_url = None %}
+        {% if path.startswith('/comunidad/') %}
         {% set back_url = url_for('comunidad_list') %}
-      {% elif path.startswith('/alumno/') %}
+        {% elif path.startswith('/alumno/') %}
         {% set back_url = url_for('alumnos_page') %}
-      {% elif path.startswith('/catalogo/') %}
+        {% elif path.startswith('/catalogo/') %}
         {% set back_url = url_for('catalogo_programas') %}
-      {% elif path.startswith('/postventa/') %}
+        {% elif path.startswith('/postventa/') %}
         {% set back_url = url_for('postventa_insights') %}
-      {% endif %}
+        {% endif %}
 
-      <!-- Menú izquierdo -->
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        {% if user %}
+        <!-- Menú izquierdo -->
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          {% if user %}
 
           <!-- Botón Atrás siempre que haya contexto -->
           {% if back_url %}
-            <li class="nav-item me-2">
-              <a class="btn btn-outline-secondary btn-sm"
-                href="{{ back_url }}"><i class="bi bi-arrow-left"></i> Atrás</a>
-            </li>
+          <li class="nav-item me-2">
+            <a class="btn btn-outline-secondary btn-sm" href="{{ back_url }}"><i class="bi bi-arrow-left"></i> Atrás</a>
+          </li>
           {% endif %}
 
           {# ===== ADMIN: todo ===== #}
           {% if rol == 'admin' %}
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
-                href="{{ url_for('alumnos_page') }}">Alumnos</a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
-                href="{{ url_for('catalogo_programas') }}">Programas</a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
-                href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
-            </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
+              href="{{ url_for('alumnos_page') }}">Alumnos</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
+              href="{{ url_for('catalogo_programas') }}">Programas</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
+              href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
+          </li>
           {% endif %}
 
           {# (opcionales) otros roles como 'adquisicion', 'people' aquí... #}
 
-        {% endif %}
-        {% if rol in ['admin', 'postventa'] %}
+          {% endif %}
+          {% if rol in ['admin', 'postventa'] %}
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle {{ 'active' if request.path.startswith('/postventa/') else '' }}"
               href="#" id="navPostventa" role="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -134,13 +134,13 @@
               </li>
             </ul>
           </li>
-        {% endif %}
+          {% endif %}
 
-      </ul>
+        </ul>
 
-      <!-- Menú derecho -->
-      <ul class="navbar-nav ms-auto">
-        {% if user %}
+        <!-- Menú derecho -->
+        <ul class="navbar-nav ms-auto">
+          {% if user %}
           <li class="nav-item d-flex align-items-center me-2">
             <span class="navbar-text small text-muted">
               {{ user.get('correo') }} · <strong>{{ rol|title }}</strong>
@@ -149,23 +149,24 @@
           <li class="nav-item">
             <a class="nav-link" href="{{ url_for('logout') }}">Salir</a>
           </li>
-        {% else %}
+          {% else %}
           <li class="nav-item">
             <a class="nav-link {{ 'active' if request.path.startswith(url_for('login_firebase_page')) else '' }}"
               href="{{ url_for('login_firebase_page') }}">Iniciar sesión</a>
           </li>
-        {% endif %}
-      </ul>
+          {% endif %}
+        </ul>
+      </div>
     </div>
-  </div>
-</nav>
-{% endif %}
+  </nav>
+  {% endif %}
 
-<div class="container mt-4">
-  {% block content %}{% endblock %}
-</div>
+  <main class="container-xxl py-4">
+    {% block content %}{% endblock %}
+  </main>
 
-{% block scripts %}{% endblock %}
+
+  {% block scripts %}{% endblock %}
 </body>
 
 </html>
