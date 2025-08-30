@@ -3,12 +3,11 @@
 
 {% block content %}
 
-{# =======================
-   Encabezado (hero)
-   ======================= #}
 {% if not alumno_info %}
   <div class="alert alert-warning">No se encontró información para este alumno.</div>
 {% else %}
+
+  {# ========= HERO ========= #}
   <div class="card shadow-sm mb-4">
     <div class="card-body d-flex flex-wrap align-items-center gap-3 justify-content-between">
       <div class="d-flex align-items-center gap-3">
@@ -31,77 +30,77 @@
       </div>
 
       <div class="d-flex align-items-center gap-2 ms-auto">
+        {% if alumno_info.TELEFONO %}
+          <a class="btn btn-outline-success" href="tel:{{ alumno_info.TELEFONO }}"><i class="bi bi-telephone-outbound me-1"></i>Llamar</a>
+        {% endif %}
+        {% if alumno_info.CORREO %}
+          <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}"><i class="bi bi-envelope-at me-1"></i>Correo</a>
+        {% endif %}
         {% if whatsapp_url %}
           <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
             <i class="bi bi-whatsapp me-1"></i> WhatsApp
           </a>
         {% endif %}
         <a class="btn btn-outline-secondary" href="{{ url_for('alumnos_page') }}">
-          <i class="bi bi-arrow-left me-1"></i> Volver a Alumnos
+          <i class="bi bi-arrow-left me-1"></i> Volver
         </a>
       </div>
     </div>
   </div>
 
-  {# =======================
-     Información adicional (sin duplicados)
-     ======================= #}
+  {# ========= RESUMEN ECONÓMICO ========= #}
+  {% set gasto = alumno_info.GASTO or 0 %}
+  {% set ingreso = alumno_info.INGRESO or 0 %}
+  {% set saldo = ingreso - gasto %}
+  {% set saldo_cls = 'text-success' if saldo>0 else ('text-danger' if saldo<0 else 'text-muted') %}
   <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white d-flex align-items-center">
-      <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Información adicional</h5>
+    <div class="card-header bg-white border-0">
+      <h5 class="mb-0 d-flex align-items-center">
+        <i class="bi bi-graph-up-arrow text-success me-2"></i> Resumen económico
+      </h5>
     </div>
     <div class="card-body">
       <div class="row g-3">
-        {% if alumno_info.ID_ALUMNO %}
-          <div class="col-md-4">
-            <div class="form-floating">
-              <input class="form-control" value="{{ alumno_info.ID_ALUMNO }}" disabled>
-              <label>ID Alumno</label>
-            </div>
-          </div>
-        {% endif %}
-
-        {% if alumno_info.FUENTE %}
-          <div class="col-md-4">
-            <div class="form-floating">
-              <input class="form-control" value="{{ alumno_info.FUENTE }}" disabled>
-              <label>Fuente</label>
-            </div>
-          </div>
-        {% endif %}
-
-        {% if alumno_info.GASTO is not none %}
-          <div class="col-md-4">
-            <div class="form-floating">
-              <input class="form-control text-end" value="{{ alumno_info.GASTO | mxn }}" disabled>
-              <label>Gasto acumulado</label>
-            </div>
-          </div>
-        {% endif %}
-
-        {% if alumno_info.INGRESO is not none %}
-          <div class="col-md-4">
-            <div class="form-floating">
-              <input class="form-control text-end" value="{{ alumno_info.INGRESO | mxn }}" disabled>
-              <label>Ingreso acumulado</label>
-            </div>
-          </div>
-        {% endif %}
-
-        {% set saldo = ((alumno_info.INGRESO or 0) - (alumno_info.GASTO or 0)) %}
         <div class="col-md-4">
-          <div class="form-floating">
-            <input class="form-control text-end" value="{{ saldo | mxn }}" disabled>
-            <label>Saldo (Ingreso − Gasto)</label>
+          <div class="stat-tile h-100">
+            <div class="stat-icon"><i class="bi bi-cash-coin"></i></div>
+            <div class="stat-label">Gasto acumulado</div>
+            <div class="stat-value">{{ gasto | mxn }}</div>
           </div>
         </div>
+        <div class="col-md-4">
+          <div class="stat-tile h-100">
+            <div class="stat-icon"><i class="bi bi-wallet2"></i></div>
+            <div class="stat-label">Ingreso acumulado</div>
+            <div class="stat-value">{{ ingreso | mxn }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stat-tile h-100">
+            <div class="stat-icon"><i class="bi bi-balance-scale"></i></div>
+            <div class="stat-label">Saldo (Ingreso − Gasto)</div>
+            <div class="stat-value {{ saldo_cls }}">{{ saldo | mxn }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
+  {# ========= PARTICIPACIÓN ========= #}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white border-0">
+      <h5 class="mb-0 d-flex align-items-center">
+        <i class="bi bi-people text-success me-2"></i> Participación
+      </h5>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
         <div class="col-12">
-          <label class="form-label">Programas</label>
+          <div class="mb-1 fw-semibold small text-uppercase text-muted">Programas</div>
           <div>
             {% set programas = (alumno_info.PROGRAMA or '') %}
             {% for p in programas.split(', ') if p %}
-              <span class="badge text-bg-success mb-1 me-1">{{ p }}</span>
+              <span class="chip chip-success me-1 mb-1">{{ p }}</span>
             {% else %}
               <span class="text-muted">Sin programas</span>
             {% endfor %}
@@ -109,30 +108,36 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label">Generaciones</label>
+          <div class="mb-1 fw-semibold small text-uppercase text-muted">Generaciones</div>
           <div>
             {% set gens = (alumno_info.GENERACION_PROGRAMA or '') %}
             {% for g in gens.split(', ') if g %}
-              <span class="badge text-bg-secondary mb-1 me-1">{{ g }}</span>
+              <span class="chip chip-secondary me-1 mb-1">{{ g }}</span>
             {% else %}
               <span class="text-muted">Sin generaciones</span>
             {% endfor %}
           </div>
         </div>
+
+        {% if alumno_info.FUENTE %}
+        <div class="col-12">
+          <div class="mt-2 small text-muted">
+            <i class="bi bi-diagram-3 me-1"></i>Fuente: <strong class="text-body">{{ alumno_info.FUENTE }}</strong>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
 
-  {# ============================
-     INSIGHTS DE COMUNIDAD (admin/comunidad)
-     ============================ #}
+  {# ======== INSIGHTS DE COMUNIDAD (admin/comunidad) ======== #}
   {% if rol_usuario|default('', true)|lower in ['admin','comunidad'] %}
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-success text-white d-flex align-items-center">
         <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h4>
       </div>
       <div class="card-body">
-
+        {# ... (tu bloque original de comunidad, igual que antes) ... #}
         <div class="row g-3 mb-3">
           <div class="col-md-3">
             <div class="card shadow-sm h-100">
@@ -144,9 +149,7 @@
                 <small class="text-muted">
                   {% if comunidad %}
                     Cursos: {{ comunidad.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ comunidad.MONTO_INVERTIDO_GALA | mxn }}
-                  {% else %}
-                    Sin datos
-                  {% endif %}
+                  {% else %}Sin datos{% endif %}
                 </small>
               </div>
             </div>
@@ -182,9 +185,7 @@
         <div class="mb-4">
           <h6 class="mb-2">Avance de Cursos</h6>
           {% if chart_labels and chart_labels|length > 0 %}
-            <div style="height: 320px;">
-              <canvas id="chartCursos"></canvas>
-            </div>
+            <div style="height: 320px;"><canvas id="chartCursos"></canvas></div>
             <div class="text-muted small mt-2">Mostrando los {{ chart_labels|length }} cursos con mayor % de avance.</div>
           {% else %}
             <div class="text-muted small">Sin cursos registrados.</div>
@@ -214,9 +215,9 @@
                 <div class="fw-semibold mb-2">Calificaciones Promedio</div>
                 {% if comunidad %}
                   <div class="small">
-                    Expectativas: <strong>{{ comunidad.CALIF_EXPECTATIVAS }}</strong> &nbsp;·&nbsp;
-                    Temas: <strong>{{ comunidad.CALIF_TEMAS }}</strong> &nbsp;·&nbsp;
-                    Contenido: <strong>{{ comunidad.CALIF_CONTENIDO }}</strong> &nbsp;·&nbsp;
+                    Expectativas: <strong>{{ comunidad.CALIF_EXPECTATIVAS }}</strong> ·
+                    Temas: <strong>{{ comunidad.CALIF_TEMAS }}</strong> ·
+                    Contenido: <strong>{{ comunidad.CALIF_CONTENIDO }}</strong> ·
                     Clase: <strong>{{ comunidad.CALIF_CLASE }}</strong>
                   </div>
                 {% else %}
@@ -237,7 +238,6 @@
                     (Total: {{ (comunidad.TOTAL_ASISTENCIA_WEBINAR or webinar_topics|length) if comunidad else (webinar_topics|length) }})
                   </span>
                 </div>
-
                 {% if webinar_topics and (webinar_topics|length > 0) %}
                   <div>
                     {% for t in webinar_topics[:50] %}
@@ -259,9 +259,7 @@
     </div>
   {% endif %}
 
-  {# ============================
-     INSIGHTS DE POSTVENTA (postventa/admin)
-     ============================ #}
+  {# ======== INSIGHTS DE POSTVENTA (postventa/admin) ======== #}
   {% if rol_usuario|default('',true)|lower in ['postventa','admin'] and postventa %}
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-success text-white d-flex align-items-center">
@@ -302,9 +300,7 @@
             <div class="card h-100 shadow-sm">
               <div class="card-body">
                 <div class="fw-semibold">Última compra</div>
-                <div class="fs-5">
-                  {{ (postventa.FECHA_COMPRA_ULTIMA|string)[:10] if postventa.FECHA_COMPRA_ULTIMA else '-' }}
-                </div>
+                <div class="fs-5">{{ (postventa.FECHA_COMPRA_ULTIMA|string)[:10] if postventa.FECHA_COMPRA_ULTIMA else '-' }}</div>
                 <small class="text-muted">
                   INVINF: {{ postventa.GENERACION_INVINF_ULT or '-' }} · MP: {{ postventa.GENERACION_MP_ULT or '-' }}
                 </small>
@@ -323,9 +319,7 @@
     </div>
   {% endif %}
 
-  {# ============================
-     Seguimiento (form) — postventa/admin
-     ============================ #}
+  {# ======== SEGUIMIENTO (form) — postventa/admin ======== #}
   {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-success text-white">
@@ -367,9 +361,7 @@
     </div>
   {% endif %}
 
-  {# ============================
-     Historial de seguimiento — postventa/admin
-     ============================ #}
+  {# ======== HISTORIAL DE SEGUIMIENTO — postventa/admin ======== #}
   {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-success text-white">
@@ -396,9 +388,7 @@
     </div>
   {% endif %}
 
-  {# ============================
-     Kanban — postventa/admin
-     ============================ #}
+  {# ======== KANBAN — postventa/admin ======== #}
   {% if rol_usuario|default('',true)|lower in ['postventa','admin'] %}
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-success text-white">
@@ -430,7 +420,7 @@
     </style>
   {% endif %}
 
-{% endif %} {# /alumno_info #}
+{% endif %}
 
 {% endblock %}
 
@@ -447,10 +437,7 @@
 
     new Chart(el.getContext('2d'), {
       type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [{ label: '% completado', data: values, borderWidth: 1 }]
-      },
+      data: { labels, datasets: [{ label: '% completado', data: values, borderWidth: 1 }] },
       options: {
         indexAxis: 'y',
         responsive: true, maintainAspectRatio: false,
@@ -463,7 +450,7 @@
     });
   })();
 
-  // Guardar seguimiento (postventa/admin)
+  // Guardar seguimiento
   (function () {
     const form = document.getElementById('formSeguimiento');
     if (!form) return;
@@ -505,7 +492,7 @@
     });
   })();
 
-  // Kanban (drag & drop)
+  // Kanban
   (function () {
     const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
     const rol = "{{ rol_usuario|default('',true)|lower }}";
