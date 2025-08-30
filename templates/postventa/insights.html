@@ -1,41 +1,221 @@
 {% extends "base.html" %}
+{% block title %}Insights — Diagnóstico Postventa{% endblock %}
+
+{% block head %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .kpi-card .kpi-value { font-size: clamp(1.5rem, 3.2vw, 2.25rem); font-weight: 700; }
+    .kpi-card .kpi-sub   { color: #6c757d; }
+    .card-glass { backdrop-filter: blur(6px); background: rgba(255,255,255,0.9); }
+    .chart-card canvas { max-height: 320px; }
+    .table-sm td, .table-sm th { padding-top:.4rem; padding-bottom:.4rem; }
+  </style>
+{% endblock %}
+
 {% block content %}
-<h2 class="mb-3">Postventa · Insights</h2>
 
-<div class="row g-3">
-  <div class="col-sm-6 col-lg-3">
-    <div class="card shadow-sm"><div class="card-body">
-      <div class="text-muted small">Total encuestas</div>
-      <div class="fs-4 fw-bold">{{ kpis.total|default(0) }}</div>
-    </div></div>
+<!-- Filtros -->
+<form class="row g-3 align-items-end mb-4" method="get">
+  <div class="col-md-3">
+    <label class="form-label">Desde</label>
+    <input type="date" class="form-control" name="from" value="{{ f_from }}">
   </div>
-
-  <div class="col-sm-6 col-lg-3">
-    <div class="card shadow-sm"><div class="card-body">
-      <div class="text-muted small">Ventas</div>
-      <div class="fs-4 fw-bold">{{ kpis.ventas|default(0) }}</div>
-    </div></div>
+  <div class="col-md-3">
+    <label class="form-label">Hasta</label>
+    <input type="date" class="form-control" name="to" value="{{ f_to }}">
   </div>
-
-  <div class="col-sm-6 col-lg-3">
-    <div class="card shadow-sm"><div class="card-body">
-      <div class="text-muted small">Viables</div>
-      <div class="fs-4 fw-bold">{{ kpis.viables|default(0) }}</div>
-    </div></div>
+  <div class="col-md-3">
+    <label class="form-label">Generación</label>
+    <input type="text" class="form-control" name="gen" placeholder="Ej. G-01" value="{{ f_gen }}">
   </div>
-
-  <div class="col-sm-6 col-lg-3">
-    <div class="card shadow-sm"><div class="card-body">
-      <div class="text-muted small">Requiere ajuste</div>
-      <div class="fs-4 fw-bold">{{ kpis.requiere_ajuste|default(0) }}</div>
-    </div></div>
+  <div class="col-md-3 d-flex gap-2">
+    <button class="btn btn-primary flex-grow-1" type="submit">Aplicar</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('postventa_insights') }}">Limpiar</a>
   </div>
+</form>
 
-  <div class="col-sm-6 col-lg-3">
-    <div class="card shadow-sm"><div class="card-body">
-      <div class="text-muted small">No viable</div>
-      <div class="fs-4 fw-bold">{{ kpis.no_viable|default(0) }}</div>
-    </div></div>
+{% if kpis.total == 0 %}
+  <div class="alert alert-light border">No hay diagnósticos para los filtros seleccionados.</div>
+{% else %}
+
+<!-- KPIs -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card h-100 card-glass">
+      <div class="card-body">
+        <div class="kpi-sub">Diagnósticos</div>
+        <div class="kpi-value">{{ kpis.total }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card h-100 card-glass">
+      <div class="card-body">
+        <div class="kpi-sub">Conversión</div>
+        <div class="kpi-value">{{ '%.1f'|format(kpis.tasa_conversion) }}%</div>
+        <div class="small text-muted">{{ kpis.ventas }} ventas</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card h-100 card-glass">
+      <div class="card-body">
+        <div class="kpi-sub">Viables</div>
+        <div class="kpi-value">{{ '%.1f'|format(kpis.pct_viable) }}%</div>
+        <div class="small text-muted">{{ kpis.viables }} casos</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card h-100 card-glass">
+      <div class="card-body">
+        <div class="kpi-sub">Calificación</div>
+        <div class="kpi-value">
+          {% if kpis.avg_score is not none %}{{ '%.2f'|format(kpis.avg_score) }}{% else %}—{% endif %}
+        </div>
+        <div class="small text-muted">Mediana: {{ kpis.mediana if kpis.mediana is not none else '—' }}</div>
+      </div>
+    </div>
   </div>
 </div>
+
+<!-- Charts -->
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card chart-card h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+          <h6 class="mb-0">Diagnósticos por día</h6>
+        </div>
+        <canvas id="chartByDate" aria-label="Serie diagnósticos por día"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card chart-card h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+          <h6 class="mb-0">Mezcla por viabilidad</h6>
+        </div>
+        <canvas id="chartViab" aria-label="Distribución por viabilidad"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card chart-card h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+          <h6 class="mb-0">Promedio por pregunta (R1–R11)</h6>
+          <small class="text-muted">Escala 1–3</small>
+        </div>
+        <canvas id="chartQs"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card chart-card h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+          <h6 class="mb-0">Conversión por viabilidad</h6>
+          <small class="text-muted">Ventas/Diagnóstico</small>
+        </div>
+        <canvas id="chartConv"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Top generaciones -->
+<div class="card mt-4">
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between">
+      <h6 class="mb-0">Top generaciones por volumen</h6>
+    </div>
+    <div class="table-responsive mt-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>Generación</th>
+            <th class="text-end">Diagnósticos</th>
+            <th class="text-end">Conversión</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in gen_rows %}
+          <tr>
+            <td>{{ r.g }}</td>
+            <td class="text-end">{{ r.n }}</td>
+            <td class="text-end">{{ '%.1f'|format(r.conv) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+<!-- Data p/JS -->
+<script>
+  const BY_DATE_LABELS = {{ by_date_labels|tojson }};
+  const BY_DATE_COUNTS = {{ by_date_counts|tojson }};
+  const VIAB_LABELS    = {{ viability_labels|tojson }};
+  const VIAB_COUNTS    = {{ viability_counts|tojson }};
+  const QS_LABELS      = {{ questions_labels|tojson }};
+  const QS_AVG         = {{ questions_avg|tojson }};
+  const CONV_LABELS    = {{ conv_labels|tojson }};
+  const CONV_RATES     = {{ conv_rates|tojson }};
+
+  function makeChartLine(id, labels, data) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{ label: 'Diagnósticos', data, tension: 0.25 }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true, ticks: { precision:0 } } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function makeChartDoughnut(id, labels, data) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+
+  function makeChartBar(id, labels, data, yTitle='') {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: yTitle, data }] },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  // Render
+  makeChartLine('chartByDate', BY_DATE_LABELS, BY_DATE_COUNTS);
+  makeChartDoughnut('chartViab', VIAB_LABELS, VIAB_COUNTS);
+  makeChartBar('chartQs', QS_LABELS, QS_AVG, 'Promedio');
+  makeChartBar('chartConv', CONV_LABELS, CONV_RATES, '% Conversión');
+</script>
+
 {% endblock %}

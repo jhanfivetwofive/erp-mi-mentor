@@ -360,6 +360,160 @@ def _postventa_kpis():
         return {"total": 0, "ventas": 0, "viables": 0,
                 "requiere_ajuste": 0, "no_viable": 0}
 
+
+def _parse_date(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
+    """
+    Devuelve todas las piezas necesarias para el dashboard de insights.
+    Filtros: date_from/date_to (YYYY-MM-DD) y generacion (ej. 'G-01').
+    """
+    table = "fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA"
+
+    # WHERE dinámico
+    wh = ["1=1"]
+    params = []
+    if date_from:
+        wh.append("DATE(FECHA_ENCUESTA) >= @from")
+        params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+    if date_to:
+        wh.append("DATE(FECHA_ENCUESTA) <= @to")
+        params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+    if generacion:
+        wh.append("GENERACION = @gen")
+        params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
+    where_sql = "WHERE " + " AND ".join(wh)
+
+    # 1) KPIs
+    q_kpis = f"""
+    SELECT
+      COUNT(*)                         AS total,
+      COUNTIF(ESTATUS_VENTA = 1)       AS ventas,
+      COUNTIF(ESTATUS_VIABLE = 'VIABLE') AS viables,
+      COUNTIF(ESTATUS_VIABLE = 'REQUIERE AJUSTE') AS requiere_ajuste,
+      COUNTIF(ESTATUS_VIABLE = 'NO VIABLE') AS no_viable,
+      ROUND(AVG(CALIFICACION),2)       AS avg_score,
+      APPROX_QUANTILES(CALIFICACION, 2)[OFFSET(1)] AS mediana
+    FROM `{table}`
+    {where_sql}
+    """
+    row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()), None)
+    kpis = {
+        "total": int(row["total"]) if row and row["total"] is not None else 0,
+        "ventas": int(row["ventas"]) if row and row["ventas"] is not None else 0,
+        "viables": int(row["viables"]) if row and row["viables"] is not None else 0,
+        "requiere_ajuste": int(row["requiere_ajuste"]) if row and row["requiere_ajuste"] is not None else 0,
+        "no_viable": int(row["no_viable"]) if row and row["no_viable"] is not None else 0,
+        "avg_score": float(row["avg_score"]) if row and row["avg_score"] is not None else None,
+        "mediana": float(row["mediana"]) if row and row["mediana"] is not None else None,
+    }
+    kpis["tasa_conversion"] = round((kpis["ventas"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
+    kpis["pct_viable"] = round((kpis["viables"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
+
+    # 2) Serie temporal (por día)
+    q_series = f"""
+    SELECT DATE(FECHA_ENCUESTA) AS d, COUNT(*) AS n
+    FROM `{table}`
+    {where_sql}
+    GROUP BY d
+    ORDER BY d
+    """
+    by_date_labels, by_date_counts = [], []
+    for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        by_date_labels.append(r["d"].isoformat())
+        by_date_counts.append(int(r["n"]))
+
+    # 3) Mezcla por viabilidad
+    q_viab = f"""
+    SELECT ESTATUS_VIABLE AS v, COUNT(*) AS n
+    FROM `{table}`
+    {where_sql}
+    GROUP BY v
+    """
+    viability_labels, viability_counts = [], []
+    for r in client.query(q_viab, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        viability_labels.append(r["v"] or "—")
+        viability_counts.append(int(r["n"]))
+
+    # 4) Promedio por pregunta R1..R11
+    # Unpivot sencillo con UNION ALL
+    q_qs = f"""
+    WITH base AS (
+      SELECT R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11
+      FROM `{table}`
+      {where_sql}
+    )
+    SELECT k, ROUND(AVG(v),2) AS avg_v
+    FROM (
+      SELECT 'R1'  AS k, R1  AS v FROM base UNION ALL
+      SELECT 'R2', R2 FROM base UNION ALL
+      SELECT 'R3', R3 FROM base UNION ALL
+      SELECT 'R4', R4 FROM base UNION ALL
+      SELECT 'R5', R5 FROM base UNION ALL
+      SELECT 'R6', R6 FROM base UNION ALL
+      SELECT 'R7', R7 FROM base UNION ALL
+      SELECT 'R8', R8 FROM base UNION ALL
+      SELECT 'R9', R9 FROM base UNION ALL
+      SELECT 'R10', R10 FROM base UNION ALL
+      SELECT 'R11', R11 FROM base
+    )
+    GROUP BY k
+    ORDER BY CAST(SUBSTR(k,2) AS INT64)
+    """
+    questions_labels, questions_avg = [], []
+    for r in client.query(q_qs, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        questions_labels.append(r["k"])
+        questions_avg.append(float(r["avg_v"] or 0))
+
+    # 5) Conversión por viabilidad
+    q_conv = f"""
+    SELECT ESTATUS_VIABLE AS v,
+           SAFE_DIVIDE(COUNTIF(ESTATUS_VENTA=1), COUNT(*)) AS conv
+    FROM `{table}`
+    {where_sql}
+    GROUP BY v
+    ORDER BY v
+    """
+    conv_labels, conv_rates = [], []
+    for r in client.query(q_conv, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        conv_labels.append(r["v"] or "—")
+        conv_rates.append(round(float(r["conv"] or 0)*100, 1))
+
+    # 6) Top generaciones
+    q_gens = f"""
+    SELECT GENERACION AS g,
+           COUNT(*) AS n,
+           SAFE_DIVIDE(COUNTIF(ESTATUS_VENTA=1), COUNT(*)) AS conv
+    FROM `{table}`
+    {where_sql}
+    GROUP BY g
+    ORDER BY n DESC
+    LIMIT 10
+    """
+    gen_rows = []
+    for r in client.query(q_gens, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        gen_rows.append({
+            "g": r["g"],
+            "n": int(r["n"]),
+            "conv": round(float(r["conv"] or 0)*100, 1)
+        })
+
+    return {
+        "kpis": kpis,
+        "by_date_labels": by_date_labels, "by_date_counts": by_date_counts,
+        "viability_labels": viability_labels, "viability_counts": viability_counts,
+        "questions_labels": questions_labels, "questions_avg": questions_avg,
+        "conv_labels": conv_labels, "conv_rates": conv_rates,
+        "gen_rows": gen_rows,
+    }
+
+
 # =========================================================
 # 4) Rutas
 # =========================================================
@@ -397,11 +551,27 @@ def comunidad_insights():
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
 def postventa_insights():
-    #kpis = _postventa_kpis()
-    return redirect(url_for("alumnos_page"))
-    #return render_template("postventa/insights.html", kpis=kpis)
+    # Filtros (opcionales)
+    f = request.args.get("from")   # YYYY-MM-DD
+    t = request.args.get("to")     # YYYY-MM-DD
+    g = (request.args.get("gen") or "").strip() or None
 
+    date_from = _parse_date(f)
+    date_to   = _parse_date(t)
 
+    data = _postventa_insights_data(date_from=date_from, date_to=date_to, generacion=g)
+
+    return render_template(
+        "postventa/insights.html",
+        kpis=data["kpis"],
+        by_date_labels=data["by_date_labels"], by_date_counts=data["by_date_counts"],
+        viability_labels=data["viability_labels"], viability_counts=data["viability_counts"],
+        questions_labels=data["questions_labels"], questions_avg=data["questions_avg"],
+        conv_labels=data["conv_labels"], conv_rates=data["conv_rates"],
+        gen_rows=data["gen_rows"],
+        # Para repintar filtros en la vista:
+        f_from=f or "", f_to=t or "", f_gen=g or ""
+    )
 
 # --- Login Firebase: GET (pantalla)
 
