@@ -1,108 +1,195 @@
 {% extends "base.html" %}
-{% block title %}Panel de Alumno - Mi Mentor{% endblock %}
+{% block title %}Panel de Alumno — Mi Mentor{% endblock %}
+
+{% block head %}
+<style>
+  .avatar {
+    width: 56px; height: 56px; border-radius: 50%;
+    display:flex; align-items:center; justify-content:center;
+    background: #e8f3ee; color:#0f5132; font-weight:700; font-size:1.1rem;
+    border: 1px solid #d1e7dd;
+  }
+  .chip { background:#f6f7f9; border:1px solid #e5e7eb; color:#111827; }
+  .kpi-card .label { font-size:.8rem; color:#6b7280; }
+  .kpi-card .value { font-size:1.25rem; font-weight:700; }
+  .timeline { position:relative; margin:0; padding-left:1.25rem; list-style:none; }
+  .timeline::before { content:""; position:absolute; left:.35rem; top:0; bottom:0; width:2px; background:#e5e7eb; }
+  .timeline-item { position:relative; margin-bottom:1rem; }
+  .timeline-item::before {
+    content:""; position:absolute; left:-.15rem; top:.35rem;
+    width:.6rem; height:.6rem; border-radius:50%; background:#198754; border:2px solid #fff; box-shadow:0 0 0 2px #e5e7eb;
+  }
+  .btn-icon { padding:.375rem .5rem; }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="py-1">
 
   {% if not alumno_info %}
     <div class="alert alert-warning">No se encontró información para este alumno.</div>
   {% else %}
 
-  <!-- Información del Alumno (completa) -->
-  <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white d-flex align-items-center">
-      <h4 class="mb-0"><i class="bi bi-person-fill me-2"></i>Información del Alumno</h4>
-      {% if whatsapp_url %}
-        <a class="btn btn-light btn-sm ms-auto d-flex align-items-center"
-          href="{{ whatsapp_url }}" target="_blank" rel="noopener">
-          <i class="bi bi-whatsapp me-1"></i> WhatsApp
-        </a>
-      {% endif %}
-    </div>
-    <div class="card-body">
-      <form class="row">
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Nombre</label>
-          <input type="text" class="form-control" value="{{ alumno_info.NOMBRE_ALUMNO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Correo</label>
-          <input type="email" class="form-control" value="{{ alumno_info.CORREO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Teléfono</label>
-          <input type="text" class="form-control" value="{{ alumno_info.TELEFONO|default('-') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Fecha de Inscripción</label>
-          <input type="text" class="form-control" value="{{ alumno_info.FECHA_INSCRIPCION|default('') }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Gasto</label>
-          <input type="text" class="form-control text-end" value="{{ alumno_info.GASTO | mxn }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Ingreso</label>
-          <input type="text" class="form-control text-end" value="{{ alumno_info.INGRESO | mxn }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Saldo (Ingreso − Gasto)</label>
-          <input type="text" class="form-control text-end"
-                value="{{ ((alumno_info.INGRESO or 0) - (alumno_info.GASTO or 0)) | mxn }}" disabled>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Programas</label>
-          <div>
+  {# =======================
+     Encabezado / Perfil
+     ======================= #}
+  {% set nombre = alumno_info.NOMBRE_ALUMNO or '' %}
+  {% set parts = nombre.split() %}
+  {% set inic = ((parts[0][0] if parts|length>0 else '') ~ (parts[-1][0] if parts|length>1 else ''))|upper %}
+  <div class="card shadow-sm mb-3">
+    <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+      <div class="d-flex align-items-center gap-3">
+        <div class="avatar">{{ inic or '?' }}</div>
+        <div>
+          <h4 class="mb-0">{{ nombre or '—' }}</h4>
+          <div class="small text-muted">
+            <i class="bi bi-envelope me-1"></i>{{ alumno_info.CORREO or '—' }}
+            &nbsp;·&nbsp;
+            <i class="bi bi-telephone me-1"></i>{{ alumno_info.TELEFONO or '—' }}
+          </div>
+          <div class="mt-2">
             {% set programas = (alumno_info.PROGRAMA or '') %}
             {% for p in programas.split(', ') if p %}
-              <span class="badge text-bg-success mb-1 me-1">{{ p }}</span>
-            {% else %}
-              <span class="text-muted">Sin programas</span>
+              <span class="badge chip me-1 mb-1">{{ p }}</span>
             {% endfor %}
-          </div>
-        </div>
-
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Generación Programa</label>
-          <div>
+            {% if not programas %}
+              <span class="text-muted small">Sin programas</span>
+            {% endif %}
             {% set gens = (alumno_info.GENERACION_PROGRAMA or '') %}
             {% for g in gens.split(', ') if g %}
-              <span class="badge text-bg-secondary mb-1 me-1">{{ g }}</span>
-            {% else %}
-              <span class="text-muted">Sin generaciones</span>
+              <span class="badge text-bg-light border me-1 mb-1">{{ g }}</span>
             {% endfor %}
           </div>
         </div>
-      </form>
+      </div>
+
+      <div class="d-flex align-items-center gap-2">
+        {% if whatsapp_url %}
+          <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
+            <i class="bi bi-whatsapp me-1"></i> WhatsApp
+          </a>
+        {% endif %}
+        <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}"><i class="bi bi-envelope"></i></a>
+        <button class="btn btn-outline-secondary btn-icon" id="copyEmail" data-copy="{{ alumno_info.CORREO }}"><i class="bi bi-clipboard"></i></button>
+        <button class="btn btn-outline-secondary btn-icon" id="copyPhone" data-copy="{{ alumno_info.TELEFONO }}"><i class="bi bi-clipboard2"></i></button>
+      </div>
     </div>
   </div>
 
-  {# ============================
-     INSIGHTS DE COMUNIDAD
-     SOLO para admin / comunidad
-     ============================ #}
+  {# =======================
+     KPIs Financieros
+     ======================= #}
+  {% set ingreso = alumno_info.INGRESO or 0 %}
+  {% set gasto   = alumno_info.GASTO   or 0 %}
+  {% set saldo   = (ingreso - gasto) %}
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="card shadow-sm kpi-card h-100">
+        <div class="card-body">
+          <div class="label">Ingreso</div>
+          <div class="value">{{ ingreso | mxn }}</div>
+          <div class="small text-muted">Incluye pagos y abonos</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm kpi-card h-100">
+        <div class="card-body">
+          <div class="label">Gasto</div>
+          <div class="value">{{ gasto | mxn }}</div>
+          <div class="small text-muted">Costos asociados</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm kpi-card h-100">
+        <div class="card-body">
+          <div class="label">Saldo (Ingreso − Gasto)</div>
+          <div class="value">
+            {{ saldo | mxn }}
+            {% if saldo >= 0 %}<i class="bi bi-arrow-up-right text-success"></i>{% else %}<i class="bi bi-arrow-down-right text-danger"></i>{% endif %}
+          </div>
+          <div class="small text-muted">Situación al día</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm kpi-card h-100">
+        <div class="card-body">
+          <div class="label">Última compra</div>
+          <div class="value">
+            {{ (postventa.FECHA_COMPRA_ULTIMA|string)[:10] if postventa and postventa.FECHA_COMPRA_ULTIMA else '-' }}
+          </div>
+          <div class="small text-muted">
+            {% if postventa %}
+              INVINF: {{ postventa.GENERACION_INVINF_ULT or '-' }} · MP: {{ postventa.GENERACION_MP_ULT or '-' }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# =======================
+     Ficha de Datos
+     ======================= #}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Ficha del Alumno</h5>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="form-floating">
+            <input class="form-control" value="{{ alumno_info.NOMBRE_ALUMNO|default('-') }}" disabled>
+            <label>Nombre</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="form-floating">
+            <input class="form-control" value="{{ alumno_info.CORREO|default('-') }}" disabled>
+            <label>Correo</label>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="form-floating">
+            <input class="form-control" value="{{ alumno_info.TELEFONO|default('-') }}" disabled>
+            <label>Teléfono</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="form-floating">
+            <input class="form-control"
+                   value="{{ (alumno_info.FECHA_INSCRIPCION|string)[:10] if alumno_info.FECHA_INSCRIPCION else '' }}"
+                   disabled>
+            <label>Fecha de inscripción</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# =======================
+     Insights de Comunidad
+     ======================= #}
   {% if rol_usuario|default('', true)|lower in ['admin','comunidad'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white d-flex align-items-center">
-      <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h4>
+      <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h5>
     </div>
     <div class="card-body">
-
       <!-- KPIs -->
       <div class="row g-3 mb-3">
         <div class="col-md-3">
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <div class="fw-semibold">Monto Total</div>
-              <div class="fs-4">
-                {% if comunidad %}{{ comunidad.MONTO_INVERTIDO_TOTAL | mxn }}{% else %}-{% endif %}
-              </div>
+              <div class="fs-4">{{ comunidad.MONTO_INVERTIDO_TOTAL | mxn if comunidad else '-' }}</div>
               <small class="text-muted">
-                {% if comunidad %}
-                  Cursos: {{ comunidad.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ comunidad.MONTO_INVERTIDO_GALA | mxn }}
-                {% else %}
-                  Sin datos
-                {% endif %}
+                {% if comunidad %}Cursos: {{ comunidad.MONTO_INVERTIDO_CURSOS | mxn }} · Gala: {{ comunidad.MONTO_INVERTIDO_GALA | mxn }}{% else %}Sin datos{% endif %}
               </small>
             </div>
           </div>
@@ -111,8 +198,8 @@
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <div class="fw-semibold">NPS</div>
-              <div class="fs-4">{% if comunidad %}{{ comunidad.NPS_FINAL }}{% else %}-{% endif %}</div>
-              <small class="text-muted">Calc 0–10: {% if comunidad %}{{ comunidad.CALIF_CALC_0_10 }}{% else %}-{% endif %}</small>
+              <div class="fs-4">{{ comunidad.NPS_FINAL if comunidad else '-' }}</div>
+              <small class="text-muted">Calc 0–10: {{ comunidad.CALIF_CALC_0_10 if comunidad else '-' }}</small>
             </div>
           </div>
         </div>
@@ -120,8 +207,8 @@
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <div class="fw-semibold">Cursos Thinkific</div>
-              <div class="fs-4">{% if comunidad %}{{ comunidad.TOTAL_CURSOS or 0 }}{% else %}-{% endif %}</div>
-              <small class="text-muted">% avance prom.: {% if comunidad %}{{ comunidad.PROMEDIO_AVANCE }}{% else %}-{% endif %}%</small>
+              <div class="fs-4">{{ comunidad.TOTAL_CURSOS or 0 if comunidad else '-' }}</div>
+              <small class="text-muted">% avance prom.: {{ comunidad.PROMEDIO_AVANCE if comunidad else '-' }}%</small>
             </div>
           </div>
         </div>
@@ -129,7 +216,7 @@
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <div class="fw-semibold">Asistencias Webinar</div>
-              <div class="fs-4">{% if comunidad %}{{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 }}{% else %}-{% endif %}</div>
+              <div class="fs-4">{{ comunidad.TOTAL_ASISTENCIA_WEBINAR or 0 if comunidad else '-' }}</div>
             </div>
           </div>
         </div>
@@ -172,9 +259,9 @@
               <div class="fw-semibold mb-2">Calificaciones Promedio</div>
               {% if comunidad %}
                 <div class="small">
-                  Expectativas: <strong>{{ comunidad.CALIF_EXPECTATIVAS }}</strong> &nbsp;·&nbsp;
-                  Temas: <strong>{{ comunidad.CALIF_TEMAS }}</strong> &nbsp;·&nbsp;
-                  Contenido: <strong>{{ comunidad.CALIF_CONTENIDO }}</strong> &nbsp;·&nbsp;
+                  Expectativas: <strong>{{ comunidad.CALIF_EXPECTATIVAS }}</strong> ·
+                  Temas: <strong>{{ comunidad.CALIF_TEMAS }}</strong> ·
+                  Contenido: <strong>{{ comunidad.CALIF_CONTENIDO }}</strong> ·
                   Clase: <strong>{{ comunidad.CALIF_CLASE }}</strong>
                 </div>
               {% else %}
@@ -215,13 +302,16 @@
       </div>
 
     </div>
-  </div> <!-- /Insights -->
-  {% endif %} {# /rol comunidad o admin #}
+  </div>
+  {% endif %}
 
+  {# =======================
+     Insights de Postventa
+     ======================= #}
   {% if rol_usuario|default('',true)|lower in ['postventa','admin'] and postventa %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white d-flex align-items-center">
-      <h4 class="mb-0"><i class="bi bi-cash-coin me-2"></i>Insights de Postventa</h4>
+      <h5 class="mb-0"><i class="bi bi-cash-coin me-2"></i>Insights de Postventa</h5>
     </div>
     <div class="card-body">
       <div class="row g-3">
@@ -277,13 +367,15 @@
       {% endif %}
     </div>
   </div>
-{% endif %}
+  {% endif %}
 
-  <!-- Seguimiento (sólo Postventa/Admin) -->
+  {# =======================
+     Seguimiento (form)
+     ======================= #}
   {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Seguimiento (Postventa)</h4>
+      <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Seguimiento</h5>
     </div>
     <div class="card-body">
       <div id="alertSeg" class="alert d-none" role="alert"></div>
@@ -321,26 +413,31 @@
   </div>
   {% endif %}
 
-  <!-- Historial de seguimiento -->
+  {# =======================
+     Historial (timeline)
+     ======================= #}
   {% if rol_usuario|default('', true)|lower in ['postventa','admin'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Historial de Seguimiento</h4>
+      <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Historial de Seguimiento</h5>
     </div>
     <div class="card-body">
       {% if seguimientos and seguimientos|length > 0 %}
-      <div class="list-group">
-        {% for s in seguimientos %}
-          <div class="list-group-item">
+        <ul class="timeline mb-0">
+          {% for s in seguimientos %}
+          <li class="timeline-item">
             <div class="d-flex justify-content-between">
-              <strong>{{ (s.TIPO or '')|upper }} · {{ (s.ESTADO or '')|upper }}</strong>
-              <small>{{ s.FECHA }}</small>
+              <div>
+                <strong>{{ (s.TIPO or '')|upper }}</strong> ·
+                <span class="text-muted">{{ (s.ESTADO or '')|upper }}</span>
+              </div>
+              <small class="text-muted">{{ (s.FECHA|string)[:16] }}</small>
             </div>
             <div class="mt-1">{{ s.NOTA }}</div>
             <div class="mt-1 text-muted"><small>Por: {{ s.AUTOR }} ({{ s.ROL_AUTOR }})</small></div>
-          </div>
-        {% endfor %}
-      </div>
+          </li>
+          {% endfor %}
+        </ul>
       {% else %}
         <em>No hay seguimientos todavía.</em>
       {% endif %}
@@ -348,11 +445,13 @@
   </div>
   {% endif %}
 
-  <!-- Kanban -->
+  {# =======================
+     Kanban
+     ======================= #}
   {% if rol_usuario|default('',true)|lower in ['postventa','admin'] %}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-success text-white">
-      <h4 class="mb-0"><i class="bi bi-kanban me-2"></i>Seguimientos (Kanban)</h4>
+      <h5 class="mb-0"><i class="bi bi-kanban me-2"></i>Seguimientos (Kanban)</h5>
     </div>
     <div class="card-body">
       <div class="row g-3">
@@ -384,45 +483,46 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script>
-  // Gráfica de barras horizontal (solo se renderiza si existe el canvas, que solo está para admin/comunidad)
+  // Copiar email / teléfono
+  document.addEventListener('click', (e)=>{
+    if (e.target.closest('#copyEmail')) {
+      navigator.clipboard.writeText(e.target.closest('#copyEmail').dataset.copy || '').then(()=> {
+        e.target.closest('#copyEmail').classList.add('btn-success'); setTimeout(()=>e.target.closest('#copyEmail').classList.remove('btn-success'),600);
+      });
+    }
+    if (e.target.closest('#copyPhone')) {
+      navigator.clipboard.writeText(e.target.closest('#copyPhone').dataset.copy || '').then(()=> {
+        e.target.closest('#copyPhone').classList.add('btn-success'); setTimeout(()=>e.target.closest('#copyPhone').classList.remove('btn-success'),600);
+      });
+    }
+  });
+
+  // Gráfica cursos (si hay datos)
   (function(){
     const labels = {{ (chart_labels or []) | tojson }};
     const values = {{ (chart_values or []) | tojson }};
     const el = document.getElementById('chartCursos');
     if (!el || !labels.length) return;
-
     new Chart(el.getContext('2d'), {
       type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [{ label: '% completado', data: values, borderWidth: 1 }]
-      },
+      data: { labels, datasets: [{ label: '% completado', data: values, borderWidth:1 }] },
       options: {
-        indexAxis: 'y',
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          x: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: (v) => v + '%' } },
-          y: { ticks: { autoSkip: false, maxTicksLimit: 20 } }
-        },
-        plugins: { legend: { display: false } }
+        indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+        scales:{ x:{ suggestedMin:0, suggestedMax:100, ticks:{ callback:v=>v+'%' }}, y:{ ticks:{ autoSkip:false, maxTicksLimit:20 }}},
+        plugins:{ legend:{ display:false } }
       }
     });
   })();
 
-  // Guardar seguimiento (solo aparece el form en postventa/admin)
+  // Guardar seguimiento
   (function () {
-    const form = document.getElementById('formSeguimiento');
-    if (!form) return;
-
+    const form = document.getElementById('formSeguimiento'); if (!form) return;
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const spinner = document.getElementById('segSpinner');
       const alertSeg = document.getElementById('alertSeg');
-
       const payload = {
         correo: document.getElementById('correo').value,
         tipo: document.getElementById('tipo').value,
@@ -431,23 +531,17 @@
       };
       if (!payload.nota) {
         alertSeg.textContent = 'Escribe una nota.';
-        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
-        return;
+        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger'); return;
       }
-
       alertSeg.classList.add('d-none'); alertSeg.classList.remove('alert-success','alert-danger');
       spinner.classList.remove('d-none');
       try {
-        const resp = await fetch('/api/seguimiento', {
-          method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'same-origin',
-          body: JSON.stringify(payload)
-        });
+        const resp = await fetch('/api/seguimiento', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body:JSON.stringify(payload) });
         const data = await resp.json().catch(()=>({}));
         if (!resp.ok) throw new Error((data && data.error) ? JSON.stringify(data.error) : 'Error desconocido');
         alertSeg.textContent = 'Seguimiento guardado correctamente.';
         alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-success');
-        form.reset();
-        setTimeout(()=> window.location.reload(), 800);
+        form.reset(); setTimeout(()=> window.location.reload(), 800);
       } catch (err) {
         alertSeg.textContent = 'No se pudo guardar el seguimiento: ' + err.message;
         alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
@@ -455,7 +549,7 @@
     });
   })();
 
-  // Kanban (solo corre si el rol lo permite, porque no existen las columnas si no)
+  // Kanban
   (function () {
     const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
     const rol = "{{ rol_usuario|default('',true)|lower }}";
@@ -471,17 +565,14 @@
       const fecha = s.FECHA ? new Date(s.FECHA).toLocaleString() : '';
       const el = document.createElement('div');
       el.className = 'kanban-card'; el.draggable = true; el.dataset.id = s.ID; el.dataset.estado = s.ESTADO || '';
-
       const top = document.createElement('div'); top.className = 'd-flex justify-content-between align-items-start';
       const strong = document.createElement('strong'); strong.textContent = (s.TIPO || '').toUpperCase();
       const badge = document.createElement('span'); badge.className = 'badge text-bg-secondary kanban-badge'; badge.textContent = (s.ROL_AUTOR || '').toUpperCase();
       const smallFecha = document.createElement('div'); smallFecha.className = 'small text-muted'; smallFecha.textContent = fecha;
       const notaDiv = document.createElement('div'); notaDiv.className = 'mt-1'; notaDiv.textContent = (s.NOTA ?? '').toString();
       const autorDiv = document.createElement('div'); autorDiv.className = 'small text-muted mt-1'; autorDiv.textContent = `Por: ${(s.AUTOR ?? '').toString()}`;
-
       top.appendChild(strong); top.appendChild(badge);
       el.appendChild(top); el.appendChild(smallFecha); el.appendChild(notaDiv); el.appendChild(autorDiv);
-
       el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', s.ID); e.dataTransfer.effectAllowed = 'move'; });
       return el;
     }
