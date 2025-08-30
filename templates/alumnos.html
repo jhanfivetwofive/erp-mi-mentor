@@ -1,180 +1,234 @@
 {% extends "base.html" %}
+{% block title %}Alumnos — Mi Mentor de Inversión{% endblock %}
 
-{% block title %}Alumnos - Mi Mentor de Inversión{% endblock %}
+{% block head %}
+<style>
+  .page-header h4 { margin: 0; }
+  .badge-gen { background: #f6f7f9; border: 1px solid #e5e7eb; color:#111827; }
+  .table thead th { white-space: nowrap; }
+  .text-truncate-220 { max-width: 220px; display:inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+{% endblock %}
 
 {% block content %}
 
-<!-- 🟩 Encabezado -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
-        <h4 class="mb-0"><i class="bi bi-boxes me-2"></i>Alumnos - Mi Mentor de Inversión</h4>
-    </div>
+<!-- Encabezado -->
+<div class="d-flex align-items-center justify-content-between mb-3 page-header">
+  <div>
+    <h4 class="fw-semibold">Alumnos</h4>
+    <div class="text-muted small">Vista general y acceso rápido al panel del alumno</div>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <span class="badge text-bg-light" id="totalBadge">—</span>
+    <button id="exportExcelBtn" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-file-earmark-excel"></i> Exportar Excel
+    </button>
+  </div>
 </div>
 
-<!-- 🔍 Filtros -->
-<div class="card shadow-sm mb-4">
-    <div class="card-body">
-        <form id="filterForm" class="row align-items-end">
-            <div class="col-md-4">
-                <label for="generacion" class="form-label">Generación</label>
-                <select class="form-select" id="generacion">
-                    <option value="">Todas</option>
-                </select>
-            </div>
-            <div class="col-md-4">
-                <label for="correo" class="form-label">Correo</label>
-                <input type="email" class="form-control" id="correo" placeholder="Ej. jonathan@fivetwofive.mx">
-            </div>
-            <div class="col-md-4 d-flex gap-2 mt-3 mt-md-0">
-                <button type="submit" class="btn btn-primary flex-fill"><i class="bi bi-search"></i> Buscar</button>
-                <button type="button" class="btn btn-secondary flex-fill" id="limpiarFiltros"><i class="bi bi-eraser"></i> Limpiar</button>
-            </div>
-        </form>
-    </div>
+<!-- Filtros -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <form id="filterForm" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label for="generacion" class="form-label">Generación</label>
+        <select class="form-select" id="generacion">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label for="correo" class="form-label">Correo</label>
+        <input type="email" class="form-control" id="correo" placeholder="Ej. nombre@dominio.com">
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-fill">
+          <i class="bi bi-search"></i> Buscar
+        </button>
+        <button type="button" class="btn btn-secondary flex-fill" id="limpiarFiltros">
+          <i class="bi bi-eraser"></i> Limpiar
+        </button>
+      </div>
+    </form>
+  </div>
 </div>
 
-<!-- 🟢 Botón de exportación -->
-<div class="d-flex justify-content-end mb-3">
-    <button id="exportExcelBtn" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Exportar a Excel</button>
+<!-- Tabla -->
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive" id="tablaAlumnos"></div>
+  </div>
 </div>
-
-<!-- 📋 Tabla AJAX -->
-<div class="table-responsive" id="tablaAlumnos" style="overflow-x:auto; min-width:100%;"></div>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Diccionario de encabezados amigables
+// Encabezados visibles y orden
 const headersAmigables = {
-    "ID_ALUMNO": "ID Alumno",
-    "NOMBRE_ALUMNO": "Nombre",
-    "CORREO": "Correo",
-    "TELEFONO": "Teléfono",
-    "GASTO": "Gasto",
-    "INGRESO": "Ingreso",
-    "GENERACION_PROGRAMA": "Generación Programa",
-    "FECHA_INSCRIPCION": "Fecha de Inscripción",
-    "FUENTE": "Fuente"
+  "ID_ALUMNO": "ID Alumno",
+  "NOMBRE_ALUMNO": "Nombre",
+  "CORREO": "Correo",
+  "TELEFONO": "Teléfono",
+  "GASTO": "Gasto",
+  "INGRESO": "Ingreso",
+  "GENERACION_PROGRAMA": "Generación",
+  "FECHA_INSCRIPCION": "Fecha inscripción",
+  "FUENTE": "Fuente"
 };
 
-// 👉 Formateador MXN (es-MX)
 const mxnFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
-// Campos que van como moneda
-const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO"]);  
+const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO"]);
 
-function cargarAlumnos(filtros = {}) {
-    $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Cargando...</span></div><br>Cargando alumnos...</div>');
-
-    $.ajax({
-        url: "/api/alumnos",
-        method: "GET",
-        data: filtros,
-        success: function (data) {
-            if (!Array.isArray(data) || data.length === 0) {
-                $('#tablaAlumnos').html('<div class="alert alert-warning">No se encontraron alumnos.</div>');
-                return;
-            }
-
-            let columnas = Object.keys(headersAmigables);
-            let thead = '<thead><tr>' + columnas.map(col => `<th>${headersAmigables[col]}</th>`).join('') + '<th>Acción</th></tr></thead>';
-
-
-            let tbody = '<tbody>';
-            data.forEach(row => {
-                tbody += '<tr>';
-                columnas.forEach(col => {
-                    let valor = row[col] ?? '';
-
-                    // Formato fecha yyyy-mm-dd (si aplica)
-                    if (col.includes("FECHA") && valor) {
-                        let fecha = new Date(valor);
-                        if (!isNaN(fecha)) {
-                            valor = fecha.toISOString().split('T')[0];
-                        }
-                    }
-                    // 👉 Formato moneda MXN (y orden numérico correcto)
-                    if (currencyFields.has(col)) {
-                        const num = Number(row[col]);
-                        if (!isNaN(num)) {
-                            const pretty = mxnFmt.format(num);
-                            tbody += `<td class="text-end" data-order="${num}">${pretty}</td>`;
-                        } else {
-                            tbody += `<td class="text-end" data-order=""> </td>`;
-                        }
-                    } else {
-                        tbody += `<td>${valor}</td>`;
-                    }
-                });
-                tbody += `<td><a href="/alumno/${row.CORREO}" class="btn btn-info btn-sm"><i class="bi bi-person-lines-fill"></i> Ver Panel</a></td>`;
-                tbody += '</tr>';
-            });
-            tbody += '</tbody>';
-
-            const tableHTML = `<table id="alumnosTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap">${thead}${tbody}</table>`;
-            $('#tablaAlumnos').html(tableHTML);
-
-            $('#alumnosTable').DataTable({
-                scrollX: true,
-                scrollY: '400px',
-                scrollCollapse: true,
-                pageLength: 50,
-                lengthMenu: [[25, 50, 100], [25, 50, 100]],
-                autoWidth: false,
-                responsive: false,
-                dom: '<"d-flex justify-content-between align-items-center mb-2"lfB>rt<"d-flex justify-content-between mt-2"ip>',
-                buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
-                order: [[0, 'asc']],
-                language: {
-                    search: "Buscar:",
-                    lengthMenu: "Mostrar _MENU_ registros",
-                    zeroRecords: "No se encontraron resultados",
-                    info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-                    infoEmpty: "Mostrando 0 a 0 de 0 registros",
-                    infoFiltered: "(filtrado de _MAX_ registros totales)",
-                    paginate: {
-                        first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior"
-                    }
-                },
-                initComplete: function () {
-                    this.api().columns.adjust();
-                }
-            });
-
-            $('#exportExcelBtn').on('click', function () {
-                $('#alumnosTable').DataTable().button('.buttons-excel').trigger();
-            });
-        },
-        error: function (err) {
-            $('#tablaAlumnos').html('<div class="alert alert-danger">Error al cargar datos.</div>');
-            console.error("Error al cargar alumnos:", err);
-        }
-    });
+function soloFecha(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toISOString().split('T')[0];
 }
 
-$(document).ready(function () {
-    cargarAlumnos();
+function badgeGeneracion(val) {
+  if (!val) return "";
+  // Si vienen varias generaciones separadas por coma, muestra la primera + contador
+  const parts = String(val).split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return "";
+  let html = `<span class="badge badge-gen me-1">${parts[0]}</span>`;
+  if (parts.length > 1) html += `<span class="badge text-bg-light">+${parts.length-1}</span>`;
+  return html;
+}
 
-    $('#filterForm').on('submit', function (e) {
-        e.preventDefault();
-        cargarAlumnos({
-            generacion: $('#generacion').val(),
-            correo: $('#correo').val()
+function cargarAlumnos(filtros = {}) {
+  $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">Cargando alumnos…</div></div>');
+
+  $.ajax({
+    url: "/api/alumnos",
+    method: "GET",
+    data: filtros,
+    success: function (data) {
+      const total = Array.isArray(data) ? data.length : 0;
+      $('#totalBadge').text(`${total.toLocaleString('es-MX')} registros`);
+
+      if (!Array.isArray(data) || data.length === 0) {
+        $('#tablaAlumnos').html('<div class="alert alert-warning mb-0">No se encontraron alumnos.</div>');
+        return;
+      }
+
+      // Construir THEAD
+      const cols = Object.keys(headersAmigables);
+      let thead = '<thead><tr>';
+      cols.forEach(col => { thead += `<th>${headersAmigables[col]}</th>`; });
+      thead += '<th>Acción</th></tr></thead>';
+
+      // Construir TBODY
+      let tbody = '<tbody>';
+      data.forEach(row => {
+        tbody += '<tr>';
+        cols.forEach(col => {
+          let raw = row[col] ?? '';
+          // Fecha
+          if (col.includes('FECHA')) raw = soloFecha(raw);
+
+          // Moneda
+          if (currencyFields.has(col)) {
+            const num = Number(row[col]);
+            if (!isNaN(num)) {
+              const pretty = mxnFmt.format(num);
+              tbody += `<td class="text-end" data-order="${num}">${pretty}</td>`;
+              return;
+            } else {
+              tbody += `<td class="text-end" data-order=""></td>`;
+              return;
+            }
+          }
+
+          // Generación como badges
+          if (col === 'GENERACION_PROGRAMA') {
+            tbody += `<td>${badgeGeneracion(raw)}</td>`;
+            return;
+          }
+
+          // Correo truncado para no romper en móvil
+          if (col === 'CORREO') {
+            tbody += `<td><span class="text-truncate-220" title="${raw}">${raw}</span></td>`;
+            return;
+          }
+
+          tbody += `<td>${raw}</td>`;
         });
-    });
 
-    $('#limpiarFiltros').on('click', function () {
-        $('#filterForm')[0].reset();
-        cargarAlumnos();
-    });
+        const correo = row.CORREO || '';
+        const tel = row.TELEFONO || '';
+        const wa = 'https://wa.me/' + (String(tel).replace(/\D/g,'').length === 10 ? '52'+String(tel).replace(/\D/g,'') : String(tel).replace(/\D/g,'')) + '?text=' + encodeURIComponent(`Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`);
+        tbody += `<td class="text-nowrap">
+          <a href="/alumno/${correo}" class="btn btn-info btn-sm me-1"><i class="bi bi-person-lines-fill"></i> Panel</a>
+          <a href="${wa}" target="_blank" rel="noopener" class="btn btn-success btn-sm"><i class="bi bi-whatsapp"></i></a>
+        </td>`;
+        tbody += '</tr>';
+      });
+      tbody += '</tbody>';
 
-    $.ajax({
-        url: '/api/generaciones',
-        method: 'GET',
-        success: function (data) {
-            data.forEach(gen => $('#generacion').append(`<option value="${gen.trim()}">${gen}</option>`));
-        }
+      const html = `<table id="alumnosTable" class="table table-sm table-hover table-striped align-middle text-nowrap w-100">${thead}${tbody}</table>`;
+      $('#tablaAlumnos').html(html);
+
+      // DataTables
+      const dt = $('#alumnosTable').DataTable({
+        scrollX: true,
+        pageLength: 50,
+        lengthMenu: [[25, 50, 100], [25, 50, 100]],
+        autoWidth: false,
+        fixedHeader: true,
+        dom: '<"d-flex justify-content-between align-items-center mb-2"lf>rt<"d-flex justify-content-between mt-2"ip><"dt-hidden-buttons"B>',
+        buttons: [
+          // botón excel oculto; usamos el botón propio arriba
+          { extend: 'excelHtml5', title: 'alumnos', className: 'd-none', exportOptions: { columns: ':visible' } }
+        ],
+        order: [[0, 'asc']],
+        language: {
+          search: "Buscar:",
+          lengthMenu: "Mostrar _MENU_",
+          zeroRecords: "No se encontraron resultados",
+          info: "Mostrando _START_ a _END_ de _TOTAL_",
+          infoEmpty: "Mostrando 0 a 0 de 0",
+          infoFiltered: "(filtrado de _MAX_ en total)",
+          paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
+        },
+        initComplete: function () { this.api().columns.adjust(); }
+      });
+
+      // Botón export (dispara el excel oculto)
+      $('#exportExcelBtn').off('click').on('click', function(){
+        dt.button('.buttons-excel').trigger();
+      });
+    },
+    error: function (err) {
+      console.error("Error al cargar alumnos:", err);
+      $('#tablaAlumnos').html('<div class="alert alert-danger mb-0">Error al cargar datos.</div>');
+    }
+  });
+}
+
+$(function () {
+  // Carga inicial
+  cargarAlumnos();
+
+  // Buscar
+  $('#filterForm').on('submit', function (e) {
+    e.preventDefault();
+    cargarAlumnos({
+      generacion: $('#generacion').val(),
+      correo: $('#correo').val()
     });
+  });
+
+  // Limpiar
+  $('#limpiarFiltros').on('click', function () {
+    $('#filterForm')[0].reset();
+    cargarAlumnos();
+  });
+
+  // Poblar generaciones
+  $.get('/api/generaciones', function (gens) {
+    (gens || []).forEach(g => $('#generacion').append(`<option value="${(g||'').trim()}">${g}</option>`));
+  });
 });
 </script>
 {% endblock %}
