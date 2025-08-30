@@ -34,73 +34,72 @@
         </thead>
         <tbody>
           {% for r in data %}
-            {# Viabilidad desde la vista DM (más fiable) #}
-            {% set vtxt = (r.ESTATUS_VIABLE or '') %}
-            {% set vcolor = 'success' if vtxt == 'VIABLE'
-                            else 'warning' if vtxt == 'REQUIERE AJUSTE'
-                            else 'danger' if vtxt == 'NO VIABLE'
-                            else 'secondary' %}
-            {% set es_venta = (r.ESTATUS_VENTA or 0)|int %}
-            {% set fecha = r.FECHA_ENCUESTA %}
-            <tr>
-              <td class="text-nowrap">
-                <span class="badge bg-light text-dark fw-semibold font-monospace">{{ r.ID_ENCUESTA }}</span>
-              </td>
-              <td class="text-nowrap"
-                  data-order="{{ fecha.isoformat() if fecha }}">
-                {{ fecha.strftime('%Y-%m-%d %H:%M') if fecha }}
-              </td>
-              <td>{{ r.NOMBRE }}</td>
-              <td class="text-nowrap">{{ r.GENERACION }}</td>
-              <td>
-                <div class="d-flex align-items-center gap-2">
-                  <strong>{{ r.CALIFICACION }}</strong>
-                  <div class="progress flex-grow-1" style="height:8px; max-width:120px;">
-                    <div class="progress-bar"
-                         role="progressbar"
-                         style="width: {{ ((r.CALIFICACION or 0) / 33.0 * 100) | round(0) }}%;"></div>
-                  </div>
+          {# Viabilidad desde la vista DM (más fiable) #}
+          {% set vtxt = (r.ESTATUS_VIABLE or '') %}
+          {% set vcolor = 'success' if vtxt == 'VIABLE'
+          else 'warning' if vtxt == 'REQUIERE AJUSTE'
+          else 'danger' if vtxt == 'NO VIABLE'
+          else 'secondary' %}
+          {% set es_venta = (r.ESTATUS_VENTA or 0)|int %}
+          {% set fecha = r.FECHA_ENCUESTA %}
+          <tr>
+            {# antes de las celdas, resuelve variables seguras #}
+            {% set id_val = r.ID_ENCUESTA or r.ID %}
+            {% set fecha_val = r.FECHA_ENCUESTA or r.FECHA %}
+
+            <td class="text-nowrap">
+              <span class="badge bg-light text-dark fw-semibold font-monospace">{{ id_val }}</span>
+            </td>
+            <td class="text-nowrap" data-order="{{ fecha_val.isoformat() if fecha_val }}">
+              {{ fecha_val.strftime('%Y-%m-%d %H:%M') if fecha_val }}
+            </td>
+            <td>{{ r.NOMBRE }}</td>
+            <td class="text-nowrap">{{ r.GENERACION }}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <strong>{{ r.CALIFICACION }}</strong>
+                <div class="progress flex-grow-1" style="height:8px; max-width:120px;">
+                  <div class="progress-bar" role="progressbar"
+                    style="width: {{ ((r.CALIFICACION or 0) / 33.0 * 100) | round(0) }}%;"></div>
                 </div>
-              </td>
-              <td>
-                {% if vtxt %}
-                  <span class="badge bg-{{ vcolor }}">{{ vtxt }}</span>
-                {% endif %}
-              </td>
-              <td>
-                <span class="badge {{ 'bg-success' if es_venta == 1 else 'bg-secondary' }}">
-                  {{ venta_text(r.ESTATUS_VENTA) }}
-                </span>
-              </td>
-              <td class="text-nowrap">
-                {% set t = r.TELEFONO or '' %}
-                {% if t %}
-                  <a href="tel:+52{{ to_whatsapp_e164(t)|replace('52','',1) }}" class="link-underline link-underline-opacity-0">
-                    {{ t }}
-                  </a>
-                {% endif %}
-              </td>
-              <td class="text-nowrap">
-                {% if r.CORREO %}
-                  <a href="mailto:{{ r.CORREO }}" class="link-underline link-underline-opacity-0">{{ r.CORREO }}</a>
-                {% endif %}
-              </td>
-              <td class="text-nowrap d-flex gap-1">
-                {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '') ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
-                <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">
-                  <i class="bi bi-whatsapp me-1"></i> WhatsApp
-                </a>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-primary btn-ver"
-                  data-bs-toggle="modal"
-                  data-bs-target="#modalRespuestas"
-                  data-reg='{{ r|tojson|safe }}'
-                >
-                  <i class="bi bi-card-checklist me-1"></i> Respuestas
-                </button>
-              </td>
-            </tr>
+              </div>
+            </td>
+            <td>
+              {% if vtxt %}
+              <span class="badge bg-{{ vcolor }}">{{ vtxt }}</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {{ 'bg-success' if es_venta == 1 else 'bg-secondary' }}">
+                {{ venta_text(r.ESTATUS_VENTA) }}
+              </span>
+            </td>
+            <td class="text-nowrap">
+              {% set t = r.TELEFONO or '' %}
+              {% if t %}
+              <a href="tel:+52{{ to_whatsapp_e164(t)|replace('52','',1) }}"
+                class="link-underline link-underline-opacity-0">
+                {{ t }}
+              </a>
+              {% endif %}
+            </td>
+            <td class="text-nowrap">
+              {% if r.CORREO %}
+              <a href="mailto:{{ r.CORREO }}" class="link-underline link-underline-opacity-0">{{ r.CORREO }}</a>
+              {% endif %}
+            </td>
+            <td class="text-nowrap d-flex gap-1">
+              {% set wa = 'https://wa.me/' ~ to_whatsapp_e164(r.TELEFONO or '') ~ '?text=' ~ ('Hola ' ~ (r.NOMBRE or '')
+              ~ ', soy de Mi Mentor. Gracias por tu diagnóstico. ¿Te comparto un plan de acción?')|urlencode %}
+              <a class="btn btn-sm btn-success" href="{{ wa }}" target="_blank" rel="noopener">
+                <i class="bi bi-whatsapp me-1"></i> WhatsApp
+              </a>
+              <button type="button" class="btn btn-sm btn-outline-primary btn-ver" data-bs-toggle="modal"
+                data-bs-target="#modalRespuestas" data-reg='{{ r|tojson|safe }}'>
+                <i class="bi bi-card-checklist me-1"></i> Respuestas
+              </button>
+            </td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
@@ -140,8 +139,8 @@
         stateSave: true,
         fixedHeader: true,
         dom: '<"row align-items-center mb-3"<"col-sm-6"l><"col-sm-6 text-end"f>>' +
-             't' +
-             '<"row mt-3"<"col-sm-6"i><"col-sm-6 text-end"p>>',
+          't' +
+          '<"row mt-3"<"col-sm-6"i><"col-sm-6 text-end"p>>',
         language: {
           lengthMenu: "Mostrar _MENU_ registros",
           search: "Buscar:",
@@ -161,16 +160,19 @@
       const raw = btn?.getAttribute('data-reg');
       if (!raw) return;
       const r = JSON.parse(raw);
+      const id = r.ID_ENCUESTA ?? r.ID ?? '';
+      const fecha = r.FECHA_ENCUESTA ?? r.FECHA ?? '';
+
 
       const meta = `
-        <div><strong>ID:</strong> ${r.ID_ENCUESTA ?? ''} · <strong>Fecha:</strong> ${r.FECHA_ENCUESTA ?? ''}</div>
+        <div><strong>ID:</strong> ${id} · <strong>Fecha:</strong> ${fecha || ''}</div>
         <div><strong>Nombre:</strong> ${r.NOMBRE ?? ''} · <strong>Generación:</strong> ${r.GENERACION ?? ''}</div>
         <div><strong>Calificación:</strong> ${r.CALIFICACION ?? ''} · <strong>Venta:</strong> ${r.ESTATUS_VENTA ?? ''}</div>
         <div><strong>Correo:</strong> ${r.CORREO ?? ''} · <strong>Teléfono:</strong> ${r.TELEFONO ?? ''}</div>
       `;
       document.getElementById('respMeta').innerHTML = meta;
 
-      const keys = ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10","R11"];
+      const keys = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11"];
       const grid = document.getElementById('respGrid');
       grid.innerHTML = "";
 
