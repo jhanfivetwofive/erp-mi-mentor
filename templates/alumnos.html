@@ -7,6 +7,7 @@
   .badge-gen { background: #f6f7f9; border: 1px solid #e5e7eb; color:#111827; }
   .table thead th { white-space: nowrap; }
   .text-truncate-220 { max-width: 220px; display:inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dropdown-menu-small { min-width: 240px; }
 </style>
 {% endblock %}
 
@@ -16,12 +17,27 @@
 <div class="d-flex align-items-center justify-content-between mb-3 page-header">
   <div>
     <h4 class="fw-semibold">Alumnos</h4>
-    <div class="text-muted small">Vista general y acceso rápido al panel del alumno</div>
+    <div class="text-muted small">Vista general y acceso rápido al panel</div>
   </div>
   <div class="d-flex gap-2 align-items-center">
     <span class="badge text-bg-light" id="totalBadge">—</span>
+
+    <!-- Selector de columnas -->
+    <div class="dropdown">
+      <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+        <i class="bi bi-layout-three-columns"></i> Columnas
+      </button>
+      <div class="dropdown-menu p-2 dropdown-menu-small">
+        <div id="colToggles" class="vstack gap-1"></div>
+        <div class="d-flex gap-2 mt-2">
+          <button type="button" class="btn btn-light btn-sm" id="colShowAll">Todas</button>
+          <button type="button" class="btn btn-light btn-sm" id="colReset">Reset</button>
+        </div>
+      </div>
+    </div>
+
     <button id="exportExcelBtn" class="btn btn-outline-success btn-sm">
-      <i class="bi bi-file-earmark-excel"></i> Exportar Excel
+      <i class="bi bi-file-earmark-excel"></i> Excel
     </button>
   </div>
 </div>
@@ -63,7 +79,20 @@
 
 {% block scripts %}
 <script>
-// Encabezados visibles y orden
+// Orden y nombres visibles de columnas (incluye ROI)
+const displayCols = [
+  "ID_ALUMNO",
+  "NOMBRE_ALUMNO",
+  "CORREO",
+  "TELEFONO",
+  "GASTO",
+  "INGRESO",
+  "ROI",                 // <-- nueva
+  "GENERACION_PROGRAMA",
+  "FECHA_INSCRIPCION",
+  "FUENTE"
+];
+
 const headersAmigables = {
   "ID_ALUMNO": "ID Alumno",
   "NOMBRE_ALUMNO": "Nombre",
@@ -71,13 +100,20 @@ const headersAmigables = {
   "TELEFONO": "Teléfono",
   "GASTO": "Gasto",
   "INGRESO": "Ingreso",
+  "ROI": "ROI (Ingreso − Gasto)",
   "GENERACION_PROGRAMA": "Generación",
   "FECHA_INSCRIPCION": "Fecha inscripción",
   "FUENTE": "Fuente"
 };
 
+// Conjunto por defecto de columnas visibles (puedes ajustar)
+const DEFAULT_VISIBLE = new Set([
+  "ID_ALUMNO","NOMBRE_ALUMNO","CORREO","GENERACION_PROGRAMA",
+  "FECHA_INSCRIPCION","INGRESO","ROI","FUENTE"
+]);
+
 const mxnFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
-const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO"]);
+const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO", "ROI"]);
 
 function soloFecha(iso) {
   if (!iso) return "";
@@ -88,12 +124,32 @@ function soloFecha(iso) {
 
 function badgeGeneracion(val) {
   if (!val) return "";
-  // Si vienen varias generaciones separadas por coma, muestra la primera + contador
   const parts = String(val).split(',').map(s => s.trim()).filter(Boolean);
   if (parts.length === 0) return "";
   let html = `<span class="badge badge-gen me-1">${parts[0]}</span>`;
   if (parts.length > 1) html += `<span class="badge text-bg-light">+${parts.length-1}</span>`;
   return html;
+}
+
+function fuenteChip(val) {
+  if (!val) return "";
+  const key = String(val).toLowerCase();
+  let cls = 'text-bg-secondary';
+  if (/(org[aá]nico|organic)/.test(key)) cls = 'text-bg-success';
+  else if (/(facebook|meta)/.test(key)) cls = 'text-bg-primary';
+  else if (/(google|search|adwords)/.test(key)) cls = 'text-bg-warning';
+  else if (/(referido|referral)/.test(key)) cls = 'text-bg-info';
+  else if (/tiktok/.test(key)) cls = 'text-bg-dark';
+  else if (/youtube/.test(key)) cls = 'text-bg-danger';
+  return `<span class="badge rounded-pill ${cls}">${val}</span>`;
+}
+
+function calcROI(row) {
+  const ing = Number(row.INGRESO);
+  const gas = Number(row.GASTO);
+  if (isNaN(ing) && isNaN(gas)) return null;
+  const v = (isNaN(ing) ? 0 : ing) - (isNaN(gas) ? 0 : gas);
+  return v;
 }
 
 function cargarAlumnos(filtros = {}) {
@@ -112,19 +168,31 @@ function cargarAlumnos(filtros = {}) {
         return;
       }
 
-      // Construir THEAD
-      const cols = Object.keys(headersAmigables);
+      // THEAD
       let thead = '<thead><tr>';
-      cols.forEach(col => { thead += `<th>${headersAmigables[col]}</th>`; });
+      displayCols.forEach(col => { thead += `<th>${headersAmigables[col]}</th>`; });
       thead += '<th>Acción</th></tr></thead>';
 
-      // Construir TBODY
+      // TBODY
       let tbody = '<tbody>';
       data.forEach(row => {
+        const roi = calcROI(row);
+
         tbody += '<tr>';
-        cols.forEach(col => {
+        displayCols.forEach(col => {
+          // Valor base
           let raw = row[col] ?? '';
-          // Fecha
+
+          // Derivado ROI
+          if (col === 'ROI') {
+            if (roi === null) { tbody += `<td class="text-end" data-order=""></td>`; return; }
+            const pretty = mxnFmt.format(roi);
+            const trendIcon = roi >= 0 ? 'bi-arrow-up-right text-success' : 'bi-arrow-down-right text-danger';
+            tbody += `<td class="text-end" data-order="${roi}">${pretty} <i class="bi ${trendIcon}"></i></td>`;
+            return;
+          }
+
+          // Fecha -> solo YYYY-MM-DD
           if (col.includes('FECHA')) raw = soloFecha(raw);
 
           // Moneda
@@ -140,13 +208,19 @@ function cargarAlumnos(filtros = {}) {
             }
           }
 
-          // Generación como badges
+          // Generación
           if (col === 'GENERACION_PROGRAMA') {
             tbody += `<td>${badgeGeneracion(raw)}</td>`;
             return;
           }
 
-          // Correo truncado para no romper en móvil
+          // Fuente como chip
+          if (col === 'FUENTE') {
+            tbody += `<td>${fuenteChip(raw)}</td>`;
+            return;
+          }
+
+          // Correo truncado
           if (col === 'CORREO') {
             tbody += `<td><span class="text-truncate-220" title="${raw}">${raw}</span></td>`;
             return;
@@ -155,13 +229,16 @@ function cargarAlumnos(filtros = {}) {
           tbody += `<td>${raw}</td>`;
         });
 
+        // Acción
         const correo = row.CORREO || '';
-        const tel = row.TELEFONO || '';
-        const wa = 'https://wa.me/' + (String(tel).replace(/\D/g,'').length === 10 ? '52'+String(tel).replace(/\D/g,'') : String(tel).replace(/\D/g,'')) + '?text=' + encodeURIComponent(`Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`);
+        const tel = (row.TELEFONO || '').replace(/\D/g,'');
+        const waNum = tel.length === 10 ? '52'+tel : tel;
+        const wa = 'https://wa.me/' + waNum + '?text=' + encodeURIComponent(`Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`);
         tbody += `<td class="text-nowrap">
           <a href="/alumno/${correo}" class="btn btn-info btn-sm me-1"><i class="bi bi-person-lines-fill"></i> Panel</a>
           <a href="${wa}" target="_blank" rel="noopener" class="btn btn-success btn-sm"><i class="bi bi-whatsapp"></i></a>
         </td>`;
+
         tbody += '</tr>';
       });
       tbody += '</tbody>';
@@ -170,6 +247,7 @@ function cargarAlumnos(filtros = {}) {
       $('#tablaAlumnos').html(html);
 
       // DataTables
+      const dateIdx = displayCols.indexOf('FECHA_INSCRIPCION');
       const dt = $('#alumnosTable').DataTable({
         scrollX: true,
         pageLength: 50,
@@ -178,10 +256,9 @@ function cargarAlumnos(filtros = {}) {
         fixedHeader: true,
         dom: '<"d-flex justify-content-between align-items-center mb-2"lf>rt<"d-flex justify-content-between mt-2"ip><"dt-hidden-buttons"B>',
         buttons: [
-          // botón excel oculto; usamos el botón propio arriba
           { extend: 'excelHtml5', title: 'alumnos', className: 'd-none', exportOptions: { columns: ':visible' } }
         ],
-        order: [[0, 'asc']],
+        order: [[ (dateIdx >= 0 ? dateIdx : 0), 'desc' ]],
         language: {
           search: "Buscar:",
           lengthMenu: "Mostrar _MENU_",
@@ -191,12 +268,56 @@ function cargarAlumnos(filtros = {}) {
           infoFiltered: "(filtrado de _MAX_ en total)",
           paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
         },
-        initComplete: function () { this.api().columns.adjust(); }
+        initComplete: function () {
+          this.api().columns.adjust();
+          // Construir toggles de columnas (omitimos la de Acciones)
+          const toggles = [];
+          displayCols.forEach((key, idx) => {
+            const checked = DEFAULT_VISIBLE.has(key) ? 'checked' : '';
+            toggles.push(`
+              <label class="form-check small">
+                <input class="form-check-input" type="checkbox" data-idx="${idx}" ${checked}>
+                <span class="form-check-label">${headersAmigables[key]}</span>
+              </label>
+            `);
+            // aplicar visibilidad inicial
+            this.api().column(idx).visible(DEFAULT_VISIBLE.has(key));
+          });
+          $('#colToggles').html(toggles.join(''));
+        }
       });
 
-      // Botón export (dispara el excel oculto)
+      // Botón export
       $('#exportExcelBtn').off('click').on('click', function(){
         dt.button('.buttons-excel').trigger();
+      });
+
+      // Handlers de checkboxes de columnas
+      $(document).off('change', '#colToggles input[type=checkbox]').on('change', '#colToggles input[type=checkbox]', function(){
+        const idx = Number(this.dataset.idx);
+        dt.column(idx).visible(this.checked);
+        dt.columns.adjust();
+      });
+
+      // Mostrar todas
+      $('#colShowAll').off('click').on('click', function(){
+        $('#colToggles input[type=checkbox]').each(function(){
+          this.checked = true;
+          const idx = Number(this.dataset.idx);
+          dt.column(idx).visible(true);
+        });
+        dt.columns.adjust();
+      });
+
+      // Reset a DEFAULT_VISIBLE
+      $('#colReset').off('click').on('click', function(){
+        $('#colToggles input[type=checkbox]').each(function(){
+          const key = displayCols[Number(this.dataset.idx)];
+          const should = DEFAULT_VISIBLE.has(key);
+          this.checked = should;
+          dt.column(Number(this.dataset.idx)).visible(should);
+        });
+        dt.columns.adjust();
       });
     },
     error: function (err) {
