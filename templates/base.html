@@ -165,46 +165,43 @@
     (function () {
       const btns = document.querySelectorAll('.js-back');
       const here = location.pathname + location.search;
-      const DEFAULT_FALLBACK = "{{ url_for('alumnos_page') }}";
+      const POSTVENTA_PREFIX = '/postventa/';
+      const FALLBACK = '{{ url_for("alumnos_page") }}'; // /alumnos
 
-      // 1) Memoriza la última página NO postventa
+      // Memoriza la última página NO postventa
       try {
-        if (!here.startsWith('/postventa/')) {
+        if (!here.startsWith(POSTVENTA_PREFIX)) {
           localStorage.setItem('mmi_last_path', here);
         }
       } catch (_) {}
 
-      // 2) Acción del botón
       function goBack(e) {
         e.preventDefault();
-        const btn = e.currentTarget;
-        const attrFallback = btn.getAttribute('data-fallback-href');
-        const fallback = attrFallback || DEFAULT_FALLBACK;
 
         try {
-          // a) Referrer del mismo origen y no es la misma página → back
+          // 1) Si hay referrer del mismo origen y NO es postventa y NO es la misma ruta → back
           if (document.referrer) {
             const ref = new URL(document.referrer);
-            if (ref.origin === location.origin && ref.pathname !== location.pathname) {
-              history.back();
-              return;
+            if (ref.origin === location.origin) {
+              const refPath = ref.pathname;
+              if (!refPath.startsWith(POSTVENTA_PREFIX) && refPath !== location.pathname) {
+                history.back();
+                return;
+              }
             }
           }
-          // b) Última página recordada (no postventa)
+
+          // 2) Si tenemos última página NO postventa guardada → ir ahí
           const last = localStorage.getItem('mmi_last_path');
-          if (last && last !== here) {
+          if (last && !last.startsWith(POSTVENTA_PREFIX) && last !== here) {
             window.location.href = last;
             return;
           }
-          // c) Historial disponible
-          if (history.length > 1) {
-            history.back();
-            return;
-          }
-        } catch (_) {}
 
-        // d) Fallback final
-        window.location.href = fallback;
+        } catch (_) { /* noop */ }
+
+        // 3) Fallback definitivo → Alumnos
+        window.location.href = FALLBACK;
       }
 
       btns.forEach(b => b.addEventListener('click', goBack));
