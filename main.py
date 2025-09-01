@@ -1374,8 +1374,8 @@ def postventa_diagnostico_list():
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
 def postventa_insights():
-    f = request.args.get("from")   # YYYY-MM-DD
-    t = request.args.get("to")     # YYYY-MM-DD
+    f = request.args.get("from")
+    t = request.args.get("to")
     g = (request.args.get("gen") or "").strip() or None
 
     date_from = _parse_date(f)
@@ -1384,14 +1384,10 @@ def postventa_insights():
     try:
         data = _postventa_insights_data(date_from=date_from, date_to=date_to, generacion=g)
     except Exception:
-        app.logger.exception("Error en /postventa/insights")
+        app.logger.exception("Error en _postventa_insights_data")
         data = {
-            "kpis": {
-                "total": 0, "ventas": 0, "viables": 0,
-                "requiere_ajuste": 0, "no_viable": 0,
-                "tasa_conversion": 0.0, "pct_viable": 0.0,
-                "avg_score": None, "mediana": None
-            },
+            "kpis": {"total":0,"ventas":0,"viables":0,"requiere_ajuste":0,"no_viable":0,
+                     "tasa_conversion":0.0,"pct_viable":0.0,"avg_score":None,"mediana":None},
             "by_date_labels": [], "by_date_counts": [],
             "viability_labels": [], "viability_counts": [],
             "questions_labels": [], "questions_avg": [],
@@ -1399,16 +1395,22 @@ def postventa_insights():
             "gen_rows": [],
         }
 
-    return render_template(
-        "postventa/insights.html",
-        kpis=data["kpis"],
-        by_date_labels=data["by_date_labels"], by_date_counts=data["by_date_counts"],
-        viability_labels=data["viability_labels"], viability_counts=data["viability_counts"],
-        questions_labels=data["questions_labels"], questions_avg=data["questions_avg"],
-        conv_labels=data["conv_labels"], conv_rates=data["conv_rates"],
-        gen_rows=data["gen_rows"],
-        f_from=f or "", f_to=t or "", f_gen=g or ""
-    )
+    try:
+        return render_template(
+            "postventa/insights.html",
+            kpis=data["kpis"],
+            by_date_labels=data["by_date_labels"], by_date_counts=data["by_date_counts"],
+            viability_labels=data["viability_labels"], viability_counts=data["viability_counts"],
+            questions_labels=data["questions_labels"], questions_avg=data["questions_avg"],
+            conv_labels=data["conv_labels"], conv_rates=data["conv_rates"],
+            gen_rows=data["gen_rows"],
+            f_from=f or "", f_to=t or "", f_gen=g or ""
+        )
+    except TemplateNotFound:
+        return Response(
+            "Falta la plantilla templates/postventa/insights.html en la imagen (o nombre distinto).",
+            status=500, mimetype="text/plain"
+        )
 
 # -------------------- Comunidad: Lista y Panel --------------------
 
