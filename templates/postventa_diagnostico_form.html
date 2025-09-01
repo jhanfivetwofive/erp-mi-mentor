@@ -8,8 +8,14 @@
       <h2 class="mb-1">Diagnóstico Postventa</h2>
       <div class="text-muted">Captura inicial para evaluar viabilidad y plan de acción</div>
     </div>
-    <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">
-      Ver lista
+    {# Encabezado, arriba a la derecha #}
+    <a href="#" class="btn btn-outline-secondary js-back">
+      Volver
+    </a>
+
+    {# Botón "Cancelar" en la columna derecha #}
+    <a href="#" class="btn btn-outline-secondary js-back">
+      Cancelar
     </a>
   </div>
 
@@ -272,5 +278,34 @@
   calcScore();
 })();
 </script>
+<script>
+(function(){
+  function goBack(e){
+    e.preventDefault();
+    try {
+      // Si hay referrer del mismo origen, usa history.back()
+      if (document.referrer) {
+        const ref = new URL(document.referrer);
+        if (ref.origin === location.origin) {
+          history.back();
+          return;
+        }
+      }
+      // Si hay historial, intenta volver
+      if (history.length > 1) {
+        history.back();
+        return;
+      }
+    } catch (_) {}
+    // Fallback seguro: ir a la lista
+    window.location.href = "{{ url_for('postventa_diagnostico_list') }}";
+  }
+
+  document.querySelectorAll('.js-back').forEach(el => {
+    el.addEventListener('click', goBack);
+  });
+})();
+</script>
+
 
 {% endblock %}
