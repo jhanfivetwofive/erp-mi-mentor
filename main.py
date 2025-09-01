@@ -1397,7 +1397,7 @@ def postventa_insights():
 
     try:
         return render_template(
-            "postventa/insights.html",
+            "postventa_insights.html",   # ← ANTES decía "postventa/insights.html"
             kpis=data["kpis"],
             by_date_labels=data["by_date_labels"], by_date_counts=data["by_date_counts"],
             viability_labels=data["viability_labels"], viability_counts=data["viability_counts"],
@@ -1408,7 +1408,7 @@ def postventa_insights():
         )
     except TemplateNotFound:
         return Response(
-            "Falta la plantilla templates/postventa/insights.html en la imagen (o nombre distinto).",
+            "Falta la plantilla templates/postventa_insights.html en la imagen (o nombre distinto).",
             status=500, mimetype="text/plain"
         )
 
