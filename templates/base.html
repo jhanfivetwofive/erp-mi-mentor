@@ -165,67 +165,50 @@
   {% block scripts %}
   <script>
   (function () {
+    // Botones "Atrás" del navbar
+    const btns = document.querySelectorAll('.js-back');
     const here = location.pathname + location.search;
+    const isPostventa = here.startsWith('/postventa/');
 
-    // 1) Memoriza la última página NO-postventa (por pestaña)
+    // Memoriza la última página NO postventa para volver ahí
     try {
-      if (!location.pathname.startsWith('/postventa/')) {
-        sessionStorage.setItem('mmi_last_non_postventa', here);
-      }
+      if (!isPostventa) localStorage.setItem('mmi_last_path', here);
     } catch (_) {}
 
-    // Utilidades
-    function sameOriginReferrer() {
-      try {
-        if (!document.referrer) return false;
-        const ref = new URL(document.referrer);
-        return ref.origin === location.origin;
-      } catch (_) { return false; }
-    }
-    function referrerPath() {
-      try { return new URL(document.referrer).pathname; } catch (_) { return ''; }
-    }
-    function isPostventa(pathname) {
-      return typeof pathname === 'string' && pathname.startsWith('/postventa/');
-    }
-
-    // 2) Acción del botón "Atrás"
     function goBack(e) {
       e.preventDefault();
-      const btn = e.currentTarget;
-      const fallback = btn.getAttribute('data-fallback-href') || '{{ url_for("alumnos_page") }}';
+      const fallback = "{{ url_for('alumnos_page') }}"; // fallback universal = Alumnos
 
-      // a) Si el referrer es del mismo origen y NO es postventa → volver
-      if (sameOriginReferrer()) {
-        const prev = referrerPath();
-        if (prev && !isPostventa(prev) && prev !== location.pathname) {
-          history.back();
-          return;
-        }
-      }
-
-      // b) Si tenemos la última ruta NO-postventa almacenada → úsala
       try {
-        const last = sessionStorage.getItem('mmi_last_non_postventa');
+        // 1) Referrer del mismo origen → back
+        if (document.referrer) {
+          const ref = new URL(document.referrer);
+          if (ref.origin === location.origin && ref.pathname !== location.pathname) {
+            history.back();
+            return;
+          }
+        }
+        // 2) Última página recordada (no postventa) → ir ahí
+        const last = localStorage.getItem('mmi_last_path');
         if (last && last !== here) {
           window.location.href = last;
           return;
         }
+        // 3) Historial disponible → back
+        if (history.length > 1) {
+          history.back();
+          return;
+        }
       } catch (_) {}
 
-      // c) Como último intento, si hay historial y el referrer no es postventa → volver
-      if (history.length > 1 && sameOriginReferrer() && !isPostventa(referrerPath())) {
-        history.back();
-        return;
-      }
-
-      // d) Fallback definitivo
+      // 4) Fallback final
       window.location.href = fallback;
     }
 
-    document.querySelectorAll('.js-back').forEach(b => b.addEventListener('click', goBack));
+    btns.forEach(b => b.addEventListener('click', goBack));
   })();
   </script>
   {% endblock %}
+
 </body>
 </html>
