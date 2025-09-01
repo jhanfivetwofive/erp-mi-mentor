@@ -13,65 +13,83 @@
     </a>
   </div>
 
-  {% if error %}
-  <div class="alert alert-danger shadow-sm">{{ error }}</div>
+  <!-- Errores del servidor (lista) -->
+  {% if errors and errors|length %}
+    <div class="alert alert-danger shadow-sm">
+      <ul class="mb-0">
+        {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+    </div>
   {% endif %}
 
-  <form method="POST" id="formDiag" novalidate action="{{ url_for('postventa_diagnostico_new') }}">
+  <!-- Error único (compatibilidad) -->
+  {% if error and not (errors and errors|length) %}
+    <div class="alert alert-danger shadow-sm">{{ error }}</div>
+  {% endif %}
 
+  <!-- Formulario -->
+  <form method="POST" id="formDiag" novalidate action="{{ url_for('postventa_diagnostico') }}">
     <div class="row g-4">
       <!-- Columna izquierda: datos y preguntas -->
       <div class="col-lg-8">
+
         <!-- Card datos del alumno -->
         <div class="card card-glass mb-4">
           <div class="card-body">
             <h5 class="card-title mb-3">Datos del alumno</h5>
 
             <div class="row g-3">
+              <!-- Nombre -->
               <div class="col-md-6">
                 <div class="form-floating">
-                  <input type="text" class="form-control" id="nombre" name="nombre" placeholder="Nombre completo"
-                    required>
+                  <input type="text" class="form-control" id="nombre" name="nombre"
+                         value="{{ (form.nombre if form else '') }}" placeholder="Nombre completo" required>
                   <label for="nombre">Nombre completo *</label>
                   <div class="invalid-feedback">Ingresa el nombre</div>
                 </div>
               </div>
 
+              <!-- Correo -->
               <div class="col-md-6">
                 <div class="form-floating">
-                  <input type="email" class="form-control" id="correo" name="correo" placeholder="correo@dominio.com"
-                    required>
+                  <input type="email" class="form-control" id="correo" name="correo"
+                         value="{{ (form.correo if form else '') }}" placeholder="correo@dominio.com" required>
                   <label for="correo">Correo *</label>
                   <div class="invalid-feedback">Ingresa un correo válido</div>
                 </div>
               </div>
 
+              <!-- Teléfono -->
               <div class="col-md-6">
                 <label class="form-label">Teléfono *</label>
                 <div class="input-group">
                   <span class="input-group-text">+52</span>
                   <input type="tel" class="form-control" id="telefono" name="telefono"
-                  inputmode="numeric" pattern="\d{10}" placeholder="10 dígitos"
-                  maxlength="10"
-                  oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)" required>
+                         value="{{ (form.telefono if form else '') }}"
+                         inputmode="numeric" pattern="\d{10}" placeholder="10 dígitos"
+                         maxlength="10"
+                         oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)" required>
                   <div class="invalid-feedback">Ingresa 10 dígitos</div>
                 </div>
                 <div class="form-text">Solo números, sin espacios</div>
               </div>
 
+              <!-- Generación -->
               <div class="col-md-6">
                 <div class="form-floating">
-                  <input type="text" class="form-control" id="generacion" name="generacion" placeholder="G-01" required>
+                  <input type="text" class="form-control" id="generacion" name="generacion"
+                         value="{{ (form.generacion if form else '') }}" placeholder="G-01" required>
                   <label for="generacion">Generación (ej. G-01) *</label>
                   <div class="invalid-feedback">Indica la generación</div>
                 </div>
               </div>
 
+              <!-- Estatus de venta -->
               <div class="col-md-6">
                 <label class="form-label">Estatus de venta</label>
                 <select class="form-select" name="estatus_venta" id="estatus_venta">
-                  <option value="0" selected>Sin venta</option>
-                  <option value="1">Venta</option>
+                  <option value="0" {{ 'selected' if (form and form.get('estatus_venta')=='0') else '' }}>Sin venta</option>
+                  <option value="1" {{ 'selected' if (form and form.get('estatus_venta')=='1') else '' }}>Venta</option>
                 </select>
               </div>
             </div>
@@ -95,11 +113,14 @@
                 </div>
 
                 <div class="btn-group mt-2" role="group" aria-label="{{ key }}">
+                  {% set sel = (form[key] if form and key in form else '') %}
                   {% for val, label in q.opciones %}
-                  <!-- Bootstrap 5 toggle radios -->
-                  <input type="radio" class="btn-check" name="{{ key }}" id="{{ key }}_{{ val }}" value="{{ val }}"
-                    autocomplete="off" required>
-                  <label class="btn btn-outline-primary" for="{{ key }}_{{ val }}">{{ label }}</label>
+                    <!-- Bootstrap 5 toggle radios -->
+                    <input type="radio" class="btn-check"
+                           name="{{ key }}" id="{{ key }}_{{ val }}" value="{{ val }}"
+                           autocomplete="off" required
+                           {{ 'checked' if sel == val else '' }}>
+                    <label class="btn btn-outline-primary" for="{{ key }}_{{ val }}">{{ label }}</label>
                   {% endfor %}
                 </div>
 
@@ -111,6 +132,7 @@
             </div>
           </div>
         </div>
+
       </div>
 
       <!-- Columna derecha: resumen -->
@@ -127,6 +149,7 @@
             <div class="progress mb-2" style="height: 10px;">
               <div class="progress-bar" id="scoreBar" role="progressbar" style="width: 0%;"></div>
             </div>
+
             <div class="d-flex align-items-center gap-2 mb-3">
               <span class="text-muted">Viabilidad</span>
               <span class="badge bg-secondary" id="viabPill">—</span>
@@ -153,78 +176,101 @@
   </form>
 </div>
 
+<!-- Estilos mínimos para la leyenda -->
+<style>
+  .legend { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:.35rem; vertical-align:middle; }
+  .legend-success { background:#198754; }
+  .legend-warning { background:#ffc107; }
+  .legend-danger  { background:#dc3545; }
+  .card-sticky { position: sticky; top: 1rem; }
+</style>
+
 <!-- Scripts de página -->
 <script>
-  (function () {
-    const form = document.getElementById('formDiag');
-    const scoreTotal = document.getElementById('scoreTotal');
-    const scoreBar = document.getElementById('scoreBar');
-    const viabPill = document.getElementById('viabPill');
-    const btnGuardar = document.getElementById('btnGuardar');
+(function () {
+  const form = document.getElementById('formDiag');
+  const scoreTotal = document.getElementById('scoreTotal');
+  const scoreBar = document.getElementById('scoreBar');
+  const viabPill = document.getElementById('viabPill');
+  const btnGuardar = document.getElementById('btnGuardar');
 
-    function calcScore() {
-      let sum = 0, answered = 0;
-      const totalQs = {{ preguntas| length
-    }
-  };
-
-  {% for key, q in preguntas.items() %}
-  const sel_{{ key }} = form.querySelector('input[name="{{ key }}"]:checked');
-  if (sel_{ { key } }) {
-    const val = parseInt(sel_{{ key }}.value);
-  sum += isNaN(val) ? 0 : val;
-  answered++;
-  form.querySelector('[data-score-for="{{ key }}"]').textContent = val || 0;
-  form.querySelector('[data-invalid-for="{{ key }}"]').style.display = 'none';
-    } else {
-    form.querySelector('[data-score-for="{{ key }}"]').textContent = '0';
-  }
-  {% endfor %}
-
-  scoreTotal.textContent = sum;
-  const pct = Math.round((sum / (totalQs * 3)) * 100);
-  scoreBar.style.width = pct + '%';
-
-  // Semáforo (mismo criterio del backend)
-  let label = '—', cls = 'bg-secondary';
-  if (sum < 20) { label = 'NO VIABLE'; cls = 'bg-danger'; }
-  else if (sum <= 25) { label = 'REQUIERE AJUSTE'; cls = 'bg-warning text-dark'; }
-  else { label = 'VIABLE'; cls = 'bg-success'; }
-  viabPill.className = 'badge ' + cls;
-  viabPill.textContent = label;
-
-  // Habilitar guardar solo si todo está contestado y datos requeridos válidos
-  //btnGuardar.disabled = !(answered === totalQs && form.checkValidity());
-  btnGuardar.disabled = false; 
+  // Corrige comas en el email en vivo (",com" -> ".com")
+  const emailInput = document.getElementById('correo');
+  if (emailInput) {
+    emailInput.addEventListener('input', () => {
+      if (emailInput.value.includes(',')) {
+        emailInput.value = emailInput.value.replace(/,/g, '.').replace(/\s+/g, '');
+      }
+    });
   }
 
-  // Listeners de cambio para preguntas y campos requeridos
+  function calcScore() {
+    let sum = 0, answered = 0;
+    const totalQs = {{ preguntas|length }};
+
+    {% for key, q in preguntas.items() %}
+      (function(){
+        const sel = form.querySelector('input[name="{{ key }}"]:checked');
+        if (sel) {
+          const val = parseInt(sel.value);
+          sum += isNaN(val) ? 0 : val;
+          answered++;
+          const badge = form.querySelector('[data-score-for="{{ key }}"]');
+          if (badge) badge.textContent = val || 0;
+          const inv = form.querySelector('[data-invalid-for="{{ key }}"]');
+          if (inv) inv.style.display = 'none';
+        } else {
+          const badge = form.querySelector('[data-score-for="{{ key }}"]');
+          if (badge) badge.textContent = '0';
+        }
+      })();
+    {% endfor %}
+
+    scoreTotal.textContent = sum;
+    const pct = Math.round((sum / (totalQs * 3)) * 100);
+    scoreBar.style.width = pct + '%';
+
+    let label = '—', cls = 'bg-secondary';
+    if (sum < 20) { label = 'NO VIABLE'; cls = 'bg-danger'; }
+    else if (sum <= 25) { label = 'REQUIERE AJUSTE'; cls = 'bg-warning text-dark'; }
+    else { label = 'VIABLE'; cls = 'bg-success'; }
+    viabPill.className = 'badge ' + cls;
+    viabPill.textContent = label;
+
+    // Permitimos intentar guardar; validamos en submit
+    btnGuardar.disabled = false;
+  }
+
+  // Eventos en vivo
   form.addEventListener('change', calcScore);
   form.addEventListener('input', calcScore);
 
+  // Validación al enviar: muestra qué falta y lleva al primer error
   form.addEventListener('submit', function (e) {
     {% for key, q in preguntas.items() %}
-    const sel_{{ key }
-  } = form.querySelector('input[name="{{ key }}"]:checked');
-  form.querySelector('[data-invalid-for="{{ key }}"]').style.display = sel_{ { key } } ?'none' : 'block';
-  {% endfor %}
+      (function(){
+        const sel = form.querySelector('input[name="{{ key }}"]:checked');
+        const inv = form.querySelector('[data-invalid-for="{{ key }}"]');
+        if (inv) inv.style.display = sel ? 'none' : 'block';
+      })();
+    {% endfor %}
 
-  if (!form.checkValidity()) {
-    e.preventDefault();
-    e.stopPropagation();
+    if (!form.checkValidity()) {
+      e.preventDefault();
+      e.stopPropagation();
+      form.classList.add('was-validated');
+      const firstInvalid = form.querySelector(':invalid, [data-invalid-for]:not([style*="display: none"])');
+      if (firstInvalid && firstInvalid.scrollIntoView) {
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
     form.classList.add('was-validated');
-    // Ir al primer inválido
-    const firstInvalid = form.querySelector(':invalid, [data-invalid-for]:not([style*="display: none"])');
-    if (firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
-  }
-  form.classList.add('was-validated');
-});
-
+  });
 
   // Init
   calcScore();
-}) ();
+})();
 </script>
 
 {% endblock %}
