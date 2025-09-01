@@ -175,10 +175,7 @@
     if (!ctx) return;
     new Chart(ctx, {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{ label: 'Diagnósticos', data, tension: 0.25 }]
-      },
+      data: { labels, datasets: [{ label: 'Diagnósticos', data, tension: 0.25 }] },
       options: {
         responsive: true,
         scales: { y: { beginAtZero: true, ticks: { precision:0 } } },

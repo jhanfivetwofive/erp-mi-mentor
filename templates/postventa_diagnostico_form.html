@@ -9,6 +9,7 @@
       <div class="text-muted">Captura inicial para evaluar viabilidad y plan de acción</div>
     </div>
   </div>
+
   <!-- Errores del servidor (lista) -->
   {% if errors and errors|length %}
     <div class="alert alert-danger shadow-sm">
@@ -49,7 +50,10 @@
               <div class="col-md-6">
                 <div class="form-floating">
                   <input type="email" class="form-control" id="correo" name="correo"
-                         value="{{ (form.correo if form else '') }}" placeholder="correo@dominio.com" required>
+                         value="{{ (form.correo if form else '') }}"
+                         placeholder="correo@dominio.com"
+                         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                         required>
                   <label for="correo">Correo *</label>
                   <div class="invalid-feedback">Ingresa un correo válido</div>
                 </div>
@@ -159,7 +163,6 @@
 
             <div class="d-grid gap-2">
               <button type="submit" class="btn btn-primary btn-lg" id="btnGuardar">Guardar diagnóstico</button>
-              <a href="{{ url_for('postventa_diagnostico_list') }}" class="btn btn-outline-secondary">Cancelar</a>
             </div>
           </div>
         </div>
@@ -268,34 +271,5 @@
   calcScore();
 })();
 </script>
-<script>
-(function(){
-  function goBack(e){
-    e.preventDefault();
-    try {
-      // Si hay referrer del mismo origen, usa history.back()
-      if (document.referrer) {
-        const ref = new URL(document.referrer);
-        if (ref.origin === location.origin) {
-          history.back();
-          return;
-        }
-      }
-      // Si hay historial, intenta volver
-      if (history.length > 1) {
-        history.back();
-        return;
-      }
-    } catch (_) {}
-    // Fallback seguro: ir a la lista
-    window.location.href = "{{ url_for('postventa_diagnostico_list') }}";
-  }
-
-  document.querySelectorAll('.js-back').forEach(el => {
-    el.addEventListener('click', goBack);
-  });
-})();
-</script>
-
 
 {% endblock %}
