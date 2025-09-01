@@ -22,7 +22,7 @@ import uuid
 import re
 import urllib.parse
 import traceback
-from flask import Response, request
+from flask import Response
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
@@ -534,8 +534,7 @@ def __health():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    # Puedes mostrar tarjetas según rol
-    return render_template("alumnos_page")
+    return redirect(url_for("alumnos_page"))
 
 # --- Comunidad (ya trabajando)
 
@@ -545,36 +544,7 @@ def dashboard():
 def comunidad_insights():
     return render_template("comunidad/insights.html")
 
-# --- Postventa (nuevo)
-
-
-@app.route("/postventa/insights")
-@role_required("postventa", "admin")
-def postventa_insights():
-    # Filtros (opcionales)
-    f = request.args.get("from")   # YYYY-MM-DD
-    t = request.args.get("to")     # YYYY-MM-DD
-    g = (request.args.get("gen") or "").strip() or None
-
-    date_from = _parse_date(f)
-    date_to   = _parse_date(t)
-
-    data = _postventa_insights_data(date_from=date_from, date_to=date_to, generacion=g)
-
-    return render_template(
-        "postventa/insights.html",
-        kpis=data["kpis"],
-        by_date_labels=data["by_date_labels"], by_date_counts=data["by_date_counts"],
-        viability_labels=data["viability_labels"], viability_counts=data["viability_counts"],
-        questions_labels=data["questions_labels"], questions_avg=data["questions_avg"],
-        conv_labels=data["conv_labels"], conv_rates=data["conv_rates"],
-        gen_rows=data["gen_rows"],
-        # Para repintar filtros en la vista:
-        f_from=f or "", f_to=t or "", f_gen=g or ""
-    )
-
 # --- Login Firebase: GET (pantalla)
-
 
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
@@ -1413,7 +1383,7 @@ def postventa_insights():
 
     try:
         data = _postventa_insights_data(date_from=date_from, date_to=date_to, generacion=g)
-    except Exception as e:
+    except Exception:
         app.logger.exception("Error en /postventa/insights")
         data = {
             "kpis": {
@@ -1440,9 +1410,7 @@ def postventa_insights():
         f_from=f or "", f_to=t or "", f_gen=g or ""
     )
 
-
 # -------------------- Comunidad: Lista y Panel --------------------
-
 
 @app.route("/comunidad")
 @role_required("admin", "comunidad")
