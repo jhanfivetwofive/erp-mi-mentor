@@ -14,7 +14,6 @@
 
 {% block content %}
 
-<!-- Filtros -->
 <form class="row g-3 align-items-end mb-4" method="get">
   <div class="col-md-3">
     <label class="form-label">Desde</label>
@@ -38,7 +37,6 @@
   <div class="alert alert-light border">No hay diagnósticos para los filtros seleccionados.</div>
 {% else %}
 
-<!-- KPIs -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
     <div class="card kpi-card h-100 card-glass">
@@ -52,7 +50,7 @@
     <div class="card kpi-card h-100 card-glass">
       <div class="card-body">
         <div class="kpi-sub">Conversión</div>
-        <div class="kpi-value">{{ '%.1f'|format(kpis.tasa_conversion) }}%</div>
+        <div class="kpi-value">{{ "{:.1f}"|format(kpis.tasa_conversion) }}%</div>
         <div class="small text-muted">{{ kpis.ventas }} ventas</div>
       </div>
     </div>
@@ -61,7 +59,7 @@
     <div class="card kpi-card h-100 card-glass">
       <div class="card-body">
         <div class="kpi-sub">Viables</div>
-        <div class="kpi-value">{{ '%.1f'|format(kpis.pct_viable) }}%</div>
+        <div class="kpi-value">{{ "{:.1f}"|format(kpis.pct_viable) }}%</div>
         <div class="small text-muted">{{ kpis.viables }} casos</div>
       </div>
     </div>
@@ -71,7 +69,7 @@
       <div class="card-body">
         <div class="kpi-sub">Calificación</div>
         <div class="kpi-value">
-          {% if kpis.avg_score is not none %}{{ '%.2f'|format(kpis.avg_score) }}{% else %}—{% endif %}
+          {% if kpis.avg_score is not none %}{{ "{:.2f}"|format(kpis.avg_score) }}{% else %}—{% endif %}
         </div>
         <div class="small text-muted">Mediana: {{ kpis.mediana if kpis.mediana is not none else '—' }}</div>
       </div>
@@ -79,7 +77,6 @@
   </div>
 </div>
 
-<!-- Charts -->
 <div class="row g-3">
   <div class="col-lg-6">
     <div class="card chart-card h-100">
@@ -128,7 +125,6 @@
   </div>
 </div>
 
-<!-- Top generaciones -->
 <div class="card mt-4">
   <div class="card-body">
     <div class="d-flex align-items-center justify-content-between">
@@ -148,7 +144,7 @@
           <tr>
             <td>{{ r.g }}</td>
             <td class="text-end">{{ r.n }}</td>
-            <td class="text-end">{{ '%.1f'|format(r.conv) }}%</td>
+            <td class="text-end">{{ "{:.1f}"|format(r.conv) }}%</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -159,7 +155,6 @@
 
 {% endif %}
 
-<!-- Data p/JS -->
 <script>
   const BY_DATE_LABELS = {{ by_date_labels|tojson }};
   const BY_DATE_COUNTS = {{ by_date_counts|tojson }};
@@ -208,7 +203,6 @@
     });
   }
 
-  // Render
   makeChartLine('chartByDate', BY_DATE_LABELS, BY_DATE_COUNTS);
   makeChartDoughnut('chartViab', VIAB_LABELS, VIAB_COUNTS);
   makeChartBar('chartQs', QS_LABELS, QS_AVG, 'Promedio');
