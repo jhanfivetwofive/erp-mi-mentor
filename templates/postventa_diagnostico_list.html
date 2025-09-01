@@ -131,20 +131,21 @@
 </div>
 
 {% endblock %}
-
 {% block scripts %}
+{{ super() }}   {# <-- MUY IMPORTANTE: trae el JS del base.html #}
+
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     // DataTable sin botones de exportación
     if (window.jQuery && $("#tablaDiag").DataTable) {
       $("#tablaDiag").DataTable({
         pageLength: 25,
-        order: [[1, 'desc']],           // por Fecha
+        order: [[1, 'desc']],
         stateSave: true,
         fixedHeader: true,
         dom: '<"row align-items-center mb-3"<"col-sm-6"l><"col-sm-6 text-end"f>>' +
-          't' +
-          '<"row mt-3"<"col-sm-6"i><"col-sm-6 text-end"p>>',
+             't' +
+             '<"row mt-3"<"col-sm-6"i><"col-sm-6 text-end"p>>',
         language: {
           lengthMenu: "Mostrar _MENU_ registros",
           search: "Buscar:",
@@ -157,7 +158,7 @@
       });
     }
 
-    // Modal: muestra respuestas usando columnas R1..R11 y R1_DESC..R11_DESC
+    // Modal Respuestas…
     const modalEl = document.getElementById('modalRespuestas');
     modalEl.addEventListener('show.bs.modal', function (ev) {
       const btn = ev.relatedTarget;
@@ -166,7 +167,7 @@
       const r = JSON.parse(raw);
       const id = r.ID_ENCUESTA ?? r.ID ?? '';
       const rawFecha = r.FECHA_ENCUESTA ?? r.FECHA ?? '';
-      const fechaTxt = String(rawFecha).slice(0, 10); // YYYY-MM-DD
+      const fechaTxt = String(rawFecha).slice(0, 10);
 
       const meta = `
         <div><strong>ID:</strong> ${id} · <strong>Fecha:</strong> ${fechaTxt}</div>
@@ -176,7 +177,7 @@
       `;
       document.getElementById('respMeta').innerHTML = meta;
 
-      const keys = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11"];
+      const keys = ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10","R11"];
       const grid = document.getElementById('respGrid');
       grid.innerHTML = "";
 
