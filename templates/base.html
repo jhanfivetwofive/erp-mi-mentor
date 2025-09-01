@@ -65,16 +65,17 @@
         {% set rol = (user.get('rol') or '')|lower %}
         {% set path = request.path %}
 
-        {# -------- Resuelve back_url contextual -------- #}
-        {% set back_url = None %}
+        {# -------- Fallback para botón "Atrás" -------- #}
+        {% set fallback_url = None %}
         {% if path.startswith('/comunidad/') %}
-        {% set back_url = url_for('comunidad_list') %}
+          {% set fallback_url = url_for('comunidad_list') %}
         {% elif path.startswith('/alumno/') %}
-        {% set back_url = url_for('alumnos_page') %}
+          {% set fallback_url = url_for('alumnos_page') %}
         {% elif path.startswith('/catalogo/') %}
-        {% set back_url = url_for('catalogo_programas') %}
+          {% set fallback_url = url_for('catalogo_programas') %}
         {% elif path.startswith('/postventa/') %}
-        {% set back_url = url_for('postventa_insights') %}
+          {# Mejor fallback para postventa: la lista, NO insights #}
+          {% set fallback_url = url_for('postventa_diagnostico_list') %}
         {% endif %}
 
         <!-- Menú izquierdo -->
@@ -82,9 +83,13 @@
           {% if user %}
 
           <!-- Botón Atrás siempre que haya contexto -->
-          {% if back_url %}
+          {# Botón "Atrás" que usa history/back si hay referrer del mismo origen, y si no usa fallback_url #}
           <li class="nav-item me-2">
-            <a class="btn btn-outline-secondary btn-sm" href="{{ back_url }}"><i class="bi bi-arrow-left"></i> Atrás</a>
+            <a class="btn btn-outline-secondary btn-sm js-back"
+              href="#"
+              data-fallback-href="{{ fallback_url or url_for('alumnos_page') }}">
+              <i class="bi bi-arrow-left"></i> Atrás
+            </a>
           </li>
           {% endif %}
 
@@ -166,7 +171,43 @@
   </main>
 
 
-  {% block scripts %}{% endblock %}
+  {% block scripts %}
+  <script>
+  (function(){
+    const btns = document.querySelectorAll('.js-back');
+    if (!btns.length) return;
+
+    function goBack(e) {
+      e.preventDefault();
+      const btn = e.currentTarget;
+      const fallback = btn.getAttribute('data-fallback-href') || '/';
+
+      try {
+        // Usa referrer del MISMO origen como prioridad
+        if (document.referrer) {
+          const ref = new URL(document.referrer);
+          if (ref.origin === location.origin && ref.pathname !== location.pathname) {
+            history.back();
+            return;
+          }
+        }
+        // Si hay historial navegable, intenta regresar
+        if (history.length > 1) {
+          history.back();
+          return;
+        }
+      } catch (_) {
+        // ignoramos errores de URL/referrer
+      }
+      // Fallback definitivo
+      window.location.href = fallback;
+    }
+
+    btns.forEach(b => b.addEventListener('click', goBack));
+  })();
+  </script>
+
+  {% endblock %}
 </body>
 
 </html>
