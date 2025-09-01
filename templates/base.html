@@ -65,7 +65,7 @@
         {% set rol = (user.get('rol') or '')|lower %}
         {% set path = request.path %}
 
-        {# -------- Fallback para botón "Atrás" -------- #}
+        {# -------- Fallback para botón "Atrás" (según sección actual) -------- #}
         {% set fallback_url = None %}
         {% if path.startswith('/comunidad/') %}
           {% set fallback_url = url_for('comunidad_list') %}
@@ -74,7 +74,7 @@
         {% elif path.startswith('/catalogo/') %}
           {% set fallback_url = url_for('catalogo_programas') %}
         {% elif path.startswith('/postventa/') %}
-          {# Mejor fallback para postventa: la lista, NO insights #}
+          {# Para postventa, mejor vuelve al listado de diagnósticos, NO a insights #}
           {% set fallback_url = url_for('postventa_diagnostico_list') %}
         {% endif %}
 
@@ -82,8 +82,7 @@
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
           {% if user %}
 
-          <!-- Botón Atrás siempre que haya contexto -->
-          {# Botón "Atrás" que usa history/back si hay referrer del mismo origen, y si no usa fallback_url #}
+          <!-- Botón Atrás (usa history.back si hay historial; si no, usa fallback_url) -->
           <li class="nav-item me-2">
             <a class="btn btn-outline-secondary btn-sm js-back"
               href="#"
@@ -91,57 +90,54 @@
               <i class="bi bi-arrow-left"></i> Atrás
             </a>
           </li>
-          {% endif %}
 
           {# ===== ADMIN: todo ===== #}
           {% if rol == 'admin' %}
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
-              href="{{ url_for('alumnos_page') }}">Alumnos</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
-              href="{{ url_for('catalogo_programas') }}">Programas</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
-              href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
-          </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('alumnos_page')) else '' }}"
+                href="{{ url_for('alumnos_page') }}">Alumnos</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_programas')) else '' }}"
+                href="{{ url_for('catalogo_programas') }}">Programas</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if request.path.startswith(url_for('catalogo_generaciones')) else '' }}"
+                href="{{ url_for('catalogo_generaciones') }}">Generaciones</a>
+            </li>
           {% endif %}
-
-          {# (opcionales) otros roles como 'adquisicion', 'people' aquí... #}
 
           {% endif %}
           {% if rol in ['admin', 'postventa'] %}
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle {{ 'active' if request.path.startswith('/postventa/') else '' }}"
-              href="#" id="navPostventa" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-              Postventa
-            </a>
-            <ul class="dropdown-menu" aria-labelledby="navPostventa">
-              <li>
-                <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico') else '' }}"
-                  href="{{ url_for('postventa_diagnostico') }}">
-                  Diagnóstico (nuevo)
-                </a>
-              </li>
-              <li>
-                <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico_list') else '' }}"
-                  href="{{ url_for('postventa_diagnostico_list') }}">
-                  Diagnóstico (listado)
-                </a>
-              </li>
-              <li>
-                <a class="dropdown-item {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
-                  href="{{ url_for('postventa_insights') }}">
-                  Insights
-                </a>
-              </li>
-            </ul>
-          </li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle {{ 'active' if request.path.startswith('/postventa/') else '' }}"
+                href="#" id="navPostventa" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Postventa
+              </a>
+              <ul class="dropdown-menu" aria-labelledby="navPostventa">
+                <li>
+                  <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico') else '' }}"
+                    href="{{ url_for('postventa_diagnostico') }}">
+                    Diagnóstico (nuevo)
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico_list') else '' }}"
+                    href="{{ url_for('postventa_diagnostico_list') }}">
+                    Diagnóstico (listado)
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item {{ 'active' if request.path.startswith(url_for('postventa_insights')) else '' }}"
+                    href="{{ url_for('postventa_insights') }}">
+                    Insights
+                  </a>
+                </li>
+              </ul>
+            </li>
           {% endif %}
-
         </ul>
+
 
         <!-- Menú derecho -->
         <ul class="navbar-nav ms-auto">
@@ -177,28 +173,39 @@
     const btns = document.querySelectorAll('.js-back');
     if (!btns.length) return;
 
+    // Ruta de Insights para detectarla como "no válida" para volver
+    const INSIGHTS_PATH = "{{ url_for('postventa_insights') }}";
+
     function goBack(e) {
       e.preventDefault();
       const btn = e.currentTarget;
       const fallback = btn.getAttribute('data-fallback-href') || '/';
 
       try {
-        // Usa referrer del MISMO origen como prioridad
         if (document.referrer) {
           const ref = new URL(document.referrer);
-          if (ref.origin === location.origin && ref.pathname !== location.pathname) {
+          const sameOrigin = ref.origin === location.origin;
+          const notSamePage = ref.pathname !== location.pathname;
+          const isInsights = ref.pathname === INSIGHTS_PATH;  // <- si vienes de Insights, ignora history.back()
+
+          if (sameOrigin && notSamePage && !isInsights) {
             history.back();
             return;
           }
         }
-        // Si hay historial navegable, intenta regresar
         if (history.length > 1) {
-          history.back();
-          return;
+          // Si hay historial pero el referrer fue Insights (o no confiable), mejor usa fallback
+          // para evitar el “rebote” a Insights
+          const refPath = (document.referrer ? new URL(document.referrer).pathname : "");
+          if (refPath && refPath !== INSIGHTS_PATH) {
+            history.back();
+            return;
+          }
         }
       } catch (_) {
         // ignoramos errores de URL/referrer
       }
+
       // Fallback definitivo
       window.location.href = fallback;
     }
@@ -206,6 +213,7 @@
     btns.forEach(b => b.addEventListener('click', goBack));
   })();
   </script>
+
 
   {% endblock %}
 </body>
