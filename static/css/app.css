@@ -36,3 +36,42 @@ body {
 
 /* Floating labels: mejor contraste */
 .form-floating > label { color: #6c757d; }
+
+/* === Stat tiles === */
+.stat-tile {
+  border: 1px solid #e9ecef;
+  border-radius: 1rem;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  box-shadow: 0 1px 1px rgba(16,24,40,.03);
+}
+.stat-tile .stat-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: #f1f8f4; /* verde muy claro */
+  color: #198754;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: .25rem;
+}
+.stat-tile .stat-label {
+  font-size: .825rem;
+  color: #6c757d;
+}
+.stat-tile .stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+/* === Chips === */
+.chip {
+  display: inline-flex; align-items: center;
+  padding: .35rem .6rem;
+  border-radius: 999px;
+  font-size: .85rem;
+  line-height: 1;
+  border: 1px solid transparent;
+  background: #f8f9fa;
+  color: #495057;
+}
+.chip-success { background: #eef8f1; color: #146c43; border-color: #d1f2dc; }
+.chip-secondary { background: #f1f3f5; color: #495057; border-color: #e9ecef; }

@@ -1277,80 +1277,103 @@ def api_listar_seguimientos():
 
 # -------------------- Postventa: Diagnóstico (form + list) --------------------
 
-
 @app.route("/postventa/diagnostico", methods=["GET", "POST"])
 @role_required("postventa", "admin")
 def postventa_diagnostico():
-    preguntas = {
-        "R1":  "¿Tienes actualmente alguna fuente de ingreso activa?",
-        "R2":  "¿De cuanto son tus ingresos mensuales aproximadamente?",
-        "R3":  "¿Tienes personas que dependan de ti?",
-        "R4":  "¿Tu numero de libertad financiera es mas, menos o igual de tus ingresos actuales ?",
-        "R5":  "¿Cuánto puedes invertir mensualmente sin afectar tus gastos básicos?",
-        "R6":  "¿Tienes algún ahorro o capital disponible para invertir? ¿y cual seria el monto aproximado?",
-        "R7":  "¿Tienes acceso a financiamiento?",
-        "R8":  "¿Tienes alguna deuda activa actualmente?",
-        "R9":  "¿Qué tan dispuesto estás a seguir un plan de acción con la guía de mentores?",
-        "R10": "Si hoy tuvieras una estrategia clara para invertir, ¿te comprometerías a ejecutarla?",
-        "R11": "En una escala del 1 al 10, ¿qué tan importante es para ti lograr la libertad financiera?",
-    }
+    KEYS = list(PREGUNTAS_DEF.keys())
 
     if request.method == "POST":
+        # Lee crudo (para mensajes) y normaliza (para guardar)
         nombre = (request.form.get("nombre") or "").strip()
-        telefono = _normalize_phone(request.form.get("telefono"))
-        correo = _normalize_email(request.form.get("correo"))
+        telefono_raw = request.form.get("telefono") or ""
+        telefono = _normalize_phone(telefono_raw)
+        correo_raw = (request.form.get("correo") or "").strip()
+        correo_norm = _normalize_email(correo_raw.replace(",", "."))  # corrige ,com → .com
         generacion = _format_generacion(request.form.get("generacion"))
-        estatus_venta = request.form.get("estatus_venta") or "0"
+        estatus_venta_raw = request.form.get("estatus_venta") or "0"
 
-        # Validación básica
-        if not nombre or not telefono or not correo or not generacion:
-            return render_template("postventa_diagnostico_form.html",
-                                   preguntas=preguntas,
-                                   error="Completa nombre, teléfono, correo y generación.")
+        # Validaciones con mensajes útiles
+        errors = []
+        if not nombre:
+            errors.append("Ingresa el nombre.")
+        if not telefono or not re.fullmatch(r"\d{10}", telefono):
+            errors.append("El teléfono debe tener exactamente 10 dígitos.")
+        if not correo_raw:
+            errors.append("Ingresa el correo.")
+        else:
+            if "," in correo_raw:
+                errors.append("El correo contiene coma ',' — cámbiala por punto '.'.")
+            # Regex sencilla de e-mail
+            if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo_norm):
+                errors.append("El correo no parece válido (ejemplo: usuario@dominio.com).")
+        if not generacion:
+            errors.append("Indica la generación en formato G-01, G-02, ...")
 
-        # Scores 1..3
+        # Preguntas R1..R11
         vals = {}
-        for k in preguntas.keys():
-            v = request.form.get(k)
-            if v not in {"1", "2", "3"}:
-                return render_template("postventa_diagnostico_form.html",
-                                       preguntas=PREGUNTAS_DEF,
-                                       error=f"Falta o es inválido el campo {k} (1, 2 o 3)")
-            vals[k] = int(v)
+        faltantes = []
+        invalidas = []
+        for k in KEYS:
+            v = (request.form.get(k) or "").strip()
+            if not v:
+                faltantes.append(k)
+            elif v not in {"1", "2", "3"}:
+                invalidas.append(k)
+            else:
+                vals[k] = int(v)
 
+        if faltantes:
+            errors.append(f"Faltan respuestas en: {', '.join(faltantes)} (elige 1, 2 o 3).")
+        if invalidas:
+            errors.append(f"Valores inválidos en: {', '.join(invalidas)} (debe ser 1, 2 o 3).")
+
+        # Si hay errores, re-render con feedback y valores previos
+        if errors:
+            return render_template(
+                "postventa_diagnostico_form.html",
+                preguntas=PREGUNTAS_DEF,  # ← siempre el mismo shape que espera el template
+                errors=errors,
+                form=request.form
+            ), 400
+
+        # Parseo seguro de estatus_venta
         try:
-            estatus_venta = int(estatus_venta)
+            estatus_venta = int(estatus_venta_raw)
         except ValueError:
             estatus_venta = 0
 
         nuevo_id = _postventa_next_id()
         calificacion = sum(vals.values())
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
         row = {
             "ID": nuevo_id,
             "NOMBRE": nombre,
             "TELEFONO": telefono,
-            "CORREO": correo,
+            "CORREO": correo_norm,
             "GENERACION": generacion,
             "FECHA": now_iso,
-            "R1": vals["R1"], "R2": vals["R2"], "R3": vals["R3"],
-            "R4": vals["R4"], "R5": vals["R5"], "R6": vals["R6"],
-            "R7": vals["R7"], "R8": vals["R8"], "R9": vals["R9"],
-            "R10": vals["R10"], "R11": vals["R11"],
+            **{k: vals[k] for k in KEYS},  # R1..R11
             "CALIFICACION": calificacion,
             "ESTATUS_VENTA": estatus_venta,
         }
 
-        errors = client.insert_rows_json(POSTVENTA_TABLA_BASE, [row])
-        if errors:
-            return render_template("postventa_diagnostico_form.html",
-                                   preguntas=preguntas,
-                                   error=f"Error al guardar en BigQuery: {errors}")
+        errors_bq = client.insert_rows_json(POSTVENTA_TABLA_BASE, [row])
+        if errors_bq:
+            return render_template(
+                "postventa_diagnostico_form.html",
+                preguntas=PREGUNTAS_DEF,
+                errors=[f"Error al guardar en BigQuery: {errors_bq}"],
+                form=request.form
+            ), 500
+
         return redirect(url_for("postventa_diagnostico_list"))
 
     # GET
-    return render_template("postventa_diagnostico_form.html", preguntas=PREGUNTAS_DEF)
+    return render_template("postventa_diagnostico_form.html",
+                           preguntas=PREGUNTAS_DEF,
+                           errors=[],
+                           form=None)
 
 
 @app.route("/postventa/diagnostico/list")
