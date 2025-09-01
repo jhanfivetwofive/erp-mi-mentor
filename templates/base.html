@@ -75,7 +75,7 @@
           {% set fallback_url = url_for('catalogo_programas') %}
         {% elif path.startswith('/postventa/') %}
           {# Para postventa, mejor vuelve al listado de diagnósticos, NO a insights #}
-          {% set fallback_url = url_for('postventa_diagnostico_list') %}
+          {% set fallback_url = url_for('alumnos_page') %}
         {% endif %}
 
         <!-- Menú izquierdo -->
@@ -169,51 +169,64 @@
 
   {% block scripts %}
   <script>
-  (function(){
+  (function () {
     const btns = document.querySelectorAll('.js-back');
-    if (!btns.length) return;
-
-    // Ruta de Insights para detectarla como "no válida" para volver
+    const here = location.pathname + location.search;
     const INSIGHTS_PATH = "{{ url_for('postventa_insights') }}";
 
+    // 1) Memoriza la última página "no postventa" para usarla como regreso
+    try {
+      if (!here.startsWith('/postventa/')) {
+        localStorage.setItem('mmi_last_path', here);
+      }
+    } catch (_) {}
+
+    // 2) Acción del botón "Atrás"
     function goBack(e) {
       e.preventDefault();
       const btn = e.currentTarget;
       const fallback = btn.getAttribute('data-fallback-href') || '/';
 
       try {
+        // a) Si hay referrer del mismo origen y NO es Insights → back
         if (document.referrer) {
           const ref = new URL(document.referrer);
           const sameOrigin = ref.origin === location.origin;
           const notSamePage = ref.pathname !== location.pathname;
-          const isInsights = ref.pathname === INSIGHTS_PATH;  // <- si vienes de Insights, ignora history.back()
+          const isInsights = ref.pathname === INSIGHTS_PATH;
 
           if (sameOrigin && notSamePage && !isInsights) {
             history.back();
             return;
           }
         }
+
+        // b) Si tenemos una "última página" recordada (no-postventa), úsala
+        const last = localStorage.getItem('mmi_last_path');
+        if (last && last !== here) {
+          window.location.href = last;
+          return;
+        }
+
+        // c) Si hay historial navegable y no venimos de Insights, intenta volver
         if (history.length > 1) {
-          // Si hay historial pero el referrer fue Insights (o no confiable), mejor usa fallback
-          // para evitar el “rebote” a Insights
-          const refPath = (document.referrer ? new URL(document.referrer).pathname : "");
+          const refPath = document.referrer ? new URL(document.referrer).pathname : "";
           if (refPath && refPath !== INSIGHTS_PATH) {
             history.back();
             return;
           }
         }
       } catch (_) {
-        // ignoramos errores de URL/referrer
+        // ignorar
       }
 
-      // Fallback definitivo
+      // d) Fallback definitivo
       window.location.href = fallback;
     }
 
     btns.forEach(b => b.addEventListener('click', goBack));
   })();
   </script>
-
 
   {% endblock %}
 </body>
