@@ -8,51 +8,42 @@
 {% else %}
 
   {# ========= HERO ========= #}
-  <div class="card shadow-sm mb-4">
-    <div class="card-body d-flex flex-wrap align-items-center gap-3 justify-content-between">
-      <div class="d-flex align-items-center gap-3">
-        <div class="rounded-circle bg-success-subtle border border-success-subtle d-flex align-items-center justify-content-center"
-             style="width:56px;height:56px;">
-          <i class="bi bi-person fs-3 text-success"></i>
-        </div>
-        <div>
-          <h3 class="mb-1">{{ alumno_info.NOMBRE_ALUMNO or '—' }}</h3>
-          <div class="small text-muted">
-            <i class="bi bi-envelope me-1"></i>{{ alumno_info.CORREO or '—' }}
-            &nbsp;·&nbsp;
-            <i class="bi bi-telephone me-1"></i>{{ alumno_info.TELEFONO or '—' }}
-            {% if alumno_info.FECHA_INSCRIPCION %}
-              &nbsp;·&nbsp;
-              <i class="bi bi-calendar me-1"></i>{{ (alumno_info.FECHA_INSCRIPCION|string)[:10] }}
-            {% endif %}
-          </div>
-        </div>
-      </div>
-
-      <div class="d-flex align-items-center gap-2 ms-auto">
-        {% if alumno_info.TELEFONO %}
-          <a class="btn btn-outline-success" href="tel:{{ alumno_info.TELEFONO }}"><i class="bi bi-telephone-outbound me-1"></i>Llamar</a>
-        {% endif %}
-        {% if alumno_info.CORREO %}
-          <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}"><i class="bi bi-envelope-at me-1"></i>Correo</a>
-        {% endif %}
-        {% if whatsapp_url %}
-          <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
-            <i class="bi bi-whatsapp me-1"></i> WhatsApp
-          </a>
-        {% endif %}
-        <a class="btn btn-outline-secondary" href="{{ url_for('alumnos_page') }}">
-          <i class="bi bi-arrow-left me-1"></i> Volver
-        </a>
-      </div>
-    </div>
+  <div class="d-flex align-items-center flex-wrap gap-2 ms-auto">
+    {% if alumno_info.CORREO %}
+      <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}">
+        <i class="bi bi-envelope-at me-1"></i>Correo
+      </a>
+    {% endif %}
+    {% if whatsapp_url %}
+      <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
+        <i class="bi bi-whatsapp me-1"></i> WhatsApp
+      </a>
+    {% endif %}
+    <button id="btnCsv" class="btn btn-outline-secondary">
+      <i class="bi bi-filetype-csv me-1"></i>CSV
+    </button>
+    <button id="btnTxt" class="btn btn-outline-secondary">
+      <i class="bi bi-filetype-txt me-1"></i>TXT
+    </button>
+    <a class="btn btn-outline-secondary" href="{{ back_url() }}">
+      <i class="bi bi-arrow-left me-1"></i> Volver
+    </a>
   </div>
+
 
   {# ========= RESUMEN ECONÓMICO ========= #}
   {% set gasto = alumno_info.GASTO or 0 %}
   {% set ingreso = alumno_info.INGRESO or 0 %}
   {% set saldo = ingreso - gasto %}
   {% set saldo_cls = 'text-success' if saldo>0 else ('text-danger' if saldo<0 else 'text-muted') %}
+  {% set puede_mostrar_invertido = rol_usuario|default('', true)|lower in ['admin','postventa','adquisicion'] %}
+  {% set col = 'col-md-3' if puede_mostrar_invertido else 'col-md-4' %}
+  {% set gasto = alumno_info.GASTO or 0 %}
+  {% set ingreso = alumno_info.INGRESO or 0 %}
+  {% set invertido = alumno_info.MONTO_INVERTIDO_CURSOS or 0 %}
+  {% set saldo = ingreso - gasto %}
+  {% set saldo_cls = 'text-success' if saldo>0 else ('text-danger' if saldo<0 else 'text-muted') %}
+
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-white border-0">
       <h5 class="mb-0 d-flex align-items-center">
@@ -61,27 +52,38 @@
     </div>
     <div class="card-body">
       <div class="row g-3">
-        <div class="col-md-4">
+        <div class="{{ col }}">
           <div class="stat-tile h-100">
             <div class="stat-icon"><i class="bi bi-cash-coin"></i></div>
             <div class="stat-label">Gasto acumulado</div>
             <div class="stat-value">{{ gasto | mxn }}</div>
           </div>
         </div>
-        <div class="col-md-4">
+        <div class="{{ col }}">
           <div class="stat-tile h-100">
             <div class="stat-icon"><i class="bi bi-wallet2"></i></div>
             <div class="stat-label">Ingreso acumulado</div>
             <div class="stat-value">{{ ingreso | mxn }}</div>
           </div>
         </div>
-        <div class="col-md-4">
+        <div class="{{ col }}">
           <div class="stat-tile h-100">
             <div class="stat-icon"><i class="bi bi-balance-scale"></i></div>
             <div class="stat-label">Saldo (Ingreso − Gasto)</div>
             <div class="stat-value {{ saldo_cls }}">{{ saldo | mxn }}</div>
           </div>
         </div>
+
+        {% if puede_mostrar_invertido %}
+        <div class="{{ col }}">
+          <div class="stat-tile h-100">
+            <div class="stat-icon"><i class="bi bi-mortarboard"></i></div>
+            <div class="stat-label">Monto invertido en cursos</div>
+            <div class="stat-value">{{ invertido | mxn }}</div>
+            <small class="text-muted">Visible para Adquisición/Postventa/Admin</small>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -428,139 +430,126 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-  // Gráfica de avance de cursos (si aplica)
-  (function(){
-    const labels = {{ (chart_labels or []) | tojson }};
-    const values = {{ (chart_values or []) | tojson }};
-    const el = document.getElementById('chartCursos');
-    if (!el || !labels.length) return;
+(function () {
+  const btnCsv = document.getElementById('btnCsv');
+  const btnTxt = document.getElementById('btnTxt');
+  if (!btnCsv && !btnTxt) return;
 
-    new Chart(el.getContext('2d'), {
-      type: 'bar',
-      data: { labels, datasets: [{ label: '% completado', data: values, borderWidth: 1 }] },
-      options: {
-        indexAxis: 'y',
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          x: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: (v) => v + '%' } },
-          y: { ticks: { autoSkip: false, maxTicksLimit: 20 } }
-        },
-        plugins: { legend: { display: false } }
-      }
-    });
-  })();
+  const alumno = {{ alumno_info | tojson }};
+  const cursos = {{ (cursos_info or []) | tojson }};
+  const segs   = {{ (seguimientos or []) | tojson }};
 
-  // Guardar seguimiento
-  (function () {
-    const form = document.getElementById('formSeguimiento');
-    if (!form) return;
+  function dl(filename, mime, content) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    URL.revokeObjectURL(url); a.remove();
+  }
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const spinner = document.getElementById('segSpinner');
-      const alertSeg = document.getElementById('alertSeg');
-
-      const payload = {
-        correo: document.getElementById('correo').value,
-        tipo: document.getElementById('tipo').value,
-        estado: document.getElementById('estado').value,
-        nota: (document.getElementById('nota').value || '').trim()
-      };
-      if (!payload.nota) {
-        alertSeg.textContent = 'Escribe una nota.';
-        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
-        return;
-      }
-
-      alertSeg.classList.add('d-none'); alertSeg.classList.remove('alert-success','alert-danger');
-      spinner.classList.remove('d-none');
-      try {
-        const resp = await fetch('/api/seguimiento', {
-          method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'same-origin',
-          body: JSON.stringify(payload)
-        });
-        const data = await resp.json().catch(()=>({}));
-        if (!resp.ok) throw new Error((data && data.error) ? JSON.stringify(data.error) : 'Error desconocido');
-        alertSeg.textContent = 'Seguimiento guardado correctamente.';
-        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-success');
-        form.reset();
-        setTimeout(()=> window.location.reload(), 800);
-      } catch (err) {
-        alertSeg.textContent = 'No se pudo guardar el seguimiento: ' + err.message;
-        alertSeg.classList.remove('d-none'); alertSeg.classList.add('alert','alert-danger');
-      } finally { spinner.classList.add('d-none'); }
-    });
-  })();
-
-  // Kanban
-  (function () {
-    const correoAlumno = "{{ (alumno_info.CORREO if alumno_info else '')|lower }}";
-    const rol = "{{ rol_usuario|default('',true)|lower }}";
-    if (!correoAlumno || !['postventa', 'admin'].includes(rol)) return;
-
-    const cols = {
-      contactado: document.getElementById('col-contactado'),
-      en_proceso: document.getElementById('col-enproceso'),
-      cerrado: document.getElementById('col-cerrado'),
+  function toCsv(rows) {
+    const esc = (v) => {
+      const s = (v ?? '').toString();
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
     };
+    return rows.map(r => r.map(esc).join(',')).join('\n');
+  }
 
-    function cardTemplate(s) {
-      const fecha = s.FECHA ? new Date(s.FECHA).toLocaleString() : '';
-      const el = document.createElement('div');
-      el.className = 'kanban-card'; el.draggable = true; el.dataset.id = s.ID; el.dataset.estado = s.ESTADO || '';
+  function alumnoRows() {
+    return [
+      ['CAMPO','VALOR'],
+      ['ID_ALUMNO', alumno.ID_ALUMNO || ''],
+      ['NOMBRE_ALUMNO', alumno.NOMBRE_ALUMNO || ''],
+      ['CORREO', alumno.CORREO || ''],
+      ['TELEFONO', alumno.TELEFONO || ''],
+      ['FECHA_INSCRIPCION', (alumno.FECHA_INSCRIPCION||'').toString().slice(0,10)],
+      ['PROGRAMA', alumno.PROGRAMA || ''],
+      ['GENERACION_PROGRAMA', alumno.GENERACION_PROGRAMA || ''],
+      ['GASTO', alumno.GASTO ?? ''],
+      ['INGRESO', alumno.INGRESO ?? ''],
+      ['MONTO_INVERTIDO_CURSOS', alumno.MONTO_INVERTIDO_CURSOS ?? '']
+    ];
+  }
 
-      const top = document.createElement('div'); top.className = 'd-flex justify-content-between align-items-start';
-      const strong = document.createElement('strong'); strong.textContent = (s.TIPO || '').toUpperCase();
-      const badge = document.createElement('span'); badge.className = 'badge text-bg-secondary kanban-badge'; badge.textContent = (s.ROL_AUTOR || '').toUpperCase();
-      const smallFecha = document.createElement('div'); smallFecha.className = 'small text-muted'; smallFecha.textContent = fecha;
-      const notaDiv = document.createElement('div'); notaDiv.className = 'mt-1'; notaDiv.textContent = (s.NOTA ?? '').toString();
-      const autorDiv = document.createElement('div'); autorDiv.className = 'small text-muted mt-1'; autorDiv.textContent = `Por: ${(s.AUTOR ?? '').toString()}`;
+  function cursosRows() {
+    if (!Array.isArray(cursos) || !cursos.length) return [];
+    const head = [['COURSE_NAME','PERCENTAGE_COMPLETED','STARTED_AT','UPDATED_AT','COMPLETED_AT']];
+    const body = cursos.map(c => [
+      c.COURSE_NAME ?? '',
+      c.PERCENTAGE_COMPLETED ?? '',
+      c.STARTED_AT ?? '',
+      c.UPDATED_AT ?? '',
+      c.COMPLETED_AT ?? ''
+    ]);
+    return [[''],['SECCION','CURSOS']].concat(head, body);
+  }
 
-      top.appendChild(strong); top.appendChild(badge);
-      el.appendChild(top); el.appendChild(smallFecha); el.appendChild(notaDiv); el.appendChild(autorDiv);
+  function segRows() {
+    if (!Array.isArray(segs) || !segs.length) return [];
+    const head = [['ID','FECHA','TIPO','ESTADO','AUTOR','ROL_AUTOR','NOTA']];
+    const body = segs.map(s => [
+      s.ID ?? '',
+      s.FECHA ?? '',
+      s.TIPO ?? '',
+      s.ESTADO ?? '',
+      s.AUTOR ?? '',
+      s.ROL_AUTOR ?? '',
+      (s.NOTA ?? '').toString().replace(/\n/g,' ')
+    ]);
+    return [[''],['SECCION','SEGUIMIENTOS (últimos)']].concat(head, body);
+  }
 
-      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', s.ID); e.dataTransfer.effectAllowed = 'move'; });
-      return el;
-    }
-
-    function ensureEmptyState() {
-      Object.values(cols).forEach(col => {
-        if (!col.querySelector('.kanban-card')) {
-          const p = document.createElement('div'); p.className = 'text-muted small'; p.textContent = 'Sin registros'; col.appendChild(p);
-        }
+  function toTxt() {
+    const lines = [];
+    const fmt = (k,v) => `${k}: ${v ?? ''}`;
+    lines.push(
+      '=== ALUMNO ===',
+      fmt('ID_ALUMNO', alumno.ID_ALUMNO),
+      fmt('NOMBRE', alumno.NOMBRE_ALUMNO),
+      fmt('CORREO', alumno.CORREO),
+      fmt('TELEFONO', alumno.TELEFONO),
+      fmt('FECHA_INSCRIPCION', (alumno.FECHA_INSCRIPCION||'').toString().slice(0,10)),
+      fmt('PROGRAMA', alumno.PROGRAMA),
+      fmt('GENERACION_PROGRAMA', alumno.GENERACION_PROGRAMA),
+      '',
+      '=== RESUMEN ECONÓMICO ===',
+      fmt('GASTO', alumno.GASTO),
+      fmt('INGRESO', alumno.INGRESO),
+      fmt('MONTO_INVERTIDO_CURSOS', alumno.MONTO_INVERTIDO_CURSOS),
+      fmt('SALDO (INGRESO - GASTO)', (alumno.INGRESO||0) - (alumno.GASTO||0))
+    );
+    if (Array.isArray(cursos) && cursos.length) {
+      lines.push('', '=== CURSOS (Top N) ===');
+      cursos.forEach(c => {
+        lines.push(`- ${c.COURSE_NAME || '(sin nombre)'} | ${c.PERCENTAGE_COMPLETED ?? ''}% | upd: ${c.UPDATED_AT ?? ''}`);
       });
     }
-
-    async function loadSeguimientos() {
-      const res = await fetch(`/api/seguimientos?correo=${encodeURIComponent(correoAlumno)}`, { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const data = await res.json();
-      Object.values(cols).forEach(c => c.innerHTML = '');
-      (data || []).forEach(s => {
-        const estado = (s.ESTADO || '').toLowerCase();
-        const col = cols[estado] || cols.contactado;
-        col.appendChild(cardTemplate(s));
+    if (Array.isArray(segs) && segs.length) {
+      lines.push('', '=== SEGUIMIENTOS ===');
+      segs.forEach(s => {
+        lines.push(`[${s.FECHA || ''}] ${ (s.TIPO||'').toUpperCase() } / ${ (s.ESTADO||'').toUpperCase() } — ${s.NOTA || ''} (por ${s.AUTOR || ''} - ${s.ROL_AUTOR || ''})`);
       });
-      ensureEmptyState();
     }
+    return lines.join('\n');
+  }
 
-    Object.entries(cols).forEach(([estado, colEl]) => {
-      colEl.addEventListener('dragover', (e) => { e.preventDefault(); colEl.classList.add('drag-over'); });
-      colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
-      colEl.addEventListener('drop', async (e) => {
-        e.preventDefault(); colEl.classList.remove('drag-over');
-        const segId = e.dataTransfer.getData('text/plain'); if (!segId) return;
-        const card = document.querySelector(`.kanban-card[data-id="${segId}"]`); if (card) colEl.appendChild(card);
-        try {
-          const resp = await fetch(`/api/seguimiento/${encodeURIComponent(segId)}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ estado })
-          });
-          if (!resp.ok) { await loadSeguimientos(); alert('No se pudo actualizar el estado'); }
-        } catch { await loadSeguimientos(); alert('Error de red'); }
-      });
-    });
+  btnCsv?.addEventListener('click', () => {
+    const rows = []
+      .concat(alumnoRows())
+      .concat(cursosRows())
+      .concat(segRows());
+    const csv = toCsv(rows);
+    const fname = `alumno_${(alumno.CORREO||'sin_correo').replace(/[^a-z0-9_.-]+/gi,'_')}.csv`;
+    dl(fname, 'text/csv;charset=utf-8', csv);
+  });
 
-    loadSeguimientos();
-  })();
+  btnTxt?.addEventListener('click', () => {
+    const txt = toTxt();
+    const fname = `alumno_${(alumno.CORREO||'sin_correo').replace(/[^a-z0-9_.-]+/gi,'_')}.txt`;
+    dl(fname, 'text/plain;charset=utf-8', txt);
+  });
+})();
 </script>
+
 {% endblock %}

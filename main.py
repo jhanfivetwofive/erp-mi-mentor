@@ -859,21 +859,40 @@ def get_alumno_info(correo):
         )
 
         # ---- 1) Info del alumno (se muestra a todos) ----
+                # ---- 1) Info del alumno (se muestra a todos) ----
         query_alumno = """
-            SELECT
-              ID_ALUMNO,
-              CORREO,
-              STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
-              STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
-              MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
-              MAX(TELEFONO) AS TELEFONO,
-              MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION,
-              MAX(GASTO) AS GASTO,
-              MAX(INGRESO) AS INGRESO
-            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-            WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
-            GROUP BY ID_ALUMNO, CORREO
+            WITH base AS (
+                    SELECT DISTINCT
+                        ID_INSCRIPCION,
+                        ID_ALUMNO,
+                        LOWER(TRIM(CORREO)) AS CORREO,
+                        PROGRAMA,
+                        GENERACION_PROGRAMA,
+                        CAST(PRECIO_GENERACION AS NUMERIC) AS PRECIO_GENERACION,
+                        CAST(GASTO AS NUMERIC) AS GASTO,
+                        CAST(INGRESO AS NUMERIC) AS INGRESO,
+                        NOMBRE_ALUMNO,
+                        TELEFONO,
+                        FECHA_INSCRIPCION
+                    FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+                    WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
+                    )
+                    SELECT
+                    ID_ALUMNO,
+                    CORREO,
+                    STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
+                    STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
+                    MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
+                    MAX(TELEFONO) AS TELEFONO,
+                    MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION,
+                    -- Totales reales por alumno
+                    SUM(GASTO)  AS GASTO,
+                    SUM(INGRESO) AS INGRESO,
+                    SUM(PRECIO_GENERACION) AS MONTO_INVERTIDO_CURSOS
+                    FROM base
+                    GROUP BY ID_ALUMNO, CORREO
         """
+
         result_alumno = client.query(
             query_alumno, job_config=job_config).result()
 
@@ -888,7 +907,8 @@ def get_alumno_info(correo):
                 'PROGRAMA': row['PROGRAMA'],
                 'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA'],
                 'GASTO': row['GASTO'],
-                'INGRESO': row['INGRESO']
+                'INGRESO': row['INGRESO'],
+                'MONTO_INVERTIDO_CURSOS': row['MONTO_INVERTIDO_CURSOS']
             }
             break
 
