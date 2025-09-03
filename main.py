@@ -513,10 +513,73 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+# === BACK URL ROBUSTO (ATRÁS) ===
+def _is_safe_internal_url(target: str) -> bool:
+    """Permite solo URLs internas del mismo host (previene saltos externos)."""
+    if not target:
+        return False
+    try:
+        host_url = urllib.parse.urlparse(request.host_url)
+        redirect_url = urllib.parse.urlparse(urllib.parse.urljoin(request.host_url, target))
+        return (redirect_url.scheme in ("http", "https") and host_url.netloc == redirect_url.netloc)
+    except Exception:
+        return False
+
+def _route_por_rol() -> str:
+    """Home por rol. Ajusta endpoints si cambian."""
+    rol = (current_user_role() or "").lower()
+    mapa = {
+        "admin": "alumnos_page",                 # tu dashboard redirige a alumnos_page
+        "postventa": "postventa_diagnostico_list",
+        "comunidad": "comunidad_list",
+        "adquisicion": "alumnos_page",           # si tienes otro home de Adquisición, cámbialo aquí
+        "people": "alumnos_page",
+        "invitado": "alumnos_page",
+        "": "alumnos_page",
+    }
+    endpoint = mapa.get(rol, "alumnos_page")
+    try:
+        return url_for(endpoint)
+    except Exception:
+        return url_for("alumnos_page")
+
+def back_url(default: str | None = None) -> str:
+    """
+    Resuelve una URL de regreso robusta:
+      1) ?next= (o form 'next')
+      2) request.referrer (interno)
+      3) ruta por rol
+      4) alumnos_page
+    """
+    # 1) next
+    next_param = request.args.get("next") or request.form.get("next")
+    if next_param and _is_safe_internal_url(next_param):
+        return next_param
+
+    # 2) referrer
+    ref = request.referrer
+    if ref and _is_safe_internal_url(ref):
+        return ref
+
+    # 3) default (si lo pasan) o por rol
+    if default and _is_safe_internal_url(default):
+        return default
+
+    # 4) fallback final
+    try:
+        return _route_por_rol()
+    except Exception:
+        return url_for("alumnos_page")
+
 
 # =========================================================
 # 4) Rutas
 # =========================================================
+
+# Exponer a Jinja como función global
+@app.context_processor
+def _inject_back_url():
+    return {"back_url": back_url}
 
 
 @app.route("/")

@@ -46,8 +46,8 @@ function ensureScript(src) {
 
 (async function init(){
   // CSS (por si base.html no lo trae)
-  ensureCss('cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css');
-  ensureCss('cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css');
+  ensureCss('https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css');
+  ensureCss('https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css');
 
   // jQuery + DataTables (si no están)
   if (!(window.$ && window.jQuery)) {
@@ -80,7 +80,9 @@ function cargarProgramas() {
         return;
       }
 
-      const columnas = ["ID_PROGRAMA","NOMBRE_PROGRAMA","NOMENCLATURA","DESCRIPCION","SKU_PRODUCTO","EMBUDO"];
+      // después de EMBUDO en `columnas`
+      const columnas = ["ID_PROGRAMA","NOMBRE_PROGRAMA","NOMENCLATURA","DESCRIPCION","SKU_PRODUCTO","EMBUDO","__ACCION__"];
+
       let thead = '<thead><tr>';
       columnas.forEach(col => thead += `<th>${headersAmigables[col] || col}</th>`);
       thead += '</tr></thead>';
@@ -88,13 +90,23 @@ function cargarProgramas() {
       let tbody = '<tbody>';
       (data || []).forEach(row => {
         tbody += '<tr>';
-        columnas.forEach(col => {
+        (columnas || []).forEach(col => {
+          if (col === "__ACCION__") {
+            const nextParam = encodeURIComponent(window.location.href);
+            const id = encodeURIComponent(String(row.ID_PROGRAMA || ""));
+            const href = `/programa/${id}?next=${nextParam}`;
+            tbody += `<td class="text-nowrap">
+              <a href="${href}" class="btn btn-sm btn-outline-primary">Ver</a>
+            </td>`;
+            return; // saltamos al siguiente col
+          }
           let valor = (row[col] ?? '');
           tbody += `<td>${valor}</td>`;
         });
         tbody += '</tr>';
       });
       tbody += '</tbody>';
+
 
       const tableHTML = `
         <table id="programasTable" class="table table-sm table-hover table-striped table-bordered align-middle text-nowrap w-100">

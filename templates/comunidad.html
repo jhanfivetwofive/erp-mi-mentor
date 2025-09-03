@@ -59,9 +59,14 @@ document.addEventListener("DOMContentLoaded", function() {
       { data: "NPS_FINAL" },
       { data: "TOTAL_ASISTENCIA_WEBINAR" },
       { data: "CORREO",
-        render: function(c){ return `<a class="btn btn-sm btn-outline-primary" href="/comunidad/${encodeURIComponent(c)}">Ver</a>`; },
+        render: function(c){
+          const nextParam = encodeURIComponent(window.location.href);
+          const href = `/comunidad/${encodeURIComponent(c)}?next=${nextParam}`;
+          return `<a class="btn btn-sm btn-outline-primary" href="${href}">Ver</a>`;
+        },
         orderable: false, searchable: false
       }
+
     ],
     pageLength: 25
   });

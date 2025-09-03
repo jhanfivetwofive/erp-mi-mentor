@@ -81,8 +81,8 @@
           {% if user %}
           <!-- Botón Atrás -->
           <li class="nav-item me-2">
-            <a class="btn btn-outline-secondary btn-sm js-back" href="#"
-              data-fallback-href="{{ fallback_url or url_for('alumnos_page') }}">
+            <a class="btn btn-outline-secondary btn-sm"
+              href="{{ back_url(fallback_url or url_for('alumnos_page')) }}">
               <i class="bi bi-arrow-left"></i> Atrás
             </a>
           </li>
@@ -162,67 +162,6 @@
   </main>
 
   {% block scripts %}
-  <script>
-    (function () {
-      const btns = document.querySelectorAll('.js-back');
-      const here = location.pathname + location.search;
-      const POSTVENTA_PREFIX = '/postventa/';
-      const FALLBACK = '{{ url_for("alumnos_page") }}'; // /alumnos
-
-      // Memoriza última página NO postventa
-      try {
-        if (!here.startsWith(POSTVENTA_PREFIX)) {
-          localStorage.setItem('mmi_last_path', here);
-        }
-      } catch (_) {}
-
-      function goBack(e) {
-        e.preventDefault();
-
-        // Si estamos en /postventa/*, solo regresa a una página NO postventa; si no hay, ve a /alumnos
-        try {
-          if (here.startsWith(POSTVENTA_PREFIX)) {
-            // 1) Si el referrer es mismo origen y NO es postventa → back
-            if (document.referrer) {
-              const ref = new URL(document.referrer);
-              if (ref.origin === location.origin && !ref.pathname.startsWith(POSTVENTA_PREFIX)) {
-                history.back();
-                return;
-              }
-            }
-            // 2) Última página no-postventa guardada
-            const last = localStorage.getItem('mmi_last_path');
-            if (last && !last.startsWith(POSTVENTA_PREFIX) && last !== here) {
-              window.location.href = last;
-              return;
-            }
-            // 3) Fallback fijo
-            window.location.href = FALLBACK;
-            return;
-          }
-
-          // Fuera de /postventa/: usa back si el referrer es válido; si no, usa último guardado o fallback
-          if (document.referrer) {
-            const ref = new URL(document.referrer);
-            if (ref.origin === location.origin && ref.pathname !== location.pathname) {
-              history.back();
-              return;
-            }
-          }
-          const last = localStorage.getItem('mmi_last_path');
-          if (last && last !== here) {
-            window.location.href = last;
-            return;
-          }
-        } catch (_) {}
-
-        window.location.href = FALLBACK;
-      }
-
-      btns.forEach(b => b.addEventListener('click', goBack));
-    })();
-  </script>
-
   {% endblock %}
 
 </body>
