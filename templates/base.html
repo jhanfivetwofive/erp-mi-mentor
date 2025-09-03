@@ -104,6 +104,17 @@
           {% endif %}
           {% endif %}
 
+          {# ... dentro de la barra de navegación ... #}
+          {% set rol_base = (session.get('user') or {}).get('rol','')|lower %}
+          {% if rol_base in ['adquisicion','admin'] %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('adquisicion_insights') }}">
+                <i class="bi bi-bullseye me-1"></i> Adquisición
+              </a>
+            </li>
+          {% endif %}
+
+
           {% if rol in ['admin', 'postventa'] %}
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle {{ 'active' if request.path.startswith('/postventa/') else '' }}"

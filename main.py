@@ -336,12 +336,13 @@ def _postventa_next_id() -> str:
     return f"E{nxt:05d}"
 
 
-
 app.jinja_env.filters["mxn"] = mxn
 app.jinja_env.globals.update(to_whatsapp_e164=to_whatsapp_e164)
 app.jinja_env.globals.update(PREGUNTAS_DEF=PREGUNTAS_DEF)
 
 # --- KPIs Postventa ---
+
+
 def _postventa_kpis():
     q = """
       SELECT
@@ -355,7 +356,7 @@ def _postventa_kpis():
     try:
         row = next(iter(client.query(q).result()))
         return {k: int(row[k] or 0) for k in
-                ("total","ventas","viables","requiere_ajuste","no_viable")}
+                ("total", "ventas", "viables", "requiere_ajuste", "no_viable")}
     except Exception:
         return {"total": 0, "ventas": 0, "viables": 0,
                 "requiere_ajuste": 0, "no_viable": 0}
@@ -368,6 +369,7 @@ def _parse_date(s):
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return None
+
 
 def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     """
@@ -387,7 +389,8 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
     if generacion:
         wh.append("GENERACION = @gen")
-        params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
+        params.append(bigquery.ScalarQueryParameter(
+            "gen", "STRING", generacion))
     where_sql = "WHERE " + " AND ".join(wh)
 
     # 1) KPIs
@@ -403,7 +406,8 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     FROM `{table}`
     {where_sql}
     """
-    row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()), None)
+    row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(
+        query_parameters=params)).result()), None)
     kpis = {
         "total": int(row["total"]) if row and row["total"] is not None else 0,
         "ventas": int(row["ventas"]) if row and row["ventas"] is not None else 0,
@@ -413,8 +417,10 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "avg_score": float(row["avg_score"]) if row and row["avg_score"] is not None else None,
         "mediana": float(row["mediana"]) if row and row["mediana"] is not None else None,
     }
-    kpis["tasa_conversion"] = round((kpis["ventas"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
-    kpis["pct_viable"] = round((kpis["viables"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
+    kpis["tasa_conversion"] = round(
+        (kpis["ventas"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
+    kpis["pct_viable"] = round(
+        (kpis["viables"] / kpis["total"])*100, 1) if kpis["total"] else 0.0
 
     # 2) Serie temporal (por día)
     q_series = f"""
@@ -513,6 +519,193 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+
+def _adq_insights_data(generacion=None, date_from=None, date_to=None):
+    """
+    Insights de Adquisición:
+      - KPIs por selección (gen/fechas)
+      - Serie de inscripciones por día
+      - Ranking por generación (leads, inscripciones, diagnosticos, viabilidad, ingreso, gasto, roas)
+      - Cruce detalle: alumno ↔ último diagnóstico ↔ último seguimiento
+    """
+    params = []
+    wh = ["1=1"]
+    if generacion:
+        wh.append("GENERACION_PROGRAMA = @gen")
+        params.append(bigquery.ScalarQueryParameter(
+            "gen", "STRING", generacion))
+    if date_from:
+        wh.append("DATE(FECHA_INSCRIPCION) >= @from")
+        params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+    if date_to:
+        wh.append("DATE(FECHA_INSCRIPCION) <= @to")
+        params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+    where_sql = "WHERE " + " AND ".join(wh)
+
+    # ---------- Ranking por generación ----------
+    q_bygen = f"""
+    WITH base AS (
+      SELECT DISTINCT
+        ID_INSCRIPCION,
+        LOWER(TRIM(CORREO)) AS correo,
+        GENERACION_PROGRAMA,
+        DATE(FECHA_INSCRIPCION) AS f,
+        CAST(GASTO AS NUMERIC) AS gasto,
+        CAST(INGRESO AS NUMERIC) AS ingreso
+      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+      {where_sql}
+    ),
+    leads AS (
+      SELECT GENERACION_PROGRAMA, COUNT(DISTINCT correo) AS leads
+      FROM base GROUP BY GENERACION_PROGRAMA
+    ),
+    insc AS (
+      SELECT GENERACION_PROGRAMA,
+             COUNT(DISTINCT ID_INSCRIPCION) AS inscripciones,
+             SUM(ingreso) AS ingreso,
+             SUM(gasto)  AS gasto
+      FROM base GROUP BY GENERACION_PROGRAMA
+    ),
+    diag AS (
+      SELECT LOWER(TRIM(CORREO)) AS correo,
+             ESTATUS_VENTA,
+             ESTATUS_VIABLE
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
+    ),
+    cross AS (
+      SELECT b.GENERACION_PROGRAMA,
+             COUNTIF(d.correo IS NOT NULL) AS diagnosticos,
+             COUNTIF(d.ESTATUS_VENTA = 1)  AS ventas_diag,
+             COUNTIF(d.ESTATUS_VIABLE = 'VIABLE')            AS viables,
+             COUNTIF(d.ESTATUS_VIABLE = 'REQUIERE AJUSTE')   AS requiere_ajuste,
+             COUNTIF(d.ESTATUS_VIABLE = 'NO VIABLE')         AS no_viable
+      FROM base b
+      LEFT JOIN diag d ON d.correo = b.correo
+      GROUP BY b.GENERACION_PROGRAMA
+    )
+    SELECT
+      i.GENERACION_PROGRAMA AS generacion,
+      COALESCE(l.leads,0) AS leads,
+      COALESCE(i.inscripciones,0) AS inscripciones,
+      COALESCE(c.diagnosticos,0) AS diagnosticos,
+      COALESCE(c.ventas_diag,0)  AS ventas_diag,
+      COALESCE(c.viables,0) AS viables,
+      COALESCE(c.requiere_ajuste,0) AS requiere_ajuste,
+      COALESCE(c.no_viable,0) AS no_viable,
+      COALESCE(i.ingreso,0) AS ingreso,
+      COALESCE(i.gasto,0)   AS gasto,
+      SAFE_DIVIDE(i.ingreso, NULLIF(i.gasto,0)) AS roas
+    FROM insc i
+    LEFT JOIN leads l USING (GENERACION_PROGRAMA)
+    LEFT JOIN cross c USING (GENERACION_PROGRAMA)
+    ORDER BY generacion
+    """
+    bygen_rows = [dict(r) for r in client.query(
+        q_bygen, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()]
+
+    # ---------- KPIs de la selección (gen/fechas) ----------
+    # Si hay 'generacion' elegida, toma su fila; si no, resume todas
+    if generacion:
+        base_kpi = next((r for r in bygen_rows if (
+            r.get("generacion") or "") == generacion), None) or {}
+        kpis = {
+            "leads": int(base_kpi.get("leads") or 0),
+            "inscripciones": int(base_kpi.get("inscripciones") or 0),
+            "diagnosticos": int(base_kpi.get("diagnosticos") or 0),
+            "ventas_diag": int(base_kpi.get("ventas_diag") or 0),
+            "viables": int(base_kpi.get("viables") or 0),
+            "requiere_ajuste": int(base_kpi.get("requiere_ajuste") or 0),
+            "no_viable": int(base_kpi.get("no_viable") or 0),
+            "ingreso": float(base_kpi.get("ingreso") or 0.0),
+            "gasto": float(base_kpi.get("gasto") or 0.0),
+            "roas": float(base_kpi.get("roas") or 0.0),
+        }
+    else:
+        # agrega todo
+        k_leads = sum(int(r["leads"] or 0) for r in bygen_rows)
+        k_insc = sum(int(r["inscripciones"] or 0) for r in bygen_rows)
+        k_diag = sum(int(r["diagnosticos"] or 0) for r in bygen_rows)
+        k_vta = sum(int(r["ventas_diag"] or 0) for r in bygen_rows)
+        k_ing = sum(float(r["ingreso"] or 0) for r in bygen_rows)
+        k_gas = sum(float(r["gasto"] or 0) for r in bygen_rows)
+        k_roas = (k_ing / k_gas) if k_gas else 0.0
+        k_viab = sum(int(r["viables"] or 0) for r in bygen_rows)
+        k_req = sum(int(r["requiere_ajuste"] or 0) for r in bygen_rows)
+        k_no = sum(int(r["no_viable"] or 0) for r in bygen_rows)
+        kpis = {"leads": k_leads, "inscripciones": k_insc, "diagnosticos": k_diag, "ventas_diag": k_vta,
+                "ingreso": k_ing, "gasto": k_gas, "roas": k_roas,
+                "viables": k_viab, "requiere_ajuste": k_req, "no_viable": k_no}
+
+    # ---------- Serie por fecha (inscripciones) ----------
+    q_series = f"""
+    SELECT DATE(FECHA_INSCRIPCION) AS d, COUNT(DISTINCT ID_INSCRIPCION) AS n
+    FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+    {where_sql}
+    GROUP BY d ORDER BY d
+    """
+    series_labels, series_counts = [], []
+    for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        series_labels.append(r["d"].isoformat())
+        series_counts.append(int(r["n"]))
+
+    # ---------- Cruce detalle (último diagnóstico y seguimiento) ----------
+    q_cross = f"""
+    WITH base AS (
+      SELECT DISTINCT
+        LOWER(TRIM(CORREO)) AS correo,
+        MAX(NOMBRE_ALUMNO) AS nombre,
+        MAX(TELEFONO) AS telefono,
+        GENERACION_PROGRAMA
+      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+      {where_sql}
+      GROUP BY GENERACION_PROGRAMA, LOWER(TRIM(CORREO))
+    ),
+    diag AS (
+      SELECT LOWER(TRIM(CORREO)) AS correo,
+             ESTATUS_VIABLE, ESTATUS_VENTA,
+             FECHA_ENCUESTA
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
+    ),
+    seg AS (
+      SELECT LOWER(TRIM(CORREO)) AS correo,
+             ESTADO, FECHA
+      FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA DESC)=1
+    )
+    SELECT b.correo, b.nombre, b.telefono, b.GENERACION_PROGRAMA AS generacion,
+           d.ESTATUS_VIABLE, d.ESTATUS_VENTA, d.FECHA_ENCUESTA AS FECHA_DIAGNOSTICO,
+           s.ESTADO AS ESTADO_SEGUIMIENTO, s.FECHA AS FECHA_SEGUIMIENTO
+    FROM base b
+    LEFT JOIN diag d USING (correo)
+    LEFT JOIN seg  s USING (correo)
+    ORDER BY b.nombre
+    """
+    cross_rows = []
+    for r in client.query(q_cross, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        row = dict(r)
+        cross_rows.append({
+            "correo": row.get("correo"),
+            "nombre": row.get("nombre"),
+            "telefono": row.get("telefono"),
+            "generacion": row.get("generacion"),
+            "estatus_viable": row.get("ESTATUS_VIABLE"),
+            "estatus_venta": row.get("ESTATUS_VENTA"),
+            "fecha_diag": row.get("FECHA_DIAGNOSTICO"),
+            "estado_seg": row.get("ESTADO_SEGUIMIENTO"),
+            "fecha_seg": row.get("FECHA_SEGUIMIENTO"),
+        })
+
+    return {
+        "kpis": kpis,
+        "by_gen": bygen_rows,
+        "series_labels": series_labels,
+        "series_insc": series_counts,
+        "cross_rows": cross_rows,
+    }
+
+
 # === BACK URL ROBUSTO (ATRÁS) ===
 def _is_safe_internal_url(target: str) -> bool:
     """Permite solo URLs internas del mismo host (previene saltos externos)."""
@@ -520,10 +713,12 @@ def _is_safe_internal_url(target: str) -> bool:
         return False
     try:
         host_url = urllib.parse.urlparse(request.host_url)
-        redirect_url = urllib.parse.urlparse(urllib.parse.urljoin(request.host_url, target))
+        redirect_url = urllib.parse.urlparse(
+            urllib.parse.urljoin(request.host_url, target))
         return (redirect_url.scheme in ("http", "https") and host_url.netloc == redirect_url.netloc)
     except Exception:
         return False
+
 
 def _route_por_rol() -> str:
     """Home por rol. Ajusta endpoints si cambian."""
@@ -532,7 +727,8 @@ def _route_por_rol() -> str:
         "admin": "alumnos_page",                 # tu dashboard redirige a alumnos_page
         "postventa": "postventa_diagnostico_list",
         "comunidad": "comunidad_list",
-        "adquisicion": "alumnos_page",           # si tienes otro home de Adquisición, cámbialo aquí
+        # si tienes otro home de Adquisición, cámbialo aquí
+        "adquisicion": "alumnos_page",
         "people": "alumnos_page",
         "invitado": "alumnos_page",
         "": "alumnos_page",
@@ -542,6 +738,7 @@ def _route_por_rol() -> str:
         return url_for(endpoint)
     except Exception:
         return url_for("alumnos_page")
+
 
 def back_url(default: str | None = None) -> str:
     """
@@ -608,6 +805,7 @@ def comunidad_insights():
     return render_template("comunidad/insights.html")
 
 # --- Login Firebase: GET (pantalla)
+
 
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
@@ -859,7 +1057,7 @@ def get_alumno_info(correo):
         )
 
         # ---- 1) Info del alumno (se muestra a todos) ----
-                # ---- 1) Info del alumno (se muestra a todos) ----
+        # ---- 1) Info del alumno (se muestra a todos) ----
         query_alumno = """
             WITH base AS (
                     SELECT DISTINCT
@@ -1330,6 +1528,7 @@ def api_listar_seguimientos():
 
 # -------------------- Postventa: Diagnóstico (form + list) --------------------
 
+
 @app.route("/postventa/diagnostico", methods=["GET", "POST"])
 @role_required("postventa", "admin")
 def postventa_diagnostico():
@@ -1341,7 +1540,8 @@ def postventa_diagnostico():
         telefono_raw = request.form.get("telefono") or ""
         telefono = _normalize_phone(telefono_raw)
         correo_raw = (request.form.get("correo") or "").strip()
-        correo_norm = _normalize_email(correo_raw.replace(",", "."))  # corrige ,com → .com
+        correo_norm = _normalize_email(
+            correo_raw.replace(",", "."))  # corrige ,com → .com
         generacion = _format_generacion(request.form.get("generacion"))
         estatus_venta_raw = request.form.get("estatus_venta") or "0"
 
@@ -1355,10 +1555,12 @@ def postventa_diagnostico():
             errors.append("Ingresa el correo.")
         else:
             if "," in correo_raw:
-                errors.append("El correo contiene coma ',' — cámbiala por punto '.'.")
+                errors.append(
+                    "El correo contiene coma ',' — cámbiala por punto '.'.")
             # Regex sencilla de e-mail
             if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo_norm):
-                errors.append("El correo no parece válido (ejemplo: usuario@dominio.com).")
+                errors.append(
+                    "El correo no parece válido (ejemplo: usuario@dominio.com).")
         if not generacion:
             errors.append("Indica la generación en formato G-01, G-02, ...")
 
@@ -1376,9 +1578,11 @@ def postventa_diagnostico():
                 vals[k] = int(v)
 
         if faltantes:
-            errors.append(f"Faltan respuestas en: {', '.join(faltantes)} (elige 1, 2 o 3).")
+            errors.append(
+                f"Faltan respuestas en: {', '.join(faltantes)} (elige 1, 2 o 3).")
         if invalidas:
-            errors.append(f"Valores inválidos en: {', '.join(invalidas)} (debe ser 1, 2 o 3).")
+            errors.append(
+                f"Valores inválidos en: {', '.join(invalidas)} (debe ser 1, 2 o 3).")
 
         # Si hay errores, re-render con feedback y valores previos
         if errors:
@@ -1445,7 +1649,7 @@ def postventa_diagnostico_list():
     rows = list(client.query(q))
     data = [dict(r) for r in rows]
 
-     # Opcional: dejar FECHA amigable
+    # Opcional: dejar FECHA amigable
     for d in data:
         f = d.get("FECHA")
         if isinstance(f, datetime):
@@ -1453,6 +1657,7 @@ def postventa_diagnostico_list():
 
     return render_template("postventa_diagnostico_list.html",
                            data=data, preguntas=PREGUNTAS_DEF)
+
 
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
@@ -1462,15 +1667,16 @@ def postventa_insights():
     g = (request.args.get("gen") or "").strip() or None
 
     date_from = _parse_date(f)
-    date_to   = _parse_date(t)
+    date_to = _parse_date(t)
 
     try:
-        data = _postventa_insights_data(date_from=date_from, date_to=date_to, generacion=g)
+        data = _postventa_insights_data(
+            date_from=date_from, date_to=date_to, generacion=g)
     except Exception:
         app.logger.exception("Error en _postventa_insights_data")
         data = {
-            "kpis": {"total":0,"ventas":0,"viables":0,"requiere_ajuste":0,"no_viable":0,
-                     "tasa_conversion":0.0,"pct_viable":0.0,"avg_score":None,"mediana":None},
+            "kpis": {"total": 0, "ventas": 0, "viables": 0, "requiere_ajuste": 0, "no_viable": 0,
+                     "tasa_conversion": 0.0, "pct_viable": 0.0, "avg_score": None, "mediana": None},
             "by_date_labels": [], "by_date_counts": [],
             "viability_labels": [], "viability_counts": [],
             "questions_labels": [], "questions_avg": [],
@@ -1496,6 +1702,7 @@ def postventa_insights():
         )
 
 # -------------------- Comunidad: Lista y Panel --------------------
+
 
 @app.route("/comunidad")
 @role_required("admin", "comunidad")
@@ -1645,4 +1852,27 @@ def comunidad_panel(correo):
         webinars=webinars,
         seguimientos=seguimientos,
         rol_usuario=current_user_role()
+    )
+
+@app.route("/adquisicion/insights")
+@role_required("adquisicion", "admin")
+def adquisicion_insights():
+    f = request.args.get("from")
+    t = request.args.get("to")
+    g = (request.args.get("gen") or "").strip() or None
+    date_from = _parse_date(f)
+    date_to = _parse_date(t)
+
+    try:
+        data = _adq_insights_data(generacion=g, date_from=date_from, date_to=date_to)
+    except Exception:
+        app.logger.exception("Error en _adq_insights_data")
+        data = {"kpis": {}, "by_gen": [], "series_labels": [], "series_insc": [], "cross_rows": []}
+
+    return render_template(
+        "adquisicion_insights.html",
+        gen=g or "",
+        f_from=f or "",
+        f_to=t or "",
+        **data
     )
