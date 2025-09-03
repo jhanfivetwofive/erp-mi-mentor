@@ -1863,11 +1863,25 @@ def adquisicion_insights():
     date_from = _parse_date(f)
     date_to = _parse_date(t)
 
+    # DEFAULTS seguros para el template
+    data = {
+        "kpis": {
+            "leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+            "ingreso": 0.0, "gasto": 0.0, "roas": 0.0,
+            "viables": 0, "requiere_ajuste": 0, "no_viable": 0
+        },
+        "by_gen": [],
+        "series_labels": [],
+        "series_insc": [],
+        "cross_rows": [],
+    }
+
     try:
-        data = _adq_insights_data(generacion=g, date_from=date_from, date_to=date_to)
+        real = _adq_insights_data(generacion=g, date_from=date_from, date_to=date_to)
+        if isinstance(real, dict):
+            data.update(real or {})
     except Exception:
         app.logger.exception("Error en _adq_insights_data")
-        data = {"kpis": {}, "by_gen": [], "series_labels": [], "series_insc": [], "cross_rows": []}
 
     return render_template(
         "adquisicion_insights.html",
@@ -1876,3 +1890,4 @@ def adquisicion_insights():
         f_to=t or "",
         **data
     )
+
