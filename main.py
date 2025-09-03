@@ -528,13 +528,10 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
       - Ranking por generación
       - Cruce detalle (alumno ↔ último diagnóstico ↔ último seguimiento)
     """
-    # --- Normaliza generación a G-01, G-02, ...
+    # Normaliza gen → G-01
     if generacion:
         m = re.search(r"(\d+)", str(generacion))
-        if m:
-            generacion = f"G-{int(m.group(1)):02d}"
-        else:
-            generacion = None  # evita filtrar mal si viene sucio
+        generacion = f"G-{int(m.group(1)):02d}" if m else None
 
     params = []
     wh = ["1=1"]
@@ -542,10 +539,10 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
         wh.append("GENERACION_PROGRAMA = @gen")
         params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
     if date_from:
-        wh.append("DATE(FECHA_INSCRIPCION) >= @from")
+        wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) >= @from")
         params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
     if date_to:
-        wh.append("DATE(FECHA_INSCRIPCION) <= @to")
+        wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) <= @to")
         params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
     where_sql = "WHERE " + " AND ".join(wh)
 
@@ -556,7 +553,7 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
         ID_INSCRIPCION,
         LOWER(TRIM(CORREO)) AS correo,
         GENERACION_PROGRAMA,
-        DATE(FECHA_INSCRIPCION) AS f,
+        SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f,
         CAST(GASTO AS NUMERIC)   AS gasto,
         CAST(INGRESO AS NUMERIC) AS ingreso
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
@@ -653,12 +650,14 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
             "no_viable":       sum(r["no_viable"] for r in bygen_rows),
         }
 
-    # ---------- Serie por fecha (inscripciones) ----------
+    # ---------- Serie por fecha ----------
     q_series = f"""
-    SELECT DATE(FECHA_INSCRIPCION) AS d, COUNT(DISTINCT ID_INSCRIPCION) AS n
+    SELECT SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d,
+           COUNT(DISTINCT ID_INSCRIPCION) AS n
     FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
     {where_sql}
-    GROUP BY d ORDER BY d
+    GROUP BY d
+    ORDER BY d
     """
     series_labels, series_counts = [], []
     for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
