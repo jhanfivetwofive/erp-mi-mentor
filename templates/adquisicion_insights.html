@@ -11,6 +11,14 @@
   </a>
 </div>
 
+{% if load_error %}
+<div class="alert alert-danger d-flex align-items-center">
+  <i class="bi bi-exclamation-triangle me-2"></i>
+  {{ load_error }}
+</div>
+{% endif %}
+
+
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <form method="get" class="row g-2 align-items-end">
