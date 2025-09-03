@@ -79,9 +79,9 @@
           <div>{{ (alumno_info.FECHA_INSCRIPCION|string)[:10] if alumno_info.FECHA_INSCRIPCION else '—' }}</div>
         </div>
         <div class="col-md-3">
-          <div class="small text-muted">Generación(es)</div>
-          <div class="text-truncate" title="{{ alumno_info.GENERACION_PROGRAMA or '' }}">
-            {{ alumno_info.GENERACION_PROGRAMA or '—' }}
+          <div class="small text-muted">Fuente</div>
+          <div class="text-truncate" title="{{ alumno_info.FUENTE or '' }}">
+            {{ alumno_info.FUENTE or '—' }}
           </div>
         </div>
       </div>
