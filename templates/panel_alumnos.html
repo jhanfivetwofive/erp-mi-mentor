@@ -24,11 +24,10 @@
     {% set gen_default = (alumno_info.GENERACION_PROGRAMA or '').split(',')[0].strip() %}
     {% if rol_usuario|default('', true)|lower in ['adquisicion','admin'] %}
       <a class="btn btn-outline-success"
-        href="{{ url_for('adquisicion_insights', gen=gen_default) if gen_default else url_for('adquisicion_insights') }}">
+         href="{{ url_for('adquisicion_insights', gen=gen_default) if gen_default else url_for('adquisicion_insights') }}">
         <i class="bi bi-bullseye me-1"></i> Insights
       </a>
     {% endif %}
-
 
     <button id="btnCsv" class="btn btn-outline-secondary">
       <i class="bi bi-filetype-csv me-1"></i>CSV
@@ -41,7 +40,6 @@
     </a>
   </div>
 
-
   {# ========= RESUMEN ECONÓMICO ========= #}
   {% set gasto = alumno_info.GASTO or 0 %}
   {% set ingreso = alumno_info.INGRESO or 0 %}
@@ -49,11 +47,7 @@
   {% set saldo_cls = 'text-success' if saldo>0 else ('text-danger' if saldo<0 else 'text-muted') %}
   {% set puede_mostrar_invertido = rol_usuario|default('', true)|lower in ['admin','postventa','adquisicion'] %}
   {% set col = 'col-md-3' if puede_mostrar_invertido else 'col-md-4' %}
-  {% set gasto = alumno_info.GASTO or 0 %}
-  {% set ingreso = alumno_info.INGRESO or 0 %}
   {% set invertido = alumno_info.MONTO_INVERTIDO_CURSOS or 0 %}
-  {% set saldo = ingreso - gasto %}
-  {% set saldo_cls = 'text-success' if saldo>0 else ('text-danger' if saldo<0 else 'text-muted') %}
 
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-white border-0">
@@ -150,7 +144,6 @@
         <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Insights de Comunidad</h4>
       </div>
       <div class="card-body">
-        {# ... (tu bloque original de comunidad, igual que antes) ... #}
         <div class="row g-3 mb-3">
           <div class="col-md-3">
             <div class="card shadow-sm h-100">
@@ -464,7 +457,6 @@
   })();
 </script>
 
-
 <script>
 (function () {
   const btnCsv = document.getElementById('btnCsv');
@@ -587,5 +579,4 @@
   });
 })();
 </script>
-
 {% endblock %}
