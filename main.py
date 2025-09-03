@@ -520,7 +520,7 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     }
 
 
-def _adq_insights_data(generacion=None, date_from=None, date_to=None):
+def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
     """
     Insights de Adquisición:
       - KPIs por selección (gen/fechas)
@@ -528,22 +528,33 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
       - Ranking por generación
       - Cruce detalle (alumno ↔ último diagnóstico ↔ último seguimiento)
     """
-    # Normaliza gen → G-01
-    if generacion:
-        m = re.search(r"(\d+)", str(generacion))
-        generacion = f"G-{int(m.group(1)):02d}" if m else None
-
     params = []
     wh = ["1=1"]
-    if generacion:
-        wh.append("GENERACION_PROGRAMA = @gen")
+
+    # --- Filtro de generación: exacto (G-##) o numérico dentro del texto ---
+    gen_where = None
+    if generacion and generacion_num:
+        gen_where = "(GENERACION_PROGRAMA = @gen OR REGEXP_CONTAINS(UPPER(GENERACION_PROGRAMA), @gen_re))"
         params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
+        # Busca “ 12 ”, “-12”, “G-12”, etc.
+        params.append(bigquery.ScalarQueryParameter("gen_re", "STRING", rf"(^|[\s\-_/])0?{generacion_num}($|[\s\-_/])"))
+    elif generacion:
+        gen_where = "GENERACION_PROGRAMA = @gen"
+        params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
+    elif generacion_num:
+        gen_where = "REGEXP_CONTAINS(UPPER(GENERACION_PROGRAMA), @gen_re)"
+        params.append(bigquery.ScalarQueryParameter("gen_re", "STRING", rf"(^|[\s\-_/])0?{generacion_num}($|[\s\-_/])"))
+    if gen_where:
+        wh.append(gen_where)
+
+    # --- Fechas robustas (FECHA_INSCRIPCION puede venir como STRING) ---
     if date_from:
         wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) >= @from")
         params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
     if date_to:
         wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) <= @to")
         params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+
     where_sql = "WHERE " + " AND ".join(wh)
 
     # ---------- Ranking por generación ----------
@@ -554,8 +565,8 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
         LOWER(TRIM(CORREO)) AS correo,
         GENERACION_PROGRAMA,
         SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f,
-        CAST(GASTO AS NUMERIC)   AS gasto,
-        CAST(INGRESO AS NUMERIC) AS ingreso
+        SAFE_CAST(GASTO   AS NUMERIC) AS gasto,
+        SAFE_CAST(INGRESO AS NUMERIC) AS ingreso
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
       {where_sql}
     ),
@@ -589,16 +600,16 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
       GROUP BY b.GENERACION_PROGRAMA
     )
     SELECT
-      i.GENERACION_PROGRAMA AS generacion,
-      COALESCE(l.leads,0) AS leads,
-      COALESCE(i.inscripciones,0) AS inscripciones,
-      COALESCE(c.diagnosticos,0) AS diagnosticos,
-      COALESCE(c.ventas_diag,0)  AS ventas_diag,
-      COALESCE(c.viables,0) AS viables,
-      COALESCE(c.requiere_ajuste,0) AS requiere_ajuste,
-      COALESCE(c.no_viable,0) AS no_viable,
-      COALESCE(i.ingreso,0) AS ingreso,
-      COALESCE(i.gasto,0)   AS gasto,
+      i.GENERACION_PROGRAMA                         AS generacion,
+      COALESCE(l.leads,0)                           AS leads,
+      COALESCE(i.inscripciones,0)                   AS inscripciones,
+      COALESCE(c.diagnosticos,0)                    AS diagnosticos,
+      COALESCE(c.ventas_diag,0)                     AS ventas_diag,
+      COALESCE(c.viables,0)                         AS viables,
+      COALESCE(c.requiere_ajuste,0)                 AS requiere_ajuste,
+      COALESCE(c.no_viable,0)                       AS no_viable,
+      COALESCE(i.ingreso,0)                         AS ingreso,
+      COALESCE(i.gasto,0)                           AS gasto,
       SAFE_DIVIDE(COALESCE(i.ingreso,0), NULLIF(i.gasto,0)) AS roas
     FROM insc i
     LEFT JOIN leads l USING (GENERACION_PROGRAMA)
@@ -608,17 +619,17 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     bygen_rows = []
     for r in client.query(q_bygen, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
         bygen_rows.append({
-            "generacion":      (r["generacion"] or "—"),
-            "leads":           int(r["leads"] or 0),
-            "inscripciones":   int(r["inscripciones"] or 0),
-            "diagnosticos":    int(r["diagnosticos"] or 0),
-            "ventas_diag":     int(r["ventas_diag"] or 0),
-            "viables":         int(r["viables"] or 0),
-            "requiere_ajuste": int(r["requiere_ajuste"] or 0),
-            "no_viable":       int(r["no_viable"] or 0),
-            "ingreso":         float(r["ingreso"] or 0.0),
-            "gasto":           float(r["gasto"] or 0.0),
-            "roas":            float(r["roas"] or 0.0),
+            "generacion":      r.get("generacion") or "—",
+            "leads":           int(r.get("leads") or 0),
+            "inscripciones":   int(r.get("inscripciones") or 0),
+            "diagnosticos":    int(r.get("diagnosticos") or 0),
+            "ventas_diag":     int(r.get("ventas_diag") or 0),
+            "viables":         int(r.get("viables") or 0),
+            "requiere_ajuste": int(r.get("requiere_ajuste") or 0),
+            "no_viable":       int(r.get("no_viable") or 0),
+            "ingreso":         float(r.get("ingreso") or 0.0),
+            "gasto":           float(r.get("gasto") or 0.0),
+            "roas":            float(r.get("roas") or 0.0),
         })
 
     # ---------- KPIs ----------
@@ -653,10 +664,11 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     # ---------- Serie por fecha ----------
     q_series = f"""
     SELECT SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d,
-           COUNT(DISTINCT ID_INSCRIPCION) AS n
+           COUNT(DISTINCT ID_INSCRIPCION)       AS n
     FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
     {where_sql}
     GROUP BY d
+    HAVING d IS NOT NULL
     ORDER BY d
     """
     series_labels, series_counts = [], []
@@ -668,9 +680,9 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     q_cross = f"""
     WITH base AS (
       SELECT
-        LOWER(TRIM(CORREO))       AS correo,
-        ANY_VALUE(NOMBRE_ALUMNO)  AS nombre,
-        ANY_VALUE(TELEFONO)       AS telefono,
+        LOWER(TRIM(CORREO))      AS correo,
+        ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
+        ANY_VALUE(TELEFONO)      AS telefono,
         GENERACION_PROGRAMA
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
       {where_sql}
@@ -699,15 +711,15 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     """
     cross_rows = []
     for r in client.query(q_cross, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        fd = r["FECHA_DIAGNOSTICO"]
-        fs = r["FECHA_SEGUIMIENTO"]
+        fd = r.get("FECHA_DIAGNOSTICO")
+        fs = r.get("FECHA_SEGUIMIENTO")
         cross_rows.append({
             "correo":         r.get("correo"),
             "nombre":         r.get("nombre"),
             "telefono":       r.get("telefono"),
             "generacion":     r.get("generacion"),
             "estatus_viable": r.get("ESTATUS_VIABLE"),
-            "estatus_venta":  (int(r["ESTATUS_VENTA"]) if r["ESTATUS_VENTA"] is not None else None),
+            "estatus_venta":  (int(r["ESTATUS_VENTA"]) if r.get("ESTATUS_VENTA") is not None else None),
             "fecha_diag":     (fd.strftime("%Y-%m-%d %H:%M") if isinstance(fd, datetime) else (fd.isoformat() if hasattr(fd, "isoformat") and fd else None)),
             "estado_seg":     r.get("ESTADO_SEGUIMIENTO"),
             "fecha_seg":      (fs.strftime("%Y-%m-%d %H:%M") if isinstance(fs, datetime) else (fs.isoformat() if hasattr(fs, "isoformat") and fs else None)),
@@ -720,6 +732,7 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
         "series_insc": series_counts,
         "cross_rows": cross_rows,
     }
+
 
 
 
@@ -1877,41 +1890,55 @@ def comunidad_panel(correo):
 @app.route("/adquisicion/insights")
 @role_required("adquisicion", "admin")
 def adquisicion_insights():
-    f = request.args.get("from") or ""
-    t = request.args.get("to") or ""
-    g = (request.args.get("gen") or "").strip() or None
+    f = request.args.get("from")
+    t = request.args.get("to")
+    g_raw = (request.args.get("gen") or "").strip()
+    # Normaliza generación a “G-##” y además guarda crudo para filtro flexible
+    g = None
+    g_num = None
+    if g_raw:
+        m = re.search(r"(\d+)", g_raw)
+        if m:
+            g_num = int(m.group(1))
+            g = f"G-{g_num:02d}"
+
     date_from = _parse_date(f)
     date_to   = _parse_date(t)
 
     data = {
-        "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
-                 "ingreso": 0.0, "gasto": 0.0, "roas": 0.0,
-                 "viables": 0, "requiere_ajuste": 0, "no_viable": 0},
-        "by_gen": [], "series_labels": [], "series_insc": [], "cross_rows": [],
+        "kpis": {
+            "leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+            "ingreso": 0.0, "gasto": 0.0, "roas": 0.0,
+            "viables": 0, "requiere_ajuste": 0, "no_viable": 0
+        },
+        "by_gen": [],
+        "series_labels": [],
+        "series_insc": [],
+        "cross_rows": [],
     }
     load_error = None
 
     try:
-        real = _adq_insights_data(generacion=g, date_from=date_from, date_to=date_to)
+        real = _adq_insights_data(
+            generacion=g,            # “G-##” (exacta)
+            generacion_num=g_num,    # número (para match flexible)
+            date_from=date_from,
+            date_to=date_to
+        )
         if isinstance(real, dict):
             data.update(real or {})
-        # Log de sanidad
-        app.logger.info(
-            "adq_insights OK | gen=%s from=%s to=%s | by_gen=%d series=%d cross=%d",
-            g, date_from, date_to,
-            len(data.get("by_gen", [])),
-            len(data.get("series_labels", [])),
-            len(data.get("cross_rows", [])),
-        )
     except Exception as e:
         app.logger.exception("Error en _adq_insights_data")
-        load_error = str(e) if request.args.get("debug") == "1" else "No se pudieron cargar los datos."
+        load_error = f"{type(e).__name__}: {e}"
 
     return render_template(
         "adquisicion_insights.html",
-        gen=g or "", f_from=f or "", f_to=t or "",
+        gen=g_raw or "",
+        f_from=f or "",
+        f_to=t or "",
         load_error=load_error,
         **data
     )
+
 
 
