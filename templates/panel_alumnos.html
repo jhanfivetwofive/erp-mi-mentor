@@ -7,37 +7,85 @@
   <div class="alert alert-warning">No se encontró información para este alumno.</div>
 {% else %}
 
-  {# ========= HERO ========= #}
-  <div class="d-flex align-items-center flex-wrap gap-2 ms-auto">
-    {% if alumno_info.CORREO %}
-      <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}">
-        <i class="bi bi-envelope-at me-1"></i>Correo
-      </a>
-    {% endif %}
-    {% if whatsapp_url %}
-      <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
-        <i class="bi bi-whatsapp me-1"></i> WhatsApp
-      </a>
-    {% endif %}
+  {# ========= HEADER: DATOS PRINCIPALES + ACCIONES ========= #}
+  {% set _parts = (alumno_info.NOMBRE_ALUMNO or '').split() %}
+  {% set _ini = (( _parts[0][:1] if _parts|length>0 else '' ) ~ ( _parts[1][:1] if _parts|length>1 else '' ))|upper %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+        <div class="d-flex align-items-center gap-3">
+          <div class="rounded-circle d-flex align-items-center justify-content-center"
+               style="width:52px;height:52px;background:#eef5f0;border:1px solid #d7eee0;font-weight:600;">
+            {{ _ini or 'AL' }}
+          </div>
+          <div>
+            <h3 class="mb-0">{{ alumno_info.NOMBRE_ALUMNO or '—' }}</h3>
+            <div class="text-muted small">ID: {{ alumno_info.ID_ALUMNO or '—' }}</div>
+          </div>
+        </div>
 
-    {# Botón a Insights de Adquisición (solo adquisicion/admin) #}
-    {% set gen_default = (alumno_info.GENERACION_PROGRAMA or '').split(',')[0].strip() %}
-    {% if rol_usuario|default('', true)|lower in ['adquisicion','admin'] %}
-      <a class="btn btn-outline-success"
-         href="{{ url_for('adquisicion_insights', gen=gen_default) if gen_default else url_for('adquisicion_insights') }}">
-        <i class="bi bi-bullseye me-1"></i> Insights
-      </a>
-    {% endif %}
+        <div class="d-flex flex-wrap gap-2 ms-auto">
+          {% if alumno_info.CORREO %}
+            <a class="btn btn-outline-primary" href="mailto:{{ alumno_info.CORREO }}">
+              <i class="bi bi-envelope-at me-1"></i>Correo
+            </a>
+          {% endif %}
+          {% if whatsapp_url %}
+            <a class="btn btn-success" href="{{ whatsapp_url }}" target="_blank" rel="noopener">
+              <i class="bi bi-whatsapp me-1"></i> WhatsApp
+            </a>
+          {% endif %}
 
-    <button id="btnCsv" class="btn btn-outline-secondary">
-      <i class="bi bi-filetype-csv me-1"></i>CSV
-    </button>
-    <button id="btnTxt" class="btn btn-outline-secondary">
-      <i class="bi bi-filetype-txt me-1"></i>TXT
-    </button>
-    <a class="btn btn-outline-secondary" href="{{ back_url() }}">
-      <i class="bi bi-arrow-left me-1"></i> Volver
-    </a>
+          {# Botón a Insights de Adquisición (solo adquisicion/admin) #}
+          {% set gen_default = (alumno_info.GENERACION_PROGRAMA or '').split(',')[0].strip() %}
+          {% if rol_usuario|default('', true)|lower in ['adquisicion','admin'] %}
+            <a class="btn btn-outline-success"
+               href="{{ url_for('adquisicion_insights', gen=gen_default) if gen_default else url_for('adquisicion_insights') }}">
+              <i class="bi bi-bullseye me-1"></i> Insights
+            </a>
+          {% endif %}
+
+          <button id="btnCsv" class="btn btn-outline-secondary">
+            <i class="bi bi-filetype-csv me-1"></i>CSV
+          </button>
+          <button id="btnTxt" class="btn btn-outline-secondary">
+            <i class="bi bi-filetype-txt me-1"></i>TXT
+          </button>
+          <a class="btn btn-outline-secondary" href="{{ back_url() }}">
+            <i class="bi bi-arrow-left me-1"></i> Volver
+          </a>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-3">
+        <div class="col-md-3">
+          <div class="small text-muted">Correo</div>
+          {% if alumno_info.CORREO %}
+            <div><a href="mailto:{{ alumno_info.CORREO }}">{{ alumno_info.CORREO }}</a></div>
+          {% else %}
+            <div class="text-muted">—</div>
+          {% endif %}
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Teléfono</div>
+          {% if alumno_info.TELEFONO %}
+            <div><a href="tel:{{ alumno_info.TELEFONO }}">{{ alumno_info.TELEFONO }}</a></div>
+          {% else %}
+            <div class="text-muted">—</div>
+          {% endif %}
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Fecha de inscripción</div>
+          <div>{{ (alumno_info.FECHA_INSCRIPCION|string)[:10] if alumno_info.FECHA_INSCRIPCION else '—' }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Generación(es)</div>
+          <div class="text-truncate" title="{{ alumno_info.GENERACION_PROGRAMA or '' }}">
+            {{ alumno_info.GENERACION_PROGRAMA or '—' }}
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   {# ========= RESUMEN ECONÓMICO ========= #}
