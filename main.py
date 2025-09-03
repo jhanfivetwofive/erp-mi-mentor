@@ -532,8 +532,7 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     wh = ["1=1"]
     if generacion:
         wh.append("GENERACION_PROGRAMA = @gen")
-        params.append(bigquery.ScalarQueryParameter(
-            "gen", "STRING", generacion))
+        params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
     if date_from:
         wh.append("DATE(FECHA_INSCRIPCION) >= @from")
         params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
@@ -550,7 +549,7 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
         LOWER(TRIM(CORREO)) AS correo,
         GENERACION_PROGRAMA,
         DATE(FECHA_INSCRIPCION) AS f,
-        CAST(GASTO AS NUMERIC) AS gasto,
+        CAST(GASTO AS NUMERIC)   AS gasto,
         CAST(INGRESO AS NUMERIC) AS ingreso
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
       {where_sql}
@@ -575,67 +574,79 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     ),
     cross AS (
       SELECT b.GENERACION_PROGRAMA,
-             COUNTIF(d.correo IS NOT NULL) AS diagnosticos,
-             COUNTIF(d.ESTATUS_VENTA = 1)  AS ventas_diag,
-             COUNTIF(d.ESTATUS_VIABLE = 'VIABLE')            AS viables,
-             COUNTIF(d.ESTATUS_VIABLE = 'REQUIERE AJUSTE')   AS requiere_ajuste,
-             COUNTIF(d.ESTATUS_VIABLE = 'NO VIABLE')         AS no_viable
+             COUNTIF(d.correo IS NOT NULL)                     AS diagnosticos,
+             COUNTIF(d.ESTATUS_VENTA = 1)                      AS ventas_diag,
+             COUNTIF(d.ESTATUS_VIABLE = 'VIABLE')              AS viables,
+             COUNTIF(d.ESTATUS_VIABLE = 'REQUIERE AJUSTE')     AS requiere_ajuste,
+             COUNTIF(d.ESTATUS_VIABLE = 'NO VIABLE')           AS no_viable
       FROM base b
       LEFT JOIN diag d ON d.correo = b.correo
       GROUP BY b.GENERACION_PROGRAMA
     )
     SELECT
-      i.GENERACION_PROGRAMA AS generacion,
-      COALESCE(l.leads,0) AS leads,
-      COALESCE(i.inscripciones,0) AS inscripciones,
-      COALESCE(c.diagnosticos,0) AS diagnosticos,
-      COALESCE(c.ventas_diag,0)  AS ventas_diag,
-      COALESCE(c.viables,0) AS viables,
-      COALESCE(c.requiere_ajuste,0) AS requiere_ajuste,
-      COALESCE(c.no_viable,0) AS no_viable,
-      COALESCE(i.ingreso,0) AS ingreso,
-      COALESCE(i.gasto,0)   AS gasto,
-      SAFE_DIVIDE(i.ingreso, NULLIF(i.gasto,0)) AS roas
+      i.GENERACION_PROGRAMA                                    AS generacion,
+      COALESCE(l.leads,0)                                      AS leads,
+      COALESCE(i.inscripciones,0)                              AS inscripciones,
+      COALESCE(c.diagnosticos,0)                               AS diagnosticos,
+      COALESCE(c.ventas_diag,0)                                AS ventas_diag,
+      COALESCE(c.viables,0)                                    AS viables,
+      COALESCE(c.requiere_ajuste,0)                            AS requiere_ajuste,
+      COALESCE(c.no_viable,0)                                  AS no_viable,
+      COALESCE(i.ingreso,0)                                    AS ingreso,
+      COALESCE(i.gasto,0)                                      AS gasto,
+      SAFE_DIVIDE(COALESCE(i.ingreso,0), NULLIF(i.gasto,0))    AS roas
     FROM insc i
     LEFT JOIN leads l USING (GENERACION_PROGRAMA)
     LEFT JOIN cross c USING (GENERACION_PROGRAMA)
     ORDER BY generacion
     """
-    bygen_rows = [dict(r) for r in client.query(
-        q_bygen, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()]
+    bygen_rows = []
+    for r in client.query(q_bygen, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
+        bygen_rows.append({
+            "generacion":     r["generacion"] or "—",
+            "leads":          int(r["leads"] or 0),
+            "inscripciones":  int(r["inscripciones"] or 0),
+            "diagnosticos":   int(r["diagnosticos"] or 0),
+            "ventas_diag":    int(r["ventas_diag"] or 0),
+            "viables":        int(r["viables"] or 0),
+            "requiere_ajuste":int(r["requiere_ajuste"] or 0),
+            "no_viable":      int(r["no_viable"] or 0),
+            "ingreso":        float(r["ingreso"] or 0) if r["ingreso"] is not None else 0.0,
+            "gasto":          float(r["gasto"] or 0)   if r["gasto"]   is not None else 0.0,
+            "roas":           float(r["roas"] or 0)    if r["roas"]    is not None else 0.0,
+        })
 
-    # ---------- KPIs de la selección (gen/fechas) ----------
-    # Si hay 'generacion' elegida, toma su fila; si no, resume todas
+    # ---------- KPIs de la selección ----------
     if generacion:
-        base_kpi = next((r for r in bygen_rows if (
-            r.get("generacion") or "") == generacion), None) or {}
+        base_kpi = next((r for r in bygen_rows if (r.get("generacion") or "") == generacion), None) or {}
         kpis = {
-            "leads": int(base_kpi.get("leads") or 0),
-            "inscripciones": int(base_kpi.get("inscripciones") or 0),
-            "diagnosticos": int(base_kpi.get("diagnosticos") or 0),
-            "ventas_diag": int(base_kpi.get("ventas_diag") or 0),
-            "viables": int(base_kpi.get("viables") or 0),
-            "requiere_ajuste": int(base_kpi.get("requiere_ajuste") or 0),
-            "no_viable": int(base_kpi.get("no_viable") or 0),
-            "ingreso": float(base_kpi.get("ingreso") or 0.0),
-            "gasto": float(base_kpi.get("gasto") or 0.0),
-            "roas": float(base_kpi.get("roas") or 0.0),
+            "leads":          int(base_kpi.get("leads", 0)),
+            "inscripciones":  int(base_kpi.get("inscripciones", 0)),
+            "diagnosticos":   int(base_kpi.get("diagnosticos", 0)),
+            "ventas_diag":    int(base_kpi.get("ventas_diag", 0)),
+            "viables":        int(base_kpi.get("viables", 0)),
+            "requiere_ajuste":int(base_kpi.get("requiere_ajuste", 0)),
+            "no_viable":      int(base_kpi.get("no_viable", 0)),
+            "ingreso":        float(base_kpi.get("ingreso", 0.0)),
+            "gasto":          float(base_kpi.get("gasto", 0.0)),
+            "roas":           float(base_kpi.get("roas", 0.0)),
         }
     else:
-        # agrega todo
-        k_leads = sum(int(r["leads"] or 0) for r in bygen_rows)
-        k_insc = sum(int(r["inscripciones"] or 0) for r in bygen_rows)
-        k_diag = sum(int(r["diagnosticos"] or 0) for r in bygen_rows)
-        k_vta = sum(int(r["ventas_diag"] or 0) for r in bygen_rows)
-        k_ing = sum(float(r["ingreso"] or 0) for r in bygen_rows)
-        k_gas = sum(float(r["gasto"] or 0) for r in bygen_rows)
-        k_roas = (k_ing / k_gas) if k_gas else 0.0
-        k_viab = sum(int(r["viables"] or 0) for r in bygen_rows)
-        k_req = sum(int(r["requiere_ajuste"] or 0) for r in bygen_rows)
-        k_no = sum(int(r["no_viable"] or 0) for r in bygen_rows)
-        kpis = {"leads": k_leads, "inscripciones": k_insc, "diagnosticos": k_diag, "ventas_diag": k_vta,
-                "ingreso": k_ing, "gasto": k_gas, "roas": k_roas,
-                "viables": k_viab, "requiere_ajuste": k_req, "no_viable": k_no}
+        k_leads = sum(r["leads"] for r in bygen_rows)
+        k_insc  = sum(r["inscripciones"] for r in bygen_rows)
+        k_diag  = sum(r["diagnosticos"] for r in bygen_rows)
+        k_vta   = sum(r["ventas_diag"] for r in bygen_rows)
+        k_ing   = sum(r["ingreso"] for r in bygen_rows)
+        k_gas   = sum(r["gasto"] for r in bygen_rows)
+        k_viab  = sum(r["viables"] for r in bygen_rows)
+        k_req   = sum(r["requiere_ajuste"] for r in bygen_rows)
+        k_no    = sum(r["no_viable"] for r in bygen_rows)
+        kpis = {
+            "leads": k_leads, "inscripciones": k_insc,
+            "diagnosticos": k_diag, "ventas_diag": k_vta,
+            "ingreso": k_ing, "gasto": k_gas, "roas": (k_ing / k_gas) if k_gas else 0.0,
+            "viables": k_viab, "requiere_ajuste": k_req, "no_viable": k_no
+        }
 
     # ---------- Serie por fecha (inscripciones) ----------
     q_series = f"""
@@ -646,16 +657,16 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     """
     series_labels, series_counts = [], []
     for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        series_labels.append(r["d"].isoformat())
-        series_counts.append(int(r["n"]))
+        series_labels.append(r["d"].isoformat())          # str
+        series_counts.append(int(r["n"]))                 # int
 
     # ---------- Cruce detalle (último diagnóstico y seguimiento) ----------
     q_cross = f"""
     WITH base AS (
-      SELECT DISTINCT
+      SELECT
         LOWER(TRIM(CORREO)) AS correo,
-        MAX(NOMBRE_ALUMNO) AS nombre,
-        MAX(TELEFONO) AS telefono,
+        ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
+        ANY_VALUE(TELEFONO)      AS telefono,
         GENERACION_PROGRAMA
       FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
       {where_sql}
@@ -684,17 +695,18 @@ def _adq_insights_data(generacion=None, date_from=None, date_to=None):
     """
     cross_rows = []
     for r in client.query(q_cross, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        row = dict(r)
+        fd = r["FECHA_DIAGNOSTICO"]
+        fs = r["FECHA_SEGUIMIENTO"]
         cross_rows.append({
-            "correo": row.get("correo"),
-            "nombre": row.get("nombre"),
-            "telefono": row.get("telefono"),
-            "generacion": row.get("generacion"),
-            "estatus_viable": row.get("ESTATUS_VIABLE"),
-            "estatus_venta": row.get("ESTATUS_VENTA"),
-            "fecha_diag": row.get("FECHA_DIAGNOSTICO"),
-            "estado_seg": row.get("ESTADO_SEGUIMIENTO"),
-            "fecha_seg": row.get("FECHA_SEGUIMIENTO"),
+            "correo":          r.get("correo"),
+            "nombre":          r.get("nombre"),
+            "telefono":        r.get("telefono"),
+            "generacion":      r.get("generacion"),
+            "estatus_viable":  r.get("ESTATUS_VIABLE"),
+            "estatus_venta":   (int(r["ESTATUS_VENTA"]) if r["ESTATUS_VENTA"] is not None else None),
+            "fecha_diag":      (fd.strftime("%Y-%m-%d %H:%M") if isinstance(fd, datetime) else (fd.isoformat() if hasattr(fd, "isoformat") and fd else None)),
+            "estado_seg":      r.get("ESTADO_SEGUIMIENTO"),
+            "fecha_seg":       (fs.strftime("%Y-%m-%d %H:%M") if isinstance(fs, datetime) else (fs.isoformat() if hasattr(fs, "isoformat") and fs else None)),
         })
 
     return {
@@ -1066,6 +1078,7 @@ def get_alumno_info(correo):
                         LOWER(TRIM(CORREO)) AS CORREO,
                         PROGRAMA,
                         GENERACION_PROGRAMA,
+                        FUENTE, 
                         CAST(PRECIO_GENERACION AS NUMERIC) AS PRECIO_GENERACION,
                         CAST(GASTO AS NUMERIC) AS GASTO,
                         CAST(INGRESO AS NUMERIC) AS INGRESO,
@@ -1080,6 +1093,7 @@ def get_alumno_info(correo):
                     CORREO,
                     STRING_AGG(DISTINCT PROGRAMA, ', ') AS PROGRAMA,
                     STRING_AGG(DISTINCT GENERACION_PROGRAMA, ', ') AS GENERACION_PROGRAMA,
+                    ANY_VALUE(FUENTE) AS FUENTE,
                     MAX(NOMBRE_ALUMNO) AS NOMBRE_ALUMNO,
                     MAX(TELEFONO) AS TELEFONO,
                     MIN(FECHA_INSCRIPCION) AS FECHA_INSCRIPCION,
@@ -1104,6 +1118,7 @@ def get_alumno_info(correo):
                 'FECHA_INSCRIPCION': row['FECHA_INSCRIPCION'],
                 'PROGRAMA': row['PROGRAMA'],
                 'GENERACION_PROGRAMA': row['GENERACION_PROGRAMA'],
+                'FUENTE': row['FUENTE'],
                 'GASTO': row['GASTO'],
                 'INGRESO': row['INGRESO'],
                 'MONTO_INVERTIDO_CURSOS': row['MONTO_INVERTIDO_CURSOS']
