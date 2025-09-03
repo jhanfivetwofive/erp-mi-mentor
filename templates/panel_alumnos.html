@@ -430,6 +430,31 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
+  // Render de la gráfica de Thinkific (chartCursos)
+  (function(){
+    const labels = {{ (chart_labels or []) | tojson }};
+    const values = {{ (chart_values or []) | tojson }};
+    const el = document.getElementById('chartCursos');
+    if (!el || !labels.length) return;
+
+    new Chart(el.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets: [{ label: '% completado', data: values, borderWidth: 1 }] },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: (v) => v + '%' } },
+          y: { ticks: { autoSkip: false, maxTicksLimit: 20 } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  })();
+</script>
+
+
+<script>
 (function () {
   const btnCsv = document.getElementById('btnCsv');
   const btnTxt = document.getElementById('btnTxt');
