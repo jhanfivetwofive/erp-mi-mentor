@@ -3,11 +3,31 @@
 
 {% block head %}
 <style>
-  .page-header h4 { margin: 0; }
-  .badge-gen { background: #f6f7f9; border: 1px solid #e5e7eb; color:#111827; }
-  .table thead th { white-space: nowrap; }
-  .text-truncate-220 { max-width: 220px; display:inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dropdown-menu-small { min-width: 240px; }
+  .page-header h4 {
+    margin: 0;
+  }
+
+  .badge-gen {
+    background: #f6f7f9;
+    border: 1px solid #e5e7eb;
+    color: #111827;
+  }
+
+  .table thead th {
+    white-space: nowrap;
+  }
+
+  .text-truncate-220 {
+    max-width: 220px;
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dropdown-menu-small {
+    min-width: 240px;
+  }
 </style>
 {% endblock %}
 
@@ -36,12 +56,14 @@
       </div>
     </div>
 
+    {% if not readonly %}
     <button id="exportCsvBtn" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-filetype-csv"></i> CSV
     </button>
     <button id="exportTxtBtn" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-filetype-txt"></i> TXT
     </button>
+    {% endif %}
 
   </div>
 </div>
@@ -83,321 +105,327 @@
 
 {% block scripts %}
 <script>
-// Flag readonly: usa la variable de contexto `readonly` si existe,
-// si no, deriva del rol guardado en sesión (fallback).
-const READONLY = {{ (readonly if readonly is defined else (session.get('user', {}).get('rol','')|lower == 'invitado')) | tojson }};
+  // Flag readonly: usa la variable de contexto `readonly` si existe,
+  // si no, deriva del rol guardado en sesión (fallback).
+  const READONLY = {{ (readonly if readonly is defined else (session.get('user', {}).get('rol', '') | lower == 'invitado')) | tojson }};
 </script>
 
 <script>
-// Orden y nombres visibles de columnas (incluye ROI)
-const displayCols = [
-  "ID_ALUMNO",
-  "NOMBRE_ALUMNO",
-  "CORREO",
-  "TELEFONO",
-  "GASTO",
-  "INGRESO",
-  "ROI",                 // <-- nueva
-  "GENERACION_PROGRAMA",
-  "FECHA_INSCRIPCION",
-  "FUENTE"
-];
+  // Orden y nombres visibles de columnas (incluye ROI)
+  const displayCols = [
+    "ID_ALUMNO",
+    "NOMBRE_ALUMNO",
+    "CORREO",
+    "TELEFONO",
+    "GASTO",
+    "INGRESO",
+    "ROI",                 // <-- nueva
+    "GENERACION_PROGRAMA",
+    "FECHA_INSCRIPCION",
+    "FUENTE"
+  ];
 
-const headersAmigables = {
-  "ID_ALUMNO": "ID Alumno",
-  "NOMBRE_ALUMNO": "Nombre",
-  "CORREO": "Correo",
-  "TELEFONO": "Teléfono",
-  "GASTO": "Gasto",
-  "INGRESO": "Ingreso",
-  "ROI": "ROI (Ingreso − Gasto)",
-  "GENERACION_PROGRAMA": "Generación",
-  "FECHA_INSCRIPCION": "Fecha inscripción",
-  "FUENTE": "Fuente"
-};
+  const headersAmigables = {
+    "ID_ALUMNO": "ID Alumno",
+    "NOMBRE_ALUMNO": "Nombre",
+    "CORREO": "Correo",
+    "TELEFONO": "Teléfono",
+    "GASTO": "Gasto",
+    "INGRESO": "Ingreso",
+    "ROI": "ROI (Ingreso − Gasto)",
+    "GENERACION_PROGRAMA": "Generación",
+    "FECHA_INSCRIPCION": "Fecha inscripción",
+    "FUENTE": "Fuente"
+  };
 
-// Conjunto por defecto de columnas visibles (puedes ajustar)
-const DEFAULT_VISIBLE = new Set([
-  "ID_ALUMNO","NOMBRE_ALUMNO","CORREO","GENERACION_PROGRAMA",
-  "FECHA_INSCRIPCION","INGRESO","ROI","FUENTE"
-]);
+  // Conjunto por defecto de columnas visibles (puedes ajustar)
+  const DEFAULT_VISIBLE = new Set([
+    "ID_ALUMNO", "NOMBRE_ALUMNO", "CORREO", "GENERACION_PROGRAMA",
+    "FECHA_INSCRIPCION", "INGRESO", "ROI", "FUENTE"
+  ]);
 
-const mxnFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
-const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO", "ROI"]);
+  const mxnFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+  const currencyFields = new Set(["PRECIO_GENERACION", "GASTO", "INGRESO", "ROI"]);
 
-function soloFecha(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toISOString().split('T')[0];
-}
+  function soloFecha(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toISOString().split('T')[0];
+  }
 
-function badgeGeneracion(val) {
-  if (!val) return "";
-  const parts = String(val).split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) return "";
-  let html = `<span class="badge badge-gen me-1">${parts[0]}</span>`;
-  if (parts.length > 1) html += `<span class="badge text-bg-light">+${parts.length-1}</span>`;
-  return html;
-}
+  function badgeGeneracion(val) {
+    if (!val) return "";
+    const parts = String(val).split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return "";
+    let html = `<span class="badge badge-gen me-1">${parts[0]}</span>`;
+    if (parts.length > 1) html += `<span class="badge text-bg-light">+${parts.length - 1}</span>`;
+    return html;
+  }
 
-function fuenteChip(val) {
-  if (!val) return "";
-  const key = String(val).toLowerCase();
-  let cls = 'text-bg-secondary';
-  if (/(org[aá]nico|organic)/.test(key)) cls = 'text-bg-success';
-  else if (/(facebook|meta)/.test(key)) cls = 'text-bg-primary';
-  else if (/(google|search|adwords)/.test(key)) cls = 'text-bg-warning';
-  else if (/(referido|referral)/.test(key)) cls = 'text-bg-info';
-  else if (/tiktok/.test(key)) cls = 'text-bg-dark';
-  else if (/youtube/.test(key)) cls = 'text-bg-danger';
-  return `<span class="badge rounded-pill ${cls}">${val}</span>`;
-}
+  function fuenteChip(val) {
+    if (!val) return "";
+    const key = String(val).toLowerCase();
+    let cls = 'text-bg-secondary';
+    if (/(org[aá]nico|organic)/.test(key)) cls = 'text-bg-success';
+    else if (/(facebook|meta)/.test(key)) cls = 'text-bg-primary';
+    else if (/(google|search|adwords)/.test(key)) cls = 'text-bg-warning';
+    else if (/(referido|referral)/.test(key)) cls = 'text-bg-info';
+    else if (/tiktok/.test(key)) cls = 'text-bg-dark';
+    else if (/youtube/.test(key)) cls = 'text-bg-danger';
+    return `<span class="badge rounded-pill ${cls}">${val}</span>`;
+  }
 
-function calcROI(row) {
-  const ing = Number(row.INGRESO);
-  const gas = Number(row.GASTO);
-  if (isNaN(ing) && isNaN(gas)) return null;
-  const v = (isNaN(ing) ? 0 : ing) - (isNaN(gas) ? 0 : gas);
-  return v;
-}
+  function calcROI(row) {
+    const ing = Number(row.INGRESO);
+    const gas = Number(row.GASTO);
+    if (isNaN(ing) && isNaN(gas)) return null;
+    const v = (isNaN(ing) ? 0 : ing) - (isNaN(gas) ? 0 : gas);
+    return v;
+  }
 
-function cargarAlumnos(filtros = {}) {
-  $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">Cargando alumnos…</div></div>');
+  function cargarAlumnos(filtros = {}) {
+    $('#tablaAlumnos').html('<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">Cargando alumnos…</div></div>');
 
-  $.ajax({
-    url: "/api/alumnos",
-    method: "GET",
-    data: filtros,
-    success: function (data) {
-      const total = Array.isArray(data) ? data.length : 0;
-      $('#totalBadge').text(`${total.toLocaleString('es-MX')} registros`);
+    $.ajax({
+      url: "/api/alumnos",
+      method: "GET",
+      data: filtros,
+      success: function (data) {
+        const total = Array.isArray(data) ? data.length : 0;
+        $('#totalBadge').text(`${total.toLocaleString('es-MX')} registros`);
 
-      if (!Array.isArray(data) || data.length === 0) {
-        $('#tablaAlumnos').html('<div class="alert alert-warning mb-0">No se encontraron alumnos.</div>');
-        return;
-      }
+        if (!Array.isArray(data) || data.length === 0) {
+          $('#tablaAlumnos').html('<div class="alert alert-warning mb-0">No se encontraron alumnos.</div>');
+          return;
+        }
 
-      // THEAD
-      let thead = '<thead><tr>';
-      displayCols.forEach(col => { thead += `<th>${headersAmigables[col]}</th>`; });
-      thead += '<th>Acción</th></tr></thead>';
+        // THEAD
+        let thead = '<thead><tr>';
+        displayCols.forEach(col => { thead += `<th>${headersAmigables[col]}</th>`; });
+        thead += '<th>Acción</th></tr></thead>';
 
-      // TBODY
-      let tbody = '<tbody>';
-      data.forEach(row => {
-        const roi = calcROI(row);
+        // TBODY
+        let tbody = '<tbody>';
+        data.forEach(row => {
+          const roi = calcROI(row);
 
-        tbody += '<tr>';
-        displayCols.forEach(col => {
-          // Valor base
-          let raw = row[col] ?? '';
+          tbody += '<tr>';
+          displayCols.forEach(col => {
+            // Valor base
+            let raw = row[col] ?? '';
 
-          // Derivado ROI
-          if (col === 'ROI') {
-            if (roi === null) { tbody += `<td class="text-end" data-order=""></td>`; return; }
-            const pretty = mxnFmt.format(roi);
-            const trendIcon = roi >= 0 ? 'bi-arrow-up-right text-success' : 'bi-arrow-down-right text-danger';
-            tbody += `<td class="text-end" data-order="${roi}">${pretty} <i class="bi ${trendIcon}"></i></td>`;
-            return;
-          }
-
-          // Fecha -> solo YYYY-MM-DD
-          if (col.includes('FECHA')) raw = soloFecha(raw);
-
-          // Moneda
-          if (currencyFields.has(col)) {
-            const num = Number(row[col]);
-            if (!isNaN(num)) {
-              const pretty = mxnFmt.format(num);
-              tbody += `<td class="text-end" data-order="${num}">${pretty}</td>`;
-              return;
-            } else {
-              tbody += `<td class="text-end" data-order=""></td>`;
+            // Derivado ROI
+            if (col === 'ROI') {
+              if (roi === null) { tbody += `<td class="text-end" data-order=""></td>`; return; }
+              const pretty = mxnFmt.format(roi);
+              const trendIcon = roi >= 0 ? 'bi-arrow-up-right text-success' : 'bi-arrow-down-right text-danger';
+              tbody += `<td class="text-end" data-order="${roi}">${pretty} <i class="bi ${trendIcon}"></i></td>`;
               return;
             }
-          }
 
-          // Generación
-          if (col === 'GENERACION_PROGRAMA') {
-            tbody += `<td>${badgeGeneracion(raw)}</td>`;
-            return;
-          }
+            // Fecha -> solo YYYY-MM-DD
+            if (col.includes('FECHA')) raw = soloFecha(raw);
 
-          // Fuente como chip
-          if (col === 'FUENTE') {
-            tbody += `<td>${fuenteChip(raw)}</td>`;
-            return;
-          }
+            // Moneda
+            if (currencyFields.has(col)) {
+              const num = Number(row[col]);
+              if (!isNaN(num)) {
+                const pretty = mxnFmt.format(num);
+                tbody += `<td class="text-end" data-order="${num}">${pretty}</td>`;
+                return;
+              } else {
+                tbody += `<td class="text-end" data-order=""></td>`;
+                return;
+              }
+            }
 
-          // Correo truncado
-          if (col === 'CORREO') {
-            tbody += `<td><span class="text-truncate-220" title="${raw}">${raw}</span></td>`;
-            return;
-          }
+            // Generación
+            if (col === 'GENERACION_PROGRAMA') {
+              tbody += `<td>${badgeGeneracion(raw)}</td>`;
+              return;
+            }
 
-          tbody += `<td>${raw}</td>`;
-        });
+            // Fuente como chip
+            if (col === 'FUENTE') {
+              tbody += `<td>${fuenteChip(raw)}</td>`;
+              return;
+            }
 
-        // Acción (con ?next= para volver exacto a esta lista)
-        const nextParam = encodeURIComponent(window.location.href);
-        const correo = encodeURIComponent(String(row.CORREO || '').trim().toLowerCase());
-        const hrefPanel = `/alumno/${correo}?next=${nextParam}`;
+            // Correo truncado
+            if (col === 'CORREO') {
+              tbody += `<td><span class="text-truncate-220" title="${raw}">${raw}</span></td>`;
+              return;
+            }
 
-        // Generar HTML de acciones (vacío si READONLY)
-        let acciones = '';
-        if (!READONLY) {
-          acciones += `<a href="${hrefPanel}" class="btn btn-info btn-sm me-1">
+            tbody += `<td>${raw}</td>`;
+          });
+
+          // Acción (con ?next= para volver exacto a esta lista)
+          const nextParam = encodeURIComponent(window.location.href);
+          const correo = encodeURIComponent(String(row.CORREO || '').trim().toLowerCase());
+          const hrefPanel = `/alumno/${correo}?next=${nextParam}`;
+
+          // Generar HTML de acciones (vacío si READONLY)
+          let acciones = '';
+          if (!READONLY) {
+            acciones += `<a href="${hrefPanel}" class="btn btn-info btn-sm me-1">
             <i class="bi bi-person-lines-fill"></i> Panel
           </a>`;
 
-          const tel = (row.TELEFONO || '').replace(/\D/g,'');
-          const waNum = tel.length === 10 ? '52' + tel : tel;
-          if (waNum) {
-            const msg = encodeURIComponent(
-              `Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`
-            );
-            acciones += `<a href="https://wa.me/${waNum}?text=${msg}" target="_blank" rel="noopener" class="btn btn-success btn-sm">
+            const tel = (row.TELEFONO || '').replace(/\D/g, '');
+            const waNum = tel.length === 10 ? '52' + tel : tel;
+            if (waNum) {
+              const msg = encodeURIComponent(
+                `Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`
+              );
+              acciones += `<a href="https://wa.me/${waNum}?text=${msg}" target="_blank" rel="noopener" class="btn btn-success btn-sm">
               <i class="bi bi-whatsapp"></i>
             </a>`;
+            }
           }
-        }
 
-        // Pinta SIEMPRE una celda (queda vacía para invitados)
-        tbody += `<td class="text-nowrap">${acciones}</td>`;
+          // Pinta SIEMPRE una celda (queda vacía para invitados)
+          tbody += `<td class="text-nowrap">${acciones}</td>`;
 
-      });
-      tbody += '</tbody>';
+        });
+        tbody += '</tbody>';
 
-      const html = `<table id="alumnosTable" class="table table-sm table-hover table-striped align-middle text-nowrap w-100">${thead}${tbody}</table>`;
-      $('#tablaAlumnos').html(html);
+        const domStr = READONLY
+          ? '<"d-flex justify-content-between align-items-center mb-2"lf>rt<"d-flex justify-content-between mt-2"ip>'
+          : '<"d-flex justify-content-between align-items-center mb-2"lf>rt<"d-flex justify-content-between mt-2"ip><"dt-hidden-buttons"B>';
 
-      // DataTables
-      const dateIdx = displayCols.indexOf('FECHA_INSCRIPCION');
-      const dt = $('#alumnosTable').DataTable({
-        scrollX: true,
-        pageLength: 50,
-        lengthMenu: [[25, 50, 100], [25, 50, 100]],
-        autoWidth: false,
-        fixedHeader: true,
-        dom: '<"d-flex justify-content-between align-items-center mb-2"lf>rt<"d-flex justify-content-between mt-2"ip><"dt-hidden-buttons"B>',
-        buttons: [
-          { 
-            extend: 'csvHtml5',
-            title: 'alumnos',
-            className: 'd-none btn-dt-csv',
-            bom: true,
-            exportOptions: { columns: ':visible' }
+        const html = `<table id="alumnosTable" class="table table-sm table-hover table-striped align-middle text-nowrap w-100">${thead}${tbody}</table>`;
+        $('#tablaAlumnos').html(html);
+
+        // DataTables
+        const dateIdx = displayCols.indexOf('FECHA_INSCRIPCION');
+        const dt = $('#alumnosTable').DataTable({
+          scrollX: true,
+          pageLength: 50,
+          lengthMenu: [[25, 50, 100], [25, 50, 100]],
+          autoWidth: false,
+          fixedHeader: true,
+          dom: domStr, // ← aquí
+          buttons: READONLY ? [] : [ // ← aquí
+            {
+              extend: 'csvHtml5',
+              title: 'alumnos',
+              className: 'd-none btn-dt-csv',
+              bom: true,
+              exportOptions: { columns: ':visible' }
+            },
+            {
+              extend: 'csvHtml5',
+              title: 'alumnos',
+              className: 'd-none btn-dt-txt',
+              fieldSeparator: '\t',
+              extension: '.txt',
+              bom: true,
+              exportOptions: { columns: ':visible' }
+            }
+          ],
+          order: [[(dateIdx >= 0 ? dateIdx : 0), 'desc']],
+          language: {
+            search: "Buscar:",
+            lengthMenu: "Mostrar _MENU_",
+            zeroRecords: "No se encontraron resultados",
+            info: "Mostrando _START_ a _END_ de _TOTAL_",
+            infoEmpty: "Mostrando 0 a 0 de 0",
+            infoFiltered: "(filtrado de _MAX_ en total)",
+            paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
           },
-          { 
-            extend: 'csvHtml5',
-            title: 'alumnos',
-            className: 'd-none btn-dt-txt',
-            fieldSeparator: '\t',
-            extension: '.txt',
-            bom: true,
-            exportOptions: { columns: ':visible' }
-          }
-        ],
-        order: [[ (dateIdx >= 0 ? dateIdx : 0), 'desc' ]],
-        language: {
-          search: "Buscar:",
-          lengthMenu: "Mostrar _MENU_",
-          zeroRecords: "No se encontraron resultados",
-          info: "Mostrando _START_ a _END_ de _TOTAL_",
-          infoEmpty: "Mostrando 0 a 0 de 0",
-          infoFiltered: "(filtrado de _MAX_ en total)",
-          paginate: { first: "Primero", last: "Último", next: "Siguiente", previous: "Anterior" }
-        },
-        initComplete: function () {
-          this.api().columns.adjust();
-          // Construir toggles de columnas (omitimos la de Acciones)
-          const toggles = [];
-          displayCols.forEach((key, idx) => {
-            const checked = DEFAULT_VISIBLE.has(key) ? 'checked' : '';
-            toggles.push(`
+          initComplete: function () {
+            this.api().columns.adjust();
+            // Construir toggles de columnas (omitimos la de Acciones)
+            const toggles = [];
+            displayCols.forEach((key, idx) => {
+              const checked = DEFAULT_VISIBLE.has(key) ? 'checked' : '';
+              toggles.push(`
               <label class="form-check small">
                 <input class="form-check-input" type="checkbox" data-idx="${idx}" ${checked}>
                 <span class="form-check-label">${headersAmigables[key]}</span>
               </label>
             `);
-            // aplicar visibilidad inicial
-            this.api().column(idx).visible(DEFAULT_VISIBLE.has(key));
-          });
-          $('#colToggles').html(toggles.join(''));
-          if (READONLY) {
-            // La columna Acción es la última: índice = displayCols.length
-            this.api().column(displayCols.length).visible(false);
+              // aplicar visibilidad inicial
+              this.api().column(idx).visible(DEFAULT_VISIBLE.has(key));
+            });
+            $('#colToggles').html(toggles.join(''));
+            if (READONLY) {
+              // La columna Acción es la última: índice = displayCols.length
+              this.api().column(displayCols.length).visible(false);
+            }
           }
+        });
+
+        // Botón export
+        if (!READONLY) {
+          $('#exportCsvBtn').off('click').on('click', function(){
+            dt.button('.btn-dt-csv').trigger();
+          });
+          $('#exportTxtBtn').off('click').on('click', function(){
+            dt.button('.btn-dt-txt').trigger();
+          });
         }
-      });
 
-      // Botón export
-      $('#exportCsvBtn').off('click').on('click', function(){
-        dt.button('.btn-dt-csv').trigger();
-      });
-      $('#exportTxtBtn').off('click').on('click', function(){
-        dt.button('.btn-dt-txt').trigger();
-      });
-
-      // Handlers de checkboxes de columnas
-      $(document).off('change', '#colToggles input[type=checkbox]').on('change', '#colToggles input[type=checkbox]', function(){
-        const idx = Number(this.dataset.idx);
-        dt.column(idx).visible(this.checked);
-        dt.columns.adjust();
-      });
-
-      // Mostrar todas
-      $('#colShowAll').off('click').on('click', function(){
-        $('#colToggles input[type=checkbox]').each(function(){
-          this.checked = true;
+        // Handlers de checkboxes de columnas
+        $(document).off('change', '#colToggles input[type=checkbox]').on('change', '#colToggles input[type=checkbox]', function () {
           const idx = Number(this.dataset.idx);
-          dt.column(idx).visible(true);
+          dt.column(idx).visible(this.checked);
+          dt.columns.adjust();
         });
-        dt.columns.adjust();
-      });
 
-      // Reset a DEFAULT_VISIBLE
-      $('#colReset').off('click').on('click', function(){
-        $('#colToggles input[type=checkbox]').each(function(){
-          const key = displayCols[Number(this.dataset.idx)];
-          const should = DEFAULT_VISIBLE.has(key);
-          this.checked = should;
-          dt.column(Number(this.dataset.idx)).visible(should);
+        // Mostrar todas
+        $('#colShowAll').off('click').on('click', function () {
+          $('#colToggles input[type=checkbox]').each(function () {
+            this.checked = true;
+            const idx = Number(this.dataset.idx);
+            dt.column(idx).visible(true);
+          });
+          dt.columns.adjust();
         });
-        dt.columns.adjust();
+
+        // Reset a DEFAULT_VISIBLE
+        $('#colReset').off('click').on('click', function () {
+          $('#colToggles input[type=checkbox]').each(function () {
+            const key = displayCols[Number(this.dataset.idx)];
+            const should = DEFAULT_VISIBLE.has(key);
+            this.checked = should;
+            dt.column(Number(this.dataset.idx)).visible(should);
+          });
+          dt.columns.adjust();
+        });
+      },
+      error: function (err) {
+        console.error("Error al cargar alumnos:", err);
+        $('#tablaAlumnos').html('<div class="alert alert-danger mb-0">Error al cargar datos.</div>');
+      }
+    });
+  }
+
+  $(function () {
+    // Carga inicial
+    cargarAlumnos();
+
+    // Buscar
+    $('#filterForm').on('submit', function (e) {
+      e.preventDefault();
+      cargarAlumnos({
+        generacion: $('#generacion').val(),
+        correo: $('#correo').val()
       });
-    },
-    error: function (err) {
-      console.error("Error al cargar alumnos:", err);
-      $('#tablaAlumnos').html('<div class="alert alert-danger mb-0">Error al cargar datos.</div>');
-    }
-  });
-}
+    });
 
-$(function () {
-  // Carga inicial
-  cargarAlumnos();
+    // Limpiar
+    $('#limpiarFiltros').on('click', function () {
+      $('#filterForm')[0].reset();
+      cargarAlumnos();
+    });
 
-  // Buscar
-  $('#filterForm').on('submit', function (e) {
-    e.preventDefault();
-    cargarAlumnos({
-      generacion: $('#generacion').val(),
-      correo: $('#correo').val()
+    // Poblar generaciones
+    $.get('/api/generaciones', function (gens) {
+      (gens || []).forEach(g => $('#generacion').append(`<option value="${(g || '').trim()}">${g}</option>`));
     });
   });
-
-  // Limpiar
-  $('#limpiarFiltros').on('click', function () {
-    $('#filterForm')[0].reset();
-    cargarAlumnos();
-  });
-
-  // Poblar generaciones
-  $.get('/api/generaciones', function (gens) {
-    (gens || []).forEach(g => $('#generacion').append(`<option value="${(g||'').trim()}">${g}</option>`));
-  });
-});
 </script>
 {% endblock %}
