@@ -532,18 +532,17 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     }
 
 def _gen_date_range(generacion: str) -> tuple | None:
-    """
-    Devuelve (date_from, date_to) para GENERACION (ej. 'G-06') desde CAT_GENERACION_PROGRAMA.
-    Si FECHA_FIN es NULL, usa CURRENT_DATE() como límite superior (ventana abierta).
-    """
     if not generacion:
         return None
     q = """
       SELECT
         MIN(SAFE_CAST(FECHA_INICIO AS DATE)) AS f_from,
-        COALESCE(MAX(SAFE_CAST(FECHA_FIN AS DATE)), CURRENT_DATE()) AS f_to
+        COALESCE(
+          MAX(SAFE_CAST(NULLIF(FECHA_FIN, '') AS DATE)),
+          CURRENT_DATE()
+        ) AS f_to
       FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-      WHERE GENERACION = @g
+      WHERE UPPER(TRIM(GENERACION)) = UPPER(TRIM(@g))
     """
     job = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("g", "STRING", generacion)]
@@ -552,7 +551,6 @@ def _gen_date_range(generacion: str) -> tuple | None:
     if row and row["f_from"]:
         return (row["f_from"], row["f_to"])
     return None
-
 
 
 def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
@@ -683,7 +681,6 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
                     kpis[k] = _to_float(row.get(k))
         except Exception:
             app.logger.exception("Error KPIs Adq")
-
 
     # ---------------------------
     # 2) Series (DM diaria)
@@ -2071,7 +2068,10 @@ def comunidad_panel(correo):
 def adquisicion_insights():
     f = request.args.get("from")
     t = request.args.get("to")
-    g = (request.args.get("gen") or "").strip() or None
+
+    # ⬇️ ACEPTA AMBOS NOMBRES DE PARÁMETRO
+    g = (request.args.get("gen") or request.args.get("generacion") or "").strip() or None
+
     date_from = _parse_date(f)
     date_to = _parse_date(t)
 
@@ -2095,3 +2095,4 @@ def adquisicion_insights():
         app.logger.exception("Error en _adq_insights_data")
 
     return render_template("adquisicion_insights.html", gen=g or "", f_from=f or "", f_to=t or "", **data)
+
