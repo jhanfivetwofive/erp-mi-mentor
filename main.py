@@ -23,6 +23,7 @@ import re
 import urllib.parse
 import traceback
 from flask import Response
+from decimal import Decimal
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
@@ -113,6 +114,17 @@ def fetch_role_from_bq(email_norm: str) -> str | None:
     rol = (rows[0]["rol"] or "").strip().lower()
     return rol if rol in ROLES_VALIDOS else "invitado"
 
+def _to_float(x, default=0.0):
+    if x is None:
+        return default
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, Decimal):
+        return float(x)
+    try:
+        return float(x)
+    except Exception:
+        return default
 
 def login_required(f):
     @wraps(f)
@@ -522,13 +534,14 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
 def _gen_date_range(generacion: str) -> tuple | None:
     """
     Devuelve (date_from, date_to) para GENERACION (ej. 'G-06') desde CAT_GENERACION_PROGRAMA.
+    Si FECHA_FIN es NULL, usa CURRENT_DATE() como límite superior (ventana abierta).
     """
     if not generacion:
         return None
     q = """
       SELECT
         MIN(SAFE_CAST(FECHA_INICIO AS DATE)) AS f_from,
-        MAX(SAFE_CAST(FECHA_FIN    AS DATE)) AS f_to
+        COALESCE(MAX(SAFE_CAST(FECHA_FIN AS DATE)), CURRENT_DATE()) AS f_to
       FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
       WHERE GENERACION = @g
     """
@@ -536,9 +549,10 @@ def _gen_date_range(generacion: str) -> tuple | None:
         query_parameters=[bigquery.ScalarQueryParameter("g", "STRING", generacion)]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
-    if row and row["f_from"] and row["f_to"]:
+    if row and row["f_from"]:
         return (row["f_from"], row["f_to"])
     return None
+
 
 
 def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
@@ -586,39 +600,39 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     if use_gen_window:
         q_kpis = """
           WITH g AS (
-            SELECT GENERACION,
-                   SAFE_CAST(FECHA_INICIO AS DATE) f_from,
-                   SAFE_CAST(FECHA_FIN    AS DATE) f_to
-            FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-            WHERE GENERACION = @g
-          ),
-          m AS (
-            SELECT SAFE_CAST(FECHA AS DATE) d, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
-            FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
-          )
-          SELECT
-            SUM(m.PAUTA)       AS pauta,
-            SUM(m.IMPRESIONES) AS impresiones,
-            SUM(m.CLICKS)      AS clicks,
-            SUM(m.LEADS)       AS leads,
-            SUM(m.ASISTENTES)  AS asistentes,
-            SUM(m.MONTO)       AS monto_bruto,
-            SUM(m.INGRESO)     AS ingreso,
-            SUM(m.VENTAS)      AS ventas,
-            IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.IMPRESIONES),0)) * 1000, 0) AS cpm,
-            IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.CLICKS),0)), 0)            AS cpc,
-            IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.LEADS),0)), 0)             AS cpl,
-            IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.ASISTENTES),0)), 0)        AS cpasist,
-            IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.VENTAS),0)), 0)            AS cpv,
-            IFNULL(SAFE_DIVIDE(SUM(m.CLICKS), NULLIF(SUM(m.IMPRESIONES),0)), 0)      AS ctr,
-            IFNULL(SAFE_DIVIDE(SUM(m.LEADS), NULLIF(SUM(m.CLICKS),0)), 0)            AS porc_conv_lp,
-            IFNULL(SAFE_DIVIDE(SUM(m.ASISTENTES), NULLIF(SUM(m.LEADS),0)), 0)        AS porc_asist,
-            IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.ASISTENTES),0)), 0)       AS porc_conv_asist,
-            IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.LEADS),0)), 0)            AS porc_conv_bdd,
-            IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)), 0)             AS roas,
-            IFNULL(SUM(m.MONTO) - SUM(m.PAUTA), 0)                                    AS utilidad
-          FROM g
-          JOIN m ON m.d BETWEEN g.f_from AND g.f_to
+                SELECT GENERACION,
+                        SAFE_CAST(FECHA_INICIO AS DATE) f_from,
+                        COALESCE(SAFE_CAST(FECHA_FIN AS DATE), CURRENT_DATE()) f_to2
+                FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+                WHERE GENERACION = @g
+                ),
+                m AS (
+                SELECT SAFE_CAST(FECHA AS DATE) d, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
+                FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+                )
+                SELECT
+                SUM(m.PAUTA)       AS pauta,
+                SUM(m.IMPRESIONES) AS impresiones,
+                SUM(m.CLICKS)      AS clicks,
+                SUM(m.LEADS)       AS leads,
+                SUM(m.ASISTENTES)  AS asistentes,
+                SUM(m.MONTO)       AS monto_bruto,
+                SUM(m.INGRESO)     AS ingreso,
+                SUM(m.VENTAS)      AS ventas,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.IMPRESIONES),0)) * 1000, 0) AS cpm,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.CLICKS),0)), 0)            AS cpc,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.LEADS),0)), 0)             AS cpl,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.ASISTENTES),0)), 0)        AS cpasist,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.VENTAS),0)), 0)            AS cpv,
+                IFNULL(SAFE_DIVIDE(SUM(m.CLICKS), NULLIF(SUM(m.IMPRESIONES),0)), 0)      AS ctr,
+                IFNULL(SAFE_DIVIDE(SUM(m.LEADS), NULLIF(SUM(m.CLICKS),0)), 0)            AS porc_conv_lp,
+                IFNULL(SAFE_DIVIDE(SUM(m.ASISTENTES), NULLIF(SUM(m.LEADS),0)), 0)        AS porc_asist,
+                IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.ASISTENTES),0)), 0)       AS porc_conv_asist,
+                IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.LEADS),0)), 0)            AS porc_conv_bdd,
+                IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)), 0)             AS roas,
+                IFNULL(SUM(m.MONTO) - SUM(m.PAUTA), 0)                                    AS utilidad
+                FROM g
+                JOIN m ON m.d BETWEEN g.f_from AND g.f_to2
         """
         params.append(bigquery.ScalarQueryParameter("g", "STRING", gen))
     else:
@@ -656,19 +670,20 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
           {where_dm}
         """
 
-    kpis = {k:0 for k in [
-        "pauta","impresiones","clicks","leads","asistentes",
-        "monto_bruto","ingreso","ventas","cpm","cpc","cpl","cpasist",
-        "cpv","ctr","porc_conv_lp","porc_asist","porc_conv_asist",
-        "porc_conv_bdd","roas","utilidad"
-    ]}
-    try:
-        row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()), None)
-        if row:
-            for k in kpis.keys():
-                kpis[k] = float(row[k]) if isinstance(row[k], (int,float)) else (row[k] or 0)
-    except Exception:
-        app.logger.exception("Error KPIs Adq")
+        kpis = {k:0.0 for k in [
+            "pauta","impresiones","clicks","leads","asistentes",
+            "monto_bruto","ingreso","ventas","cpm","cpc","cpl","cpasist",
+            "cpv","ctr","porc_conv_lp","porc_asist","porc_conv_asist",
+            "porc_conv_bdd","roas","utilidad"
+        ]}
+        try:
+            row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()), None)
+            if row:
+                for k in kpis.keys():
+                    kpis[k] = _to_float(row.get(k))
+        except Exception:
+            app.logger.exception("Error KPIs Adq")
+
 
     # ---------------------------
     # 2) Series (DM diaria)
@@ -676,14 +691,15 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     if use_gen_window:
         q_series = """
           WITH g AS (
-            SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from, SAFE_CAST(FECHA_FIN AS DATE) f_to
+            SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from,
+                    COALESCE(SAFE_CAST(FECHA_FIN AS DATE), CURRENT_DATE()) f_to2
             FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
             WHERE GENERACION = @g
-          )
-          SELECT SAFE_CAST(m.FECHA AS DATE) AS d, m.LEADS, m.VENTAS, m.PAUTA, m.INGRESO
-          FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA` m, g
-          WHERE SAFE_CAST(m.FECHA AS DATE) BETWEEN g.f_from AND g.f_to
-          ORDER BY d
+            )
+            SELECT SAFE_CAST(m.FECHA AS DATE) AS d, m.LEADS, m.VENTAS, m.PAUTA, m.INGRESO
+            FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA` m, g
+            WHERE SAFE_CAST(m.FECHA AS DATE) BETWEEN g.f_from AND g.f_to2
+            ORDER BY d
         """
         params_series = [bigquery.ScalarQueryParameter("g", "STRING", gen)]
     else:
@@ -735,44 +751,45 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
 
     q_rank = f"""
       WITH g AS (
-        SELECT GENERACION,
-               SAFE_CAST(FECHA_INICIO AS DATE) f_from,
-               SAFE_CAST(FECHA_FIN    AS DATE) f_to
-        FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-        {gen_filter}
-        GROUP BY GENERACION, f_from, f_to
-      ),
-      m AS (
-        SELECT SAFE_CAST(FECHA AS DATE) AS FECHA, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
-        FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
-        {clip}
-      )
-      SELECT
-        g.GENERACION AS generacion,
-        SUM(m.LEADS)   AS leads,
-        SUM(m.VENTAS)  AS ventas,
-        SUM(m.PAUTA)   AS pauta,
-        SUM(m.MONTO)   AS monto_bruto,
-        SUM(m.INGRESO) AS ingreso,
-        IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)), 0) AS roas
-      FROM g
-      LEFT JOIN m
-        ON m.FECHA BETWEEN g.f_from AND g.f_to
-      GROUP BY generacion
-      ORDER BY generacion
+            SELECT GENERACION,
+                    SAFE_CAST(FECHA_INICIO AS DATE) f_from,
+                    COALESCE(SAFE_CAST(FECHA_FIN AS DATE), CURRENT_DATE()) f_to2
+            FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+            {gen_filter}
+            GROUP BY GENERACION, f_from, f_to2
+            ),
+            m AS (
+            SELECT SAFE_CAST(FECHA AS DATE) AS FECHA, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
+            FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+            {clip}
+            )
+            SELECT
+            g.GENERACION AS generacion,
+            SUM(m.LEADS)   AS leads,
+            SUM(m.VENTAS)  AS ventas,
+            SUM(m.PAUTA)   AS pauta,
+            SUM(m.MONTO)   AS monto_bruto,
+            SUM(m.INGRESO) AS ingreso,
+            IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)), 0) AS roas
+            FROM g
+            LEFT JOIN m
+            ON m.FECHA BETWEEN g.f_from AND g.f_to2
+            GROUP BY generacion
+            ORDER BY generacion
     """
     bygen_rows = []
     try:
         for r in client.query(q_rank, job_config=bigquery.QueryJobConfig(query_parameters=params_rank)).result():
             bygen_rows.append({
                 "generacion":  r["generacion"] or "—",
-                "leads":       int(r["leads"] or 0),
-                "ventas":      int(r["ventas"] or 0),
-                "pauta":       float(r["pauta"] or 0.0),
-                "monto_bruto": float(r["monto_bruto"] or 0.0),
-                "ingreso":     float(r["ingreso"] or 0.0),
-                "roas":        float(r["roas"] or 0.0),
+                "leads":       int(_to_float(r["leads"])),
+                "ventas":      int(_to_float(r["ventas"])),
+                "pauta":       _to_float(r["pauta"]),
+                "monto_bruto": _to_float(r["monto_bruto"]),
+                "ingreso":     _to_float(r["ingreso"]),
+                "roas":        _to_float(r["roas"]),
             })
+
     except Exception:
         app.logger.exception("Error ranking gen Adq")
 
@@ -784,29 +801,31 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         if use_gen_window:
             q_cross = """
               WITH g AS (
-                SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from, SAFE_CAST(FECHA_FIN AS DATE) f_to
-                FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-                WHERE GENERACION = @g
-              ),
-              base AS (
-                SELECT DISTINCT
-                  LOWER(TRIM(CORREO)) AS correo,
-                  ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
-                  ANY_VALUE(TELEFONO) AS telefono,
-                  SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f_insc
-                FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`, g
-                WHERE SAFE_CAST(FECHA_INSCRIPCION AS DATE) BETWEEN g.f_from AND g.f_to
-              ),
-              diag AS (
-                SELECT LOWER(TRIM(CORREO)) AS correo, GENERACION, FECHA_ENCUESTA
-                FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
-              )
-              SELECT b.correo, b.nombre, b.telefono, d.GENERACION AS generacion_diag, d.FECHA_ENCUESTA AS fecha_diag
-              FROM base b
-              LEFT JOIN diag d USING (correo)
-              ORDER BY b.nombre
-              LIMIT 1000
+                    SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from,
+                            COALESCE(SAFE_CAST(FECHA_FIN AS DATE), CURRENT_DATE()) f_to2
+                    FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+                    WHERE GENERACION = @g
+                    ),
+                    base AS (
+                    SELECT DISTINCT
+                        LOWER(TRIM(CORREO)) AS correo,
+                        ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
+                        ANY_VALUE(TELEFONO) AS telefono,
+                        SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f_insc
+                    FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`, g
+                    WHERE SAFE_CAST(FECHA_INSCRIPCION AS DATE) BETWEEN g.f_from AND g.f_to2
+                    ),
+                    diag AS (
+                    SELECT LOWER(TRIM(CORREO)) AS correo, GENERACION, FECHA_ENCUESTA
+                    FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+                    QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
+                    )
+                    SELECT b.correo, b.nombre, b.telefono, d.GENERACION AS generacion_diag, d.FECHA_ENCUESTA AS fecha_diag
+                    FROM base b
+                    LEFT JOIN diag d USING (correo)
+                    ORDER BY b.nombre
+                    LIMIT 1000
+
             """
             params_cross = [bigquery.ScalarQueryParameter("g", "STRING", gen)]
         else:
@@ -863,8 +882,6 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         "series_ingreso": series_ingreso,
         "cross_rows": cross_rows,
     }
-
-
 
 # === BACK URL ROBUSTO (ATRÁS) ===
 def _is_safe_internal_url(target: str) -> bool:
@@ -1131,10 +1148,10 @@ def api_alumnos():
 @app.route('/api/generaciones')
 def obtener_generaciones():
     query = """
-        SELECT DISTINCT GENERACION_PROGRAMA
-        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-        WHERE GENERACION_PROGRAMA IS NOT NULL
-        ORDER BY GENERACION_PROGRAMA
+        SELECT DISTINCT GENERACION
+        FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+        WHERE GENERACION IS NOT NULL
+        ORDER BY GENERACION
     """
     generaciones = client.query(query).result()
     return jsonify([row.GENERACION_PROGRAMA for row in generaciones])
@@ -1205,7 +1222,8 @@ def api_generaciones():
 
         for col in ['FECHA_INICIO', 'FECHA_FIN']:
             df[col] = pd.to_datetime(df[col], errors='coerce')
-            df[col] = df[col].fillna('No Disponible')
+            df[col] = df[col].dt.date.astype('string')  # ISO 'YYYY-MM-DD' o <NA>
+
 
         for col in df.select_dtypes(include=["object", "string"]).columns:
             df[col] = df[col].fillna("")
@@ -1470,9 +1488,6 @@ def get_alumno_info(correo):
             msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?"
             whatsapp_url = f"https://wa.me/{e164}?text=" + \
                 urllib.parse.quote(msg)
-        
-        # Dentro de get_alumno_info(...)
-        rol = current_user_role()
 
         # ... después de calcular whatsapp_url:
         if (rol or "").lower() == "invitado":
