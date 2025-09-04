@@ -101,6 +101,18 @@
   </div>
 </div>
 
+<div class="row g-3 mb-3">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white border-0"><h6 class="mb-0">
+        <i class="bi bi-graph-up-arrow text-success me-2"></i>Leads por día
+      </h6></div>
+      <div class="card-body"><div style="height:300px"><canvas id="chartLeads"></canvas></div></div>
+    </div>
+  </div>
+</div>
+
+
 {# ===== Cruce detalle ===== #}
 <div class="card shadow-sm">
   <div class="card-header bg-white border-0 d-flex align-items-center">
@@ -200,16 +212,28 @@
   if (elS && Array.isArray(sLabels) && sLabels.length) {
     new Chart(elS.getContext('2d'), {
       type: 'line',
-      data: { labels: sLabels, datasets: [{ label:'Inscripciones', data:sData, borderWidth:2, tension:.2, fill:false }] },
+      data: { labels:gLabels, datasets:[{ label:'Inscripciones (ventas)', data:gInsc, borderWidth:1 }] },
       options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ maxTicksLimit:12 } } } }
     });
   }
+
+    // Serie de leads (separada de inscripciones)
+  const sLeads = {{ series_leads|default([])|tojson }};
+  const elL = document.getElementById('chartLeads');
+  if (elL && Array.isArray(sLabels) && sLabels.length && Array.isArray(sLeads)) {
+    new Chart(elL.getContext('2d'), {
+      type: 'line',
+      data: { labels: sLabels, datasets: [{ label:'Leads', data:sLeads, borderWidth:2, tension:.2, fill:false }] },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ maxTicksLimit:12 } } } }
+    });
+  }
+
 
   // Ranking por generación
   const byGen   = {{ by_gen|default([])|tojson }};
   const gLabels = byGen.map(r => r.generacion || '—');
   // ⬇️ si no agregas alias en backend, usa los nombres reales
-  const gInsc   = byGen.map(r => (r.inscripciones ?? r.leads) || 0);
+  const gInsc   = byGen.map(r => Number(r.inscripciones) || 0); // Solo ventas (inscripciones)
   const elG = document.getElementById('chartByGen');
   if (elG && gLabels.length) {
     new Chart(elG.getContext('2d'), {
