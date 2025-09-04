@@ -801,6 +801,28 @@ def back_url(default: str | None = None) -> str:
         return _route_por_rol()
     except Exception:
         return url_for("alumnos_page")
+    
+
+# === Readonly guard para invitados ===
+READ_ONLY_BLOCKED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+@app.before_request
+def _enforce_guest_readonly():
+    try:
+        u = session.get("user") or {}
+        rol = (u.get("rol") or "").strip().lower()
+        if rol == "invitado" and request.method in READ_ONLY_BLOCKED_METHODS:
+            # API → JSON
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Modo solo lectura para usuarios invitados."}), 403
+            # Páginas → template
+            try:
+                return render_template("no_autorizado.html", msg="Modo solo lectura (invitado)"), 403
+            except Exception:
+                return "Modo solo lectura (invitado)", 403
+    except Exception:
+        # fail-closed no, preferimos no romper navegación
+        pass
 
 
 # =========================================================
@@ -812,6 +834,11 @@ def back_url(default: str | None = None) -> str:
 def _inject_back_url():
     return {"back_url": back_url}
 
+@app.context_processor
+def _inject_readonly_flag():
+    u = session.get("user") or {}
+    rol = (u.get("rol") or "").strip().lower()
+    return {"readonly": (rol == "invitado")}
 
 @app.route("/")
 def home():
@@ -1091,7 +1118,6 @@ def get_alumno_info(correo):
         )
 
         # ---- 1) Info del alumno (se muestra a todos) ----
-        # ---- 1) Info del alumno (se muestra a todos) ----
         query_alumno = """
             WITH base AS (
                     SELECT DISTINCT
@@ -1318,6 +1344,14 @@ def get_alumno_info(correo):
             msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?"
             whatsapp_url = f"https://wa.me/{e164}?text=" + \
                 urllib.parse.quote(msg)
+        
+        # Dentro de get_alumno_info(...)
+        rol = current_user_role()
+
+        # ... después de calcular whatsapp_url:
+        if (rol or "").lower() == "invitado":
+            whatsapp_url = None
+
 
         # -------------------------------------------------
         # 4) Comunidad → SOLO admin/comunidad
@@ -1389,8 +1423,7 @@ def get_alumno_info(correo):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-
+    
 # -------------------- Seguimientos (crear / mover / listar) --------------------
 
 
