@@ -519,225 +519,278 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+def _gen_date_range(generacion: str) -> tuple | None:
+    """
+    Devuelve (date_from, date_to) para una GENERACION (ej. 'G-06') a partir de
+    INSUMOS.CAT_GENERACION_PROGRAMA. Si no hay match, regresa None.
+    """
+    if not generacion:
+        return None
+    q = """
+      SELECT
+        MIN(SAFE_CAST(FECHA_INICIO AS DATE)) AS f_from,
+        MAX(SAFE_CAST(FECHA_FIN    AS DATE)) AS f_to
+      FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+      WHERE GENERACION = @g
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("g", "STRING", generacion)]
+    )
+    row = next(iter(client.query(q, job_config=job).result()), None)
+    if row and row["f_from"] and row["f_to"]:
+        return (row["f_from"], row["f_to"])
+    return None
+
+
 
 def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
     """
-    Insights de Adquisición:
-      - KPIs por selección (gen/fechas)
-      - Serie de inscripciones por día
-      - Ranking por generación
-      - Cruce detalle (alumno ↔ último diagnóstico ↔ último seguimiento)
+    Insights de Adquisición basados en DM_METRICAS_WEBINAR_X_FECHA_DIA (agregado por día),
+    con opción de acotar por rango de fechas de una GENERACION desde CAT_GENERACION_PROGRAMA.
+    También calcula ranking por generación y cruce simple con diagnóstico.
     """
-    params = []
-    wh = ["1=1"]
 
-    # --- Filtro de generación: exacto (G-##) o numérico dentro del texto ---
-    gen_where = None
-    if generacion and generacion_num:
-        gen_where = "(GENERACION_PROGRAMA = @gen OR REGEXP_CONTAINS(UPPER(GENERACION_PROGRAMA), @gen_re))"
-        params.append(bigquery.ScalarQueryParameter(
-            "gen", "STRING", generacion))
-        params.append(bigquery.ScalarQueryParameter(
-            "gen_re", "STRING", rf"(^|[\s\-_/])0?{generacion_num}($|[\s\-_/])"))
-    elif generacion:
-        gen_where = "GENERACION_PROGRAMA = @gen"
-        params.append(bigquery.ScalarQueryParameter(
-            "gen", "STRING", generacion))
-    elif generacion_num:
-        gen_where = "REGEXP_CONTAINS(UPPER(GENERACION_PROGRAMA), @gen_re)"
-        params.append(bigquery.ScalarQueryParameter(
-            "gen_re", "STRING", rf"(^|[\s\-_/])0?{generacion_num}($|[\s\-_/])"))
-    if gen_where:
-        wh.append(gen_where)
+    # ---------------------------
+    # 0) Resolver rango de fechas
+    # ---------------------------
+    # Si no vienen fechas pero sí 'generacion' (ej. 'G-06'), usa CAT_GENERACION_PROGRAMA
+    if generacion and (not date_from or not date_to):
+        rng = _gen_date_range(generacion)
+        if rng:
+            date_from, date_to = rng  # ambos son DATE
+    # Asegurar tipos DATE si vienen como strings
+    if isinstance(date_from, str):
+        try: date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+        except: date_from = None
+    if isinstance(date_to, str):
+        try: date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+        except: date_to = None
 
-    # --- Fechas robustas (FECHA_INSCRIPCION puede venir como STRING/TIMESTAMP) ---
+    # Filtro WHERE para DM_METRICAS_WEBINAR_X_FECHA_DIA
+    wh_dm, params_dm = ["1=1"], []
     if date_from:
-        wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) >= @from")
-        params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+        wh_dm.append("SAFE_CAST(FECHA AS DATE) >= @from")
+        params_dm.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
     if date_to:
-        wh.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) <= @to")
-        params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+        wh_dm.append("SAFE_CAST(FECHA AS DATE) <= @to")
+        params_dm.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+    where_dm = "WHERE " + " AND ".join(wh_dm)
 
-    where_sql = "WHERE " + " AND ".join(wh)
+    # -----------------------------------------
+    # 1) KPIs a partir de la tabla diaria (DM)
+    # -----------------------------------------
+    q_kpis = f"""
+      SELECT
+        SUM(PAUTA)        AS pauta,
+        SUM(IMPRESIONES)  AS impresiones,
+        SUM(CLICKS)       AS clicks,
+        SUM(LEADS)        AS leads,
+        SUM(ASISTENTES)   AS asistentes,
+      /* Ingresos/ventas vienen ya calculados en la DM (MONTO bruto e INGRESO neto) */
+        SUM(MONTO)        AS monto_bruto,
+        SUM(INGRESO)      AS ingreso,
+        SUM(VENTAS)       AS ventas,
+      /* Métricas compuestas recalculadas con agregados */
+        IFNULL(SAFE_DIVIDE(SUM(PAUTA), NULLIF(SUM(IMPRESIONES),0)) * 1000, 0) AS cpm,
+        IFNULL(SAFE_DIVIDE(SUM(PAUTA), NULLIF(SUM(CLICKS),0)), 0)            AS cpc,
+        IFNULL(SAFE_DIVIDE(SUM(PAUTA), NULLIF(SUM(LEADS),0)), 0)             AS cpl,
+        IFNULL(SAFE_DIVIDE(SUM(PAUTA), NULLIF(SUM(ASISTENTES),0)), 0)        AS cpasist,
+        IFNULL(SAFE_DIVIDE(SUM(PAUTA), NULLIF(SUM(VENTAS),0)), 0)            AS cpv,
+        IFNULL(SAFE_DIVIDE(SUM(CLICKS), NULLIF(SUM(IMPRESIONES),0)), 0)      AS ctr,
+        IFNULL(SAFE_DIVIDE(SUM(LEADS), NULLIF(SUM(CLICKS),0)), 0)            AS porc_conv_lp,
+        IFNULL(SAFE_DIVIDE(SUM(ASISTENTES), NULLIF(SUM(LEADS),0)), 0)        AS porc_asist,
+        IFNULL(SAFE_DIVIDE(SUM(VENTAS), NULLIF(SUM(ASISTENTES),0)), 0)       AS porc_conv_asist,
+        IFNULL(SAFE_DIVIDE(SUM(VENTAS), NULLIF(SUM(LEADS),0)), 0)            AS porc_conv_bdd,
+        IFNULL(SAFE_DIVIDE(SUM(MONTO), NULLIF(SUM(PAUTA),0)), 0)             AS roas,
+        IFNULL(SUM(MONTO) - SUM(PAUTA), 0)                                    AS utilidad
+      FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+      {where_dm}
+    """
 
-    # ---------- Ranking por generación ----------
-    q_bygen = f"""
-    WITH base AS (
-      SELECT DISTINCT
-        ID_INSCRIPCION,
-        LOWER(TRIM(CORREO)) AS correo,
-        GENERACION_PROGRAMA,
-        SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f,
-        SAFE_CAST(GASTO   AS NUMERIC) AS gasto,
-        SAFE_CAST(INGRESO AS NUMERIC) AS ingreso
-      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-      {where_sql}
-    ),
-    leads AS (
-      SELECT GENERACION_PROGRAMA, COUNT(DISTINCT correo) AS leads
-      FROM base GROUP BY GENERACION_PROGRAMA
-    ),
-    insc AS (
-      SELECT GENERACION_PROGRAMA,
-             COUNT(DISTINCT ID_INSCRIPCION) AS inscripciones,
-             SUM(ingreso) AS ingreso,
-             SUM(gasto)  AS gasto
-      FROM base GROUP BY GENERACION_PROGRAMA
-    ),
-    diag AS (
-      SELECT LOWER(TRIM(CORREO)) AS correo,
-             ESTATUS_VENTA,
-             ESTATUS_VIABLE
-      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
-      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
-    ),
-    cross_agg AS (
-      SELECT b.GENERACION_PROGRAMA,
-             COUNTIF(d.correo IS NOT NULL)                 AS diagnosticos,
-             COUNTIF(d.ESTATUS_VENTA = 1)                  AS ventas_diag,
-             COUNTIF(d.ESTATUS_VIABLE = 'VIABLE')          AS viables,
-             COUNTIF(d.ESTATUS_VIABLE = 'REQUIERE AJUSTE') AS requiere_ajuste,
-             COUNTIF(d.ESTATUS_VIABLE = 'NO VIABLE')       AS no_viable
-      FROM base b
-      LEFT JOIN diag d ON d.correo = b.correo
-      GROUP BY b.GENERACION_PROGRAMA
-    )
-    SELECT
-      i.GENERACION_PROGRAMA                         AS generacion,
-      COALESCE(l.leads,0)                           AS leads,
-      COALESCE(i.inscripciones,0)                   AS inscripciones,
-      COALESCE(ca.diagnosticos,0)                   AS diagnosticos,
-      COALESCE(ca.ventas_diag,0)                    AS ventas_diag,
-      COALESCE(ca.viables,0)                        AS viables,
-      COALESCE(ca.requiere_ajuste,0)                AS requiere_ajuste,
-      COALESCE(ca.no_viable,0)                      AS no_viable,
-      COALESCE(i.ingreso,0)                         AS ingreso,
-      COALESCE(i.gasto,0)                           AS gasto,
-      SAFE_DIVIDE(COALESCE(i.ingreso,0), NULLIF(i.gasto,0)) AS roas
-    FROM insc i
-    LEFT JOIN leads     l  USING (GENERACION_PROGRAMA)
-    LEFT JOIN cross_agg ca USING (GENERACION_PROGRAMA)
-    ORDER BY generacion
+    kpis = {
+        "pauta": 0.0, "impresiones": 0, "clicks": 0, "leads": 0,
+        "asistentes": 0, "monto_bruto": 0.0, "ingreso": 0.0, "ventas": 0,
+        "cpm": 0.0, "cpc": 0.0, "cpl": 0.0, "cpasist": 0.0, "cpv": 0.0,
+        "ctr": 0.0, "porc_conv_lp": 0.0, "porc_asist": 0.0, "porc_conv_asist": 0.0,
+        "porc_conv_bdd": 0.0, "roas": 0.0, "utilidad": 0.0
+    }
+    try:
+        row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params_dm)).result()), None)
+        if row:
+            for k in kpis.keys():
+                v = row.get(k.upper()) if k.upper() in row.keys() else row.get(k)
+                kpis[k] = float(v) if isinstance(v, (int, float)) else (int(v) if isinstance(v, int) else (v or 0))
+    except Exception:
+        app.logger.exception("Error en KPIs Adquisición")
+
+    # ---------------------------------------------
+    # 2) Serie temporal desde la tabla diaria (DM)
+    # ---------------------------------------------
+    q_series = f"""
+      SELECT
+        SAFE_CAST(FECHA AS DATE) AS d,
+        LEADS, VENTAS, PAUTA, INGRESO
+      FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+      {where_dm}
+      ORDER BY d
+    """
+    series_labels, series_leads, series_ventas, series_pauta, series_ingreso = [], [], [], [], []
+    try:
+        for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params_dm)).result():
+            d = r.get("d")
+            series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
+            series_leads.append(int(r.get("LEADS") or 0))
+            series_ventas.append(int(r.get("VENTAS") or 0))
+            # Los monetarios como float
+            series_pauta.append(float(r.get("PAUTA") or 0.0))
+            series_ingreso.append(float(r.get("INGRESO") or 0.0))
+    except Exception:
+        app.logger.exception("Error en series Adquisición")
+
+    # ------------------------------------------------------
+    # 3) Ranking por generación (bucket por rango de fechas)
+    #     CAT_GENERACION_PROGRAMA ⟂ DM_METRICAS por fecha
+    # ------------------------------------------------------
+    # Si vienen fechas explícitas, recortamos el join a ese rango.
+    wh_join, params_join = [], []
+    if date_from:
+        wh_join.append("SAFE_CAST(m.FECHA AS DATE) >= @from")
+        params_join.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+    if date_to:
+        wh_join.append("SAFE_CAST(m.FECHA AS DATE) <= @to")
+        params_join.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+    where_join = ("WHERE " + " AND ".join(wh_join)) if wh_join else ""
+
+    # Si filtras una generación específica, puedes dejar el ranking con una sola fila.
+    gen_clause = ""
+    params_gen = []
+    if generacion:
+        gen_clause = "WHERE g.GENERACION = @g"
+        params_gen.append(bigquery.ScalarQueryParameter("g", "STRING", generacion))
+
+    q_rank = f"""
+      WITH g AS (
+        SELECT GENERACION, SAFE_CAST(FECHA_INICIO AS DATE) f_from, SAFE_CAST(FECHA_FIN AS DATE) f_to
+        FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+        {gen_clause}
+      ),
+      m AS (
+        SELECT SAFE_CAST(FECHA AS DATE) AS FECHA, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
+        FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+        {where_join}
+      )
+      SELECT
+        g.GENERACION AS generacion,
+        SUM(m.LEADS)       AS leads,
+        SUM(m.VENTAS)      AS ventas,
+        SUM(m.PAUTA)       AS pauta,
+        SUM(m.MONTO)       AS monto_bruto,
+        SUM(m.INGRESO)     AS ingreso,
+        IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)), 0) AS roas
+      FROM g
+      LEFT JOIN m
+        ON m.FECHA BETWEEN g.f_from AND g.f_to
+      GROUP BY generacion
+      ORDER BY generacion
     """
     bygen_rows = []
-    for r in client.query(q_bygen, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        bygen_rows.append({
-            "generacion":      r.get("generacion") or "—",
-            "leads":           int(r.get("leads") or 0),
-            "inscripciones":   int(r.get("inscripciones") or 0),
-            "diagnosticos":    int(r.get("diagnosticos") or 0),
-            "ventas_diag":     int(r.get("ventas_diag") or 0),
-            "viables":         int(r.get("viables") or 0),
-            "requiere_ajuste": int(r.get("requiere_ajuste") or 0),
-            "no_viable":       int(r.get("no_viable") or 0),
-            "ingreso":         float(r.get("ingreso") or 0.0),
-            "gasto":           float(r.get("gasto") or 0.0),
-            "roas":            float(r.get("roas") or 0.0),
-        })
+    try:
+        params_rank = params_join + params_gen
+        for r in client.query(q_rank, job_config=bigquery.QueryJobConfig(query_parameters=params_rank)).result():
+            bygen_rows.append({
+                "generacion":  r.get("generacion") or "—",
+                "leads":       int(r.get("leads") or 0),
+                "ventas":      int(r.get("ventas") or 0),
+                "pauta":       float(r.get("pauta") or 0.0),
+                "monto_bruto": float(r.get("monto_bruto") or 0.0),
+                "ingreso":     float(r.get("ingreso") or 0.0),
+                "roas":        float(r.get("roas") or 0.0),
+            })
+    except Exception:
+        app.logger.exception("Error en ranking por generación")
 
-    # ---------- KPIs ----------
+    # -----------------------------------------
+    # 4) KPIs "top-level" para banner del board
+    # -----------------------------------------
     if generacion:
-        base_kpi = next((r for r in bygen_rows if (
-            r.get("generacion") or "") == generacion), None) or {}
-        kpis = {
-            "leads":           int(base_kpi.get("leads", 0)),
-            "inscripciones":   int(base_kpi.get("inscripciones", 0)),
-            "diagnosticos":    int(base_kpi.get("diagnosticos", 0)),
-            "ventas_diag":     int(base_kpi.get("ventas_diag", 0)),
-            "viables":         int(base_kpi.get("viables", 0)),
-            "requiere_ajuste": int(base_kpi.get("requiere_ajuste", 0)),
-            "no_viable":       int(base_kpi.get("no_viable", 0)),
-            "ingreso":         float(base_kpi.get("ingreso", 0.0)),
-            "gasto":           float(base_kpi.get("gasto", 0.0)),
-            "roas":            float(base_kpi.get("roas", 0.0)),
-        }
-    else:
-        total_gasto = sum(r["gasto"] for r in bygen_rows)
-        total_ing = sum(r["ingreso"] for r in bygen_rows)
-        kpis = {
-            "leads":           sum(r["leads"] for r in bygen_rows),
-            "inscripciones":   sum(r["inscripciones"] for r in bygen_rows),
-            "diagnosticos":    sum(r["diagnosticos"] for r in bygen_rows),
-            "ventas_diag":     sum(r["ventas_diag"] for r in bygen_rows),
-            "ingreso":         total_ing,
-            "gasto":           total_gasto,
-            "roas":            (total_ing / total_gasto) if total_gasto else 0.0,
-            "viables":         sum(r["viables"] for r in bygen_rows),
-            "requiere_ajuste": sum(r["requiere_ajuste"] for r in bygen_rows),
-            "no_viable":       sum(r["no_viable"] for r in bygen_rows),
-        }
+        # Si hay una sola generación, toma sus agregados del ranking (si existe)
+        base = next((x for x in bygen_rows if (x.get("generacion") == generacion)), None)
+        if base:
+            # complementa kpis con los del rango ya calculado por DM (consistente)
+            pass  # ya tenemos kpis calculados arriba y sumas por gen aquí
+    # (no cambiamos 'kpis' porque provienen de la DM filtrada por fechas)
 
-    # ---------- Serie por fecha ----------
-    q_series = f"""
-    SELECT SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d,
-           COUNT(DISTINCT ID_INSCRIPCION)       AS n
-    FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-    {where_sql}
-    GROUP BY d
-    HAVING d IS NOT NULL
-    ORDER BY d
-    """
-    series_labels, series_counts = [], []
-    for r in client.query(q_series, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        series_labels.append(r["d"].isoformat())
-        series_counts.append(int(r["n"]))
-
-    # ---------- Cruce detalle ----------
-    q_cross = f"""
-    WITH base AS (
-      SELECT
-        LOWER(TRIM(CORREO))      AS correo,
-        ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
-        ANY_VALUE(TELEFONO)      AS telefono,
-        GENERACION_PROGRAMA
-      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-      {where_sql}
-      GROUP BY GENERACION_PROGRAMA, LOWER(TRIM(CORREO))
-    ),
-    diag AS (
-      SELECT LOWER(TRIM(CORREO)) AS correo,
-             ESTATUS_VIABLE, ESTATUS_VENTA,
-             FECHA_ENCUESTA
-      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
-      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
-    ),
-    seg AS (
-      SELECT LOWER(TRIM(CORREO)) AS correo,
-             ESTADO, FECHA
-      FROM `fivetwofive-20.POSTVENTA.DB_SEGUIMIENTO_ALUMNO`
-      QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA DESC)=1
-    )
-    SELECT b.correo, b.nombre, b.telefono, b.GENERACION_PROGRAMA AS generacion,
-           d.ESTATUS_VIABLE, d.ESTATUS_VENTA, d.FECHA_ENCUESTA AS FECHA_DIAGNOSTICO,
-           s.ESTADO AS ESTADO_SEGUIMIENTO, s.FECHA AS FECHA_SEGUIMIENTO
-    FROM base b
-    LEFT JOIN diag d USING (correo)
-    LEFT JOIN seg  s USING (correo)
-    ORDER BY b.nombre
-    """
+    # ------------------------------------------------
+    # 5) Cruce simple: alumnos ↔ último diagnóstico
+    #     (opcional, mantiene compatibilidad)
+    # ------------------------------------------------
+    # Para el cruce usamos DV_VISTA_ALUMNOS_GENERAL para obtener correos en rango,
+    # y validamos si aparece en DM_ENCUESTA_DIAGNOSTICO_POSTVENTA (último registro).
     cross_rows = []
-    for r in client.query(q_cross, job_config=bigquery.QueryJobConfig(query_parameters=params)).result():
-        fd = r.get("FECHA_DIAGNOSTICO")
-        fs = r.get("FECHA_SEGUIMIENTO")
-        cross_rows.append({
-            "correo":         r.get("correo"),
-            "nombre":         r.get("nombre"),
-            "telefono":       r.get("telefono"),
-            "generacion":     r.get("generacion"),
-            "estatus_viable": r.get("ESTATUS_VIABLE"),
-            "estatus_venta":  (int(r["ESTATUS_VENTA"]) if r.get("ESTATUS_VENTA") is not None else None),
-            "fecha_diag":     (fd.strftime("%Y-%m-%d %H:%M") if isinstance(fd, datetime) else (fd.isoformat() if hasattr(fd, "isoformat") and fd else None)),
-            "estado_seg":     r.get("ESTADO_SEGUIMIENTO"),
-            "fecha_seg":      (fs.strftime("%Y-%m-%d %H:%M") if isinstance(fs, datetime) else (fs.isoformat() if hasattr(fs, "isoformat") and fs else None)),
-        })
+    try:
+        wh_alumnos, params_al = ["1=1"], []
+        if date_from:
+            wh_alumnos.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) >= @from")
+            params_al.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+        if date_to:
+            wh_alumnos.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) <= @to")
+            params_al.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+        # Si viene generacion y no hay fechas (ya resueltas arriba), no filtramos por texto,
+        # nos quedamos con el rango ya aplicado.
+        where_al = "WHERE " + " AND ".join(wh_alumnos)
 
+        q_cross = f"""
+          WITH base AS (
+            SELECT DISTINCT
+              LOWER(TRIM(CORREO)) AS correo,
+              ANY_VALUE(NOMBRE_ALUMNO) AS nombre,
+              ANY_VALUE(TELEFONO) AS telefono,
+              SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS f_insc
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+            {where_al}
+          ),
+          diag AS (
+            SELECT LOWER(TRIM(CORREO)) AS correo,
+                   GENERACION,
+                   FECHA_ENCUESTA
+            FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(CORREO)) ORDER BY FECHA_ENCUESTA DESC)=1
+          )
+          SELECT b.correo, b.nombre, b.telefono, d.GENERACION AS generacion_diag,
+                 d.FECHA_ENCUESTA AS fecha_diag
+          FROM base b
+          LEFT JOIN diag d USING (correo)
+          ORDER BY b.nombre
+          LIMIT 1000
+        """
+        for r in client.query(q_cross, job_config=bigquery.QueryJobConfig(query_parameters=params_al)).result():
+            fd = r.get("fecha_diag")
+            cross_rows.append({
+                "correo": r.get("correo"),
+                "nombre": r.get("nombre"),
+                "telefono": r.get("telefono"),
+                "generacion_diag": r.get("generacion_diag"),
+                "fecha_diag": (fd.strftime("%Y-%m-%d %H:%M") if isinstance(fd, datetime) else (fd.isoformat() if hasattr(fd, "isoformat") and fd else None)),
+            })
+    except Exception:
+        app.logger.exception("Error en cruce alumnos↔diagnóstico")
+
+    # -----------------------------------------
+    # 6) Respuesta (compat. de claves existente)
+    # -----------------------------------------
+    # OJO: mantenemos 'series_insc' por compatibilidad, usando LEADS
     return {
         "kpis": kpis,
         "by_gen": bygen_rows,
         "series_labels": series_labels,
-        "series_insc": series_counts,
+        "series_insc": series_leads,     # compat: antes eran inscripciones/día
+        "series_leads": series_leads,    # nuevas series explícitas
+        "series_ventas": series_ventas,
+        "series_pauta": series_pauta,
+        "series_ingreso": series_ingreso,
         "cross_rows": cross_rows,
     }
+
 
 
 # === BACK URL ROBUSTO (ATRÁS) ===
