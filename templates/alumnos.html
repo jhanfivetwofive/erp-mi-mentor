@@ -242,41 +242,30 @@ function cargarAlumnos(filtros = {}) {
         // Acción (con ?next= para volver exacto a esta lista)
         const nextParam = encodeURIComponent(window.location.href);
         const correo = encodeURIComponent(String(row.CORREO || '').trim().toLowerCase());
-        // Panel con next
         const hrefPanel = `/alumno/${correo}?next=${nextParam}`;
 
-        // Render de la celda de acción (vacía para invitados)
+        // Generar HTML de acciones (vacío si READONLY)
+        let acciones = '';
         if (!READONLY) {
-          tbody += `<td class="text-nowrap">
-            <a href="${hrefPanel}" class="btn btn-info btn-sm me-1">
-              <i class="bi bi-person-lines-fill"></i> Panel
-            </a>
-            <a href="${wa}" target="_blank" rel="noopener" class="btn btn-success btn-sm">
+          acciones += `<a href="${hrefPanel}" class="btn btn-info btn-sm me-1">
+            <i class="bi bi-person-lines-fill"></i> Panel
+          </a>`;
+
+          const tel = (row.TELEFONO || '').replace(/\D/g,'');
+          const waNum = tel.length === 10 ? '52' + tel : tel;
+          if (waNum) {
+            const msg = encodeURIComponent(
+              `Hola ${row.NOMBRE_ALUMNO || ''}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?`
+            );
+            acciones += `<a href="https://wa.me/${waNum}?text=${msg}" target="_blank" rel="noopener" class="btn btn-success btn-sm">
               <i class="bi bi-whatsapp"></i>
-            </a>
-          </td>`;
-        } else {
-          tbody += `<td class="text-nowrap"></td>`;
+            </a>`;
+          }
         }
 
+        // Pinta SIEMPRE una celda (queda vacía para invitados)
+        tbody += `<td class="text-nowrap">${acciones}</td>`;
 
-        // Render de la celda de acción (vacía para invitados)
-        if (!READONLY) {
-          // Sólo roles NO invitados ven acciones
-          tbody += `<td class="text-nowrap">
-            <a href="${hrefPanel}" class="btn btn-info btn-sm me-1">
-              <i class="bi bi-person-lines-fill"></i> Panel
-            </a>
-            <a href="${wa}" target="_blank" rel="noopener" class="btn btn-success btn-sm">
-              <i class="bi bi-whatsapp"></i>
-            </a>
-          </td>`;
-        } else {
-          // Invitado: celda vacía para no desalinear columnas
-          tbody += `<td class="text-nowrap"></td>`;
-        }
-
-        tbody += '</tr>';
       });
       tbody += '</tbody>';
 
@@ -336,6 +325,10 @@ function cargarAlumnos(filtros = {}) {
             this.api().column(idx).visible(DEFAULT_VISIBLE.has(key));
           });
           $('#colToggles').html(toggles.join(''));
+          if (READONLY) {
+            // La columna Acción es la última: índice = displayCols.length
+            this.api().column(displayCols.length).visible(false);
+          }
         }
       });
 
