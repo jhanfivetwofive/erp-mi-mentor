@@ -1208,13 +1208,15 @@ def api_alumnos():
 @app.route('/api/generaciones')
 def obtener_generaciones():
     query = """
-        SELECT DISTINCT GENERACION
-        FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-        WHERE GENERACION IS NOT NULL
-        ORDER BY GENERACION
+        SELECT DISTINCT GENERACION_PROGRAMA
+        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+        WHERE GENERACION_PROGRAMA IS NOT NULL
+          AND GENERACION_PROGRAMA != ''
+        ORDER BY GENERACION_PROGRAMA
     """
-    generaciones = client.query(query).result()
-    return jsonify([row.GENERACION for row in generaciones])
+    rows = client.query(query).result()
+    return jsonify([r.GENERACION_PROGRAMA for r in rows])
+
 
 
 @app.route("/catalogo/<catalogo_id>")
