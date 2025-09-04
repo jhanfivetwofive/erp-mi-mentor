@@ -171,22 +171,24 @@
   // Generación seleccionada (del querystring)
   const current = {{ gen|default('')|tojson }};
 
-  // Poblar select de generaciones con fallback si la actual no viene en el API
+  // Poblar select de generaciones (robusto)
   fetch('/api/generaciones')
-    .then(r=>r.json())
-    .then(list=>{
+    .then(r => r.json())
+    .then(list => {
       const sel = document.getElementById('selGen');
-      const setOpt = (g, selected=false) => {
+      const uniqueSorted = Array.from(new Set((list || []).filter(Boolean))).sort();
+      uniqueSorted.forEach(g => {
         const opt = document.createElement('option');
-        opt.value = g; opt.textContent = g;
-        if (selected) opt.selected = true;
+        opt.value = g;
+        opt.textContent = g;
+        if (current && current === g) opt.selected = true;
         sel.appendChild(opt);
-      };
-      (list||[]).forEach(g=>{
-        setOpt(g, current && current===g);
       });
-      if (current && ![...sel.options].some(o=>o.value===current)) {
-        setOpt(current, true); // fallback si API no trae esa gen
+      // Fallback: si venimos con ?gen= y no está en el API
+      if (current && ![...sel.options].some(o => o.value === current)) {
+        const opt = document.createElement('option');
+        opt.value = current; opt.textContent = current; opt.selected = true;
+        sel.appendChild(opt);
       }
     })
     .catch(()=>{}); // no bloquea la vista si falla
@@ -206,7 +208,8 @@
   // Ranking por generación
   const byGen   = {{ by_gen|default([])|tojson }};
   const gLabels = byGen.map(r => r.generacion || '—');
-  const gInsc   = byGen.map(r => r.inscripciones || 0);
+  // ⬇️ si no agregas alias en backend, usa los nombres reales
+  const gInsc   = byGen.map(r => (r.inscripciones ?? r.leads) || 0);
   const elG = document.getElementById('chartByGen');
   if (elG && gLabels.length) {
     new Chart(elG.getContext('2d'), {
@@ -216,9 +219,9 @@
         indexAxis:'y', responsive:true, maintainAspectRatio:false,
         plugins:{ legend:{display:false}, tooltip:{ callbacks:{ afterBody: (ctx)=> {
           const i = ctx[0].dataIndex, r = byGen[i] || {};
-          const roas = (r.roas ?? 0).toFixed(2);
-          const ing  = (r.ingreso ?? 0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
-          const gas  = (r.gasto ?? 0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
+          const roas = Number(r.roas ?? 0).toFixed(2);
+          const ing  = Number(r.ingreso ?? 0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
+          const gas  = Number((r.gasto ?? r.pauta) ?? 0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
           return [`ROAS: ${roas}`, `Ingreso: ${ing}`, `Gasto: ${gas}`];
         } } } },
         scales:{ x:{ beginAtZero:true } }
@@ -235,14 +238,20 @@
 
   document.getElementById('btnCsvCross')?.addEventListener('click', ()=>{
     const head = ['correo','nombre','telefono','generacion','estatus_viable','estatus_venta','fecha_diag','estado_seg','fecha_seg'];
-    const body = rows.map(r => [r.correo,r.nombre,r.telefono,r.generacion,r.estatus_viable,r.estatus_venta,r.fecha_diag||'',r.estado_seg||'',r.fecha_seg||'']);
+    const body = rows.map(r => [
+      r.correo, r.nombre, r.telefono,
+      // ⬇️ si backend no trae alias 'generacion', usa 'generacion_diag'
+      (r.generacion ?? r.generacion_diag),
+      r.estatus_viable, r.estatus_venta, r.fecha_diag || '', r.estado_seg || '', r.fecha_seg || ''
+    ]);
     dl('adquisicion_cruce.csv','text/csv;charset=utf-8', toCsv([head, ...body]));
   });
 
   document.getElementById('btnTxtCross')?.addEventListener('click', ()=>{
     const lines = [];
     rows.forEach(r=>{
-      lines.push(`${r.nombre||'—'} <${r.correo||'—'}> [${r.generacion||'—'}]`);
+      const g = (r.generacion ?? r.generacion_diag) || '—';
+      lines.push(`${r.nombre||'—'} <${r.correo||'—'}> [${g}]`);
       lines.push(`  Tel: ${r.telefono||'—'}`);
       lines.push(`  Diagnóstico: ${r.estatus_viable||'—'} | Venta: ${r.estatus_venta ?? '—'} | Fecha: ${r.fecha_diag || '—'}`);
       lines.push(`  Seguimiento: ${r.estado_seg||'—'} | Fecha: ${r.fecha_seg||'—'}`);
@@ -252,4 +261,5 @@
   });
 })();
 </script>
+
 {% endblock %}

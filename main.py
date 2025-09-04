@@ -668,12 +668,50 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
           {where_dm}
         """
 
-        kpis = {k:0.0 for k in [
-            "pauta","impresiones","clicks","leads","asistentes",
-            "monto_bruto","ingreso","ventas","cpm","cpc","cpl","cpasist",
-            "cpv","ctr","porc_conv_lp","porc_asist","porc_conv_asist",
-            "porc_conv_bdd","roas","utilidad"
+        kpis = {k: 0.0 for k in [
+        "pauta","impresiones","clicks","leads","asistentes",
+        "monto_bruto","ingreso","ventas","cpm","cpc","cpl","cpasist",
+        "cpv","ctr","porc_conv_lp","porc_asist","porc_conv_asist",
+        "porc_conv_bdd","roas","utilidad"
         ]}
+
+        if use_gen_window:
+            q_kpis = """
+            WITH g AS (
+                SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from,
+                    COALESCE(SAFE_CAST(NULLIF(FECHA_FIN,'') AS DATE), CURRENT_DATE()) f_to2
+                FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+                WHERE UPPER(TRIM(GENERACION)) = UPPER(TRIM(@g))
+            ),
+            m AS (
+                SELECT SAFE_CAST(FECHA AS DATE) d, PAUTA, IMPRESIONES, CLICKS, LEADS, ASISTENTES, MONTO, INGRESO, VENTAS
+                FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+            )
+            SELECT
+                SUM(m.PAUTA) pauta, SUM(m.IMPRESIONES) impresiones, SUM(m.CLICKS) clicks,
+                SUM(m.LEADS) leads, SUM(m.ASISTENTES) asistentes, SUM(m.MONTO) monto_bruto,
+                SUM(m.INGRESO) ingreso, SUM(m.VENTAS) ventas,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.IMPRESIONES),0))*1000,0) cpm,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.CLICKS),0)),0)         cpc,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.LEADS),0)),0)          cpl,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.ASISTENTES),0)),0)     cpasist,
+                IFNULL(SAFE_DIVIDE(SUM(m.PAUTA), NULLIF(SUM(m.VENTAS),0)),0)         cpv,
+                IFNULL(SAFE_DIVIDE(SUM(m.CLICKS), NULLIF(SUM(m.IMPRESIONES),0)),0)   ctr,
+                IFNULL(SAFE_DIVIDE(SUM(m.LEADS), NULLIF(SUM(m.CLICKS),0)),0)         porc_conv_lp,
+                IFNULL(SAFE_DIVIDE(SUM(m.ASISTENTES), NULLIF(SUM(m.LEADS),0)),0)     porc_asist,
+                IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.ASISTENTES),0)),0)    porc_conv_asist,
+                IFNULL(SAFE_DIVIDE(SUM(m.VENTAS), NULLIF(SUM(m.LEADS),0)),0)         porc_conv_bdd,
+                IFNULL(SAFE_DIVIDE(SUM(m.MONTO), NULLIF(SUM(m.PAUTA),0)),0)          roas,
+                IFNULL(SUM(m.MONTO) - SUM(m.PAUTA), 0)                                utilidad
+            FROM g
+            JOIN m ON m.d BETWEEN g.f_from AND g.f_to2
+            """
+            params = [bigquery.ScalarQueryParameter("g", "STRING", gen)]
+        else:
+            ...
+            params = [...]
+            q_kpis = """ ... """
+
         try:
             row = next(iter(client.query(q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()), None)
             if row:
@@ -681,6 +719,9 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
                     kpis[k] = _to_float(row.get(k))
         except Exception:
             app.logger.exception("Error KPIs Adq")
+    
+    kpis["gasto"] = kpis["pauta"]
+    kpis["inscripciones"] = kpis["leads"]
 
     # ---------------------------
     # 2) Series (DM diaria)
@@ -691,7 +732,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             SELECT SAFE_CAST(FECHA_INICIO AS DATE) f_from,
                     COALESCE(SAFE_CAST(FECHA_FIN AS DATE), CURRENT_DATE()) f_to2
             FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
-            WHERE GENERACION = @g
+            WHERE UPPER(TRIM(GENERACION)) = UPPER(TRIM(@g))
             )
             SELECT SAFE_CAST(m.FECHA AS DATE) AS d, m.LEADS, m.VENTAS, m.PAUTA, m.INGRESO
             FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA` m, g
@@ -742,9 +783,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             params_rank.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
     clip = ("WHERE " + " AND ".join(wh_clip)) if wh_clip else ""
 
-    gen_filter = "WHERE GENERACION = @g" if use_gen_window else ""
-    if use_gen_window:
-        params_rank.append(bigquery.ScalarQueryParameter("g", "STRING", gen))
+    gen_filter = "WHERE UPPER(TRIM(GENERACION)) = UPPER(TRIM(@g))" if use_gen_window else ""
 
     q_rank = f"""
       WITH g AS (
@@ -785,6 +824,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
                 "monto_bruto": _to_float(r["monto_bruto"]),
                 "ingreso":     _to_float(r["ingreso"]),
                 "roas":        _to_float(r["roas"]),
+                "gasto":       _to_float(r["pauta"]),
             })
 
     except Exception:
@@ -1071,6 +1111,29 @@ def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase_page'))
 
+@app.route('/api/generaciones/opciones')
+def api_generaciones_opciones():
+    q = """
+      SELECT GENERACION,
+             MIN(SAFE_CAST(FECHA_INICIO AS DATE)) AS fecha_inicio,
+             COALESCE(MAX(SAFE_CAST(NULLIF(FECHA_FIN,'') AS DATE)), CURRENT_DATE()) AS fecha_fin
+      FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
+      WHERE GENERACION IS NOT NULL
+      GROUP BY GENERACION
+      ORDER BY GENERACION
+    """
+    rows = client.query(q).result()
+    out = []
+    for r in rows:
+        out.append({
+            "value": r.GENERACION,               # ej. G-01
+            "label": r.GENERACION,               # o usa GENERACION_ETIQUETA si prefieres
+            "desde": str(r.fecha_inicio),
+            "hasta": str(r.fecha_fin),
+        })
+    return jsonify(out)
+
+
 # -------------------- Alumnos y catálogos --------------------
 
 
@@ -1151,7 +1214,7 @@ def obtener_generaciones():
         ORDER BY GENERACION
     """
     generaciones = client.query(query).result()
-    return jsonify([row.GENERACION_PROGRAMA for row in generaciones])
+    return jsonify([row.GENERACION for row in generaciones])
 
 
 @app.route("/catalogo/<catalogo_id>")
