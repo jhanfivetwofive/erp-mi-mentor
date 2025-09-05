@@ -610,14 +610,11 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     Si viene `generacion` (ID_GENERACION_PROGRAMA), leemos TODO de las vistas:
       - INSUMOS.VW_ADQ_GENERACION_METRICAS  (KPIs por ventana)
       - INSUMOS.VW_ADQ_GENERACION_SERIE_DIA (serie diaria)
-    Si NO viene `generacion`, usamos el camino por fechas (rango) que ya te cuadraba.
+    Si NO viene `generacion`, usamos el camino por fechas (rango).
     """
-    gen_id = (generacion or "").strip().upper()
-
-    # ===== CAMINO 1: filtro por GENERACION (usar "sábana") =====
     gen_raw = (generacion or "").strip()
-    if gen_raw:
-        meta = _resolve_gid(gen_raw)  # ← acepta ID **o** etiqueta
+    if gen_raw:  # ===== CAMINO 1: por GENERACION (usar sábana) =====
+        meta = _resolve_gid(gen_raw)  # acepta ID **o** etiqueta
         if not meta:
             return {
                 "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
@@ -627,19 +624,20 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             }
 
         gid = meta["gid"]
-        job = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("gid", "STRING", gid)]
-        )
+        job = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("gid", "STRING", gid)
+        ])
 
-        # 1) KPIs por generación
+        # 1) KPIs por generación (LEER TODO DESDE LA SÁBANA)
         q_met = """
-        SELECT gid, label, f_from, f_to, leads, gasto, ventas, ingreso, inscripciones
-        FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
-        WHERE gid = @gid
-        LIMIT 1
+          SELECT gid, label, f_from, f_to,
+                 leads, gasto, ventas, ingreso,
+                 inscripciones, diagnosticos, ventas_diag
+          FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
+          WHERE gid = @gid
+          LIMIT 1
         """
-        row = next(iter(client.query(q_met, job_config=job).result()), None)
+        row = next(iter(client.query(q_met, job_config=job).result()), None)  # FIX: obtener row ANTES de usarlo
         if not row:
             return {
                 "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
@@ -653,20 +651,21 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         ventas = int(row["ventas"] or 0)
         ingreso = float(row["ingreso"] or 0.0)
         insc = int(row["inscripciones"] or 0)
+        diagnosticos = int(row["diagnosticos"] or 0)   # FIX: usar valores de la sábana
+        ventas_diag  = int(row["ventas_diag"]  or 0)   # FIX
         roas = (ingreso / gasto) if gasto else 0.0
 
-        # 2) Serie diaria (inscripciones + leads)
+        # 2) Serie diaria (inscripciones + leads) desde la vista
         q_ser = """
-        SELECT d, leads, inscripciones
-        FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
-        WHERE gid = @gid
-        ORDER BY d
+          SELECT d, leads, inscripciones
+          FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
+          WHERE gid = @gid
+          ORDER BY d
         """
         series_labels, series_insc, series_leads = [], [], []
         for r in client.query(q_ser, job_config=job).result():
             d = r["d"]
-            series_labels.append(d.isoformat() if hasattr(
-                d, "isoformat") else str(d))
+            series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
             series_insc.append(int(r["inscripciones"] or 0))
             series_leads.append(int(r["leads"] or 0))
 
@@ -677,67 +676,33 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             "ingreso": ingreso, "inscripciones": insc, "roas": roas
         }]
 
-        # --- Diagnósticos (POSTVENTA) por generación seleccionada ---
-        # Tomamos la generación corta tipo G-01 a partir del label/gid
-        gen_short = _format_generacion(meta.get("label") or meta.get("gid") or "")
-
-        diag_where = ["GENERACION = @g"]
-        diag_params = [bigquery.ScalarQueryParameter("g", "STRING", gen_short)]
-
-        # Opcional: acotar por la ventana de la generación
-        if meta.get("from"):
-            diag_where.append("DATE(FECHA_ENCUESTA) >= @df")
-            diag_params.append(bigquery.ScalarQueryParameter("df", "DATE", meta["from"]))
-        if meta.get("to"):
-            diag_where.append("DATE(FECHA_ENCUESTA) <= @dt")
-            diag_params.append(bigquery.ScalarQueryParameter("dt", "DATE", meta["to"]))
-
-        q_diag = f"""
-          SELECT COUNT(*) AS n_diag,
-                 COUNTIF(ESTATUS_VENTA = 1) AS n_ventas_diag
-          FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
-          WHERE {" AND ".join(diag_where)}
-        """
-        drow = next(iter(client.query(q_diag, job_config=bigquery.QueryJobConfig(
-            query_parameters=diag_params)).result()), None)
-        n_diag = int(drow["n_diag"] or 0) if drow else 0
-        n_ventas_diag = int(drow["n_ventas_diag"] or 0) if drow else 0
-
         return {
             "kpis": {
-                    "leads": leads, 
-                    "inscripciones": insc, 
-                    "diagnosticos": n_diag,
-                    "ventas_diag": n_ventas_diag,
-                    "ingreso": ingreso, 
-                    "gasto": gasto, 
-                    "roas": roas},
-                    "by_gen": by_gen,
-                    "series_labels": series_labels,
-                    "series_insc": series_insc,
-                    "series_leads": series_leads,
-                    "series_ingreso": [],
-                    "cross_rows": []
+                "leads": leads, "inscripciones": insc,
+                "diagnosticos": diagnosticos,       # FIX: directo de la sábana
+                "ventas_diag": ventas_diag,         # FIX
+                "ingreso": ingreso, "gasto": gasto, "roas": roas
+            },
+            "by_gen": by_gen,
+            "series_labels": series_labels,
+            "series_insc": series_insc,
+            "series_leads": series_leads,
+            "series_ingreso": [],
+            "cross_rows": []
         }
 
-    # ===== CAMINO 2: sin generación → por fechas (lo que ya validaste) =====
-    # DM (pauta/leads/ventas/ingreso) por rango
+    # ===== CAMINO 2: sin generación → por fechas =====
     if isinstance(date_from, str):
-        try:
-            date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-        except:
-            date_from = None
+        try: date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+        except: date_from = None
     if isinstance(date_to, str):
-        try:
-            date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-        except:
-            date_to = None
+        try: date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+        except: date_to = None
 
     dm_params, dm_where = [], []
     if date_from:
         dm_where.append("SAFE_CAST(FECHA AS DATE) >= @from")
-        dm_params.append(bigquery.ScalarQueryParameter(
-            "from", "DATE", date_from))
+        dm_params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
     if date_to:
         dm_where.append("SAFE_CAST(FECHA AS DATE) <= @to")
         dm_params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
@@ -753,8 +718,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
       {dm_clip}
     """
     dm = {"pauta": 0.0, "leads": 0, "ventas": 0, "ingreso": 0.0}
-    r = next(iter(client.query(q_dm, job_config=bigquery.QueryJobConfig(
-        query_parameters=dm_params)).result()), None)
+    r = next(iter(client.query(q_dm, job_config=bigquery.QueryJobConfig(query_parameters=dm_params)).result()), None)
     if r:
         dm = {
             "pauta": float(r["pauta"] or 0.0),
@@ -774,88 +738,69 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     dv_clip = ("WHERE " + " AND ".join(dv_where)) if dv_where else ""
 
     q_series_insc = f"""
-            WITH base AS (
-                SELECT ID_INSCRIPCION, SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d
-                FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-                {dv_clip}
-            ),
-            dedup AS (
-                SELECT ANY_VALUE(d) AS d
-                FROM base
-                GROUP BY ID_INSCRIPCION
-            )
-            SELECT d, COUNT(*) AS n
-            FROM dedup
-            GROUP BY d
-            ORDER BY d
-            """
-
-    # --- Inscripciones por día (DV dedupe) ---
-    insc_map = {}
-    label_set = set()
+      WITH base AS (
+        SELECT ID_INSCRIPCION, SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d
+        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+        {dv_clip}
+      ),
+      dedup AS (
+        SELECT ANY_VALUE(d) AS d
+        FROM base
+        GROUP BY ID_INSCRIPCION
+      )
+      SELECT d, COUNT(*) AS n
+      FROM dedup
+      GROUP BY d
+      ORDER BY d
+    """
+    insc_map, label_set = {}, set()
     job_dv = bigquery.QueryJobConfig(query_parameters=dv_params)
     for r in client.query(q_series_insc, job_config=job_dv).result():
-        d = r["d"]
-        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
-        label_set.add(key)
-        insc_map[key] = int(r["n"] or 0)
+        d = r["d"]; key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        label_set.add(key); insc_map[key] = int(r["n"] or 0)
 
-        # --- Leads por día (DM) ---
+    # Leads por día (DM)
     q_leads_day = f"""
-            SELECT SAFE_CAST(FECHA AS DATE) AS d, SUM(LEADS) AS n
-            FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
-            {dm_clip}
-            GROUP BY d
-            ORDER BY d
-            """
+      SELECT SAFE_CAST(FECHA AS DATE) AS d, SUM(LEADS) AS n
+      FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
+      {dm_clip}
+      GROUP BY d
+      ORDER BY d
+    """
     leads_map = {}
     job_dm_day = bigquery.QueryJobConfig(query_parameters=dm_params)
     for r in client.query(q_leads_day, job_config=job_dm_day).result():
-        d = r["d"]
-        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
-        label_set.add(key)
-        leads_map[key] = int(r["n"] or 0)
+        d = r["d"]; key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        label_set.add(key); leads_map[key] = int(r["n"] or 0)
 
-    # --- Unificamos ejes (fechas) para ambas series ---
+    # Unificar ejes
     series_labels = sorted(label_set)
-    series_insc = [insc_map.get(lbl, 0) for lbl in series_labels]
+    series_insc  = [insc_map.get(lbl, 0)  for lbl in series_labels]
     series_leads = [leads_map.get(lbl, 0) for lbl in series_labels]
 
-    # KPIs de ROAS (DM)
-    roas = (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0
+    roas = (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0  # FIX: fuera del bucle
 
-    # ===== RANKING POR GENERACIÓN (GENERAL) =====
-    # Usamos la sábana agregada. Si hay fechas, mostramos generaciones cuya
-    # ventana se traslapa con el rango (sin reatribuir DM por día).
-    rank_where = []
-    rank_params = []
+    # Ranking por generación (general) desde la sábana
+    rank_where, rank_params = [], []
     if date_from:
         rank_where.append("f_to   >= @rf")
-        rank_params.append(
-            bigquery.ScalarQueryParameter("rf", "DATE", date_from))
+        rank_params.append(bigquery.ScalarQueryParameter("rf", "DATE", date_from))
     if date_to:
         rank_where.append("f_from <= @rt")
-        rank_params.append(
-            bigquery.ScalarQueryParameter("rt", "DATE", date_to))
-    rank_clip = ("WHERE " + " AND ".join(rank_where)
-                 ) if rank_where else ""
+        rank_params.append(bigquery.ScalarQueryParameter("rt", "DATE", date_to))
+    rank_clip = ("WHERE " + " AND ".join(rank_where)) if rank_where else ""
 
     q_rank = f"""
-            SELECT
-                gid, label,
-                inscripciones,
-                gasto, ingreso, leads, ventas,
-                SAFE_DIVIDE(ingreso, NULLIF(gasto,0)) AS roas
-            FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
-            {rank_clip}
-            ORDER BY inscripciones DESC
-            LIMIT 20
-            """
-
+      SELECT gid, label, inscripciones, gasto, ingreso, leads, ventas,
+             SAFE_DIVIDE(ingreso, NULLIF(gasto,0)) AS roas
+      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
+      {rank_clip}
+      ORDER BY inscripciones DESC
+      LIMIT 20
+    """
     by_gen = []
     try:
-        job_rank = bigquery.QueryJobConfig(
-            query_parameters=rank_params)
+        job_rank = bigquery.QueryJobConfig(query_parameters=rank_params)
         for rr in client.query(q_rank, job_config=job_rank).result():
             by_gen.append({
                 "gid": rr["gid"],
@@ -868,50 +813,45 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
                 "roas": float(rr["roas"] or 0.0),
             })
     except Exception:
-        app.logger.exception(
-            "Error construyendo ranking por generación (camino general)")
-    
-    # --- Diagnósticos (POSTVENTA) por rango de fechas ---
-    diag_where = []
-    diag_params = []
+        app.logger.exception("Error construyendo ranking por generación (camino general)")
+
+    # Diagnósticos por rango de fechas (directo)
+    diag_where, diag_params = [], []
     if date_from:
         diag_where.append("DATE(FECHA_ENCUESTA) >= @df")
         diag_params.append(bigquery.ScalarQueryParameter("df", "DATE", date_from))
     if date_to:
         diag_where.append("DATE(FECHA_ENCUESTA) <= @dt")
         diag_params.append(bigquery.ScalarQueryParameter("dt", "DATE", date_to))
-
     diag_clip = ("WHERE " + " AND ".join(diag_where)) if diag_where else ""
+
     q_diag = f"""
-      SELECT COUNT(*) AS n_diag,
-             COUNTIF(ESTATUS_VENTA = 1) AS n_ventas_diag
+      SELECT COUNT(*) AS n_diag, COUNTIF(ESTATUS_VENTA = 1) AS n_ventas_diag
       FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
       {diag_clip}
     """
-    drow = next(iter(client.query(q_diag, job_config=bigquery.QueryJobConfig(
-        query_parameters=diag_params)).result()), None)
+    drow = next(iter(client.query(q_diag, job_config=bigquery.QueryJobConfig(query_parameters=diag_params)).result()), None)
     n_diag = int(drow["n_diag"] or 0) if drow else 0
     n_ventas_diag = int(drow["n_ventas_diag"] or 0) if drow else 0
-
 
     return {
         "kpis": {
             "leads": dm["leads"],
-            # ← total correcto, ya no truncado
             "inscripciones": sum(series_insc),
-            "diagnosticos": n_diag,       
-            "ventas_diag": n_ventas_diag,  
-            "ingreso": dm["ingreso"],           # **DM**
-            "gasto": dm["pauta"],               # **DM**
+            "diagnosticos": n_diag,
+            "ventas_diag": n_ventas_diag,
+            "ingreso": dm["ingreso"],
+            "gasto": dm["pauta"],
             "roas": roas
         },
-        "by_gen": by_gen,                        # ranking visible en general
+        "by_gen": by_gen,
         "series_labels": series_labels,
         "series_insc": series_insc,
-        "series_leads": series_leads,            # ← ahora sí poblada
+        "series_leads": series_leads,
         "series_ventas": [], "series_pauta": [], "series_ingreso": [],
         "cross_rows": []
     }
+
 
 
 # === BACK URL ROBUSTO (ATRÁS) ===
