@@ -114,6 +114,7 @@ def fetch_role_from_bq(email_norm: str) -> str | None:
     rol = (rows[0]["rol"] or "").strip().lower()
     return rol if rol in ROLES_VALIDOS else "invitado"
 
+
 def _to_float(x, default=0.0):
     if x is None:
         return default
@@ -125,6 +126,7 @@ def _to_float(x, default=0.0):
         return float(x)
     except Exception:
         return default
+
 
 def login_required(f):
     @wraps(f)
@@ -531,6 +533,7 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+
 def _resolve_gid(any_id_or_label: str) -> dict | None:
     s = (any_id_or_label or "").strip().upper()
     if not s:
@@ -542,7 +545,7 @@ def _resolve_gid(any_id_or_label: str) -> dict | None:
       LIMIT 1
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("s","STRING",s)]
+        query_parameters=[bigquery.ScalarQueryParameter("s", "STRING", s)]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
     if row:
@@ -573,7 +576,7 @@ def _gen_meta(gid: str) -> dict | None:
       LIMIT 1
     """
     job_cat = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("gid","STRING",gid)]
+        query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
     )
     row = next(iter(client.query(q_cat, job_config=job_cat).result()), None)
     if row and row["f_from"]:
@@ -592,13 +595,14 @@ def _gen_meta(gid: str) -> dict | None:
       LIMIT 1
     """
     job_dv = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("gid","STRING",gid)]
+        query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
     )
     row2 = next(iter(client.query(q_dv, job_config=job_dv).result()), None)
     if row2 and row2["f_from"]:
         return {"gid": row2["gid"], "label": row2["label"], "from": row2["f_from"], "to": row2["f_to"]}
 
     return None
+
 
 def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
     """
@@ -610,94 +614,100 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     gen_id = (generacion or "").strip().upper()
 
     # ===== CAMINO 1: filtro por GENERACION (usar "sábana") =====
-gen_raw = (generacion or "").strip()
-if gen_raw:
-    meta = _resolve_gid(gen_raw)  # ← acepta ID **o** etiqueta
-    if not meta:
+    gen_raw = (generacion or "").strip()
+    if gen_raw:
+        meta = _resolve_gid(gen_raw)  # ← acepta ID **o** etiqueta
+        if not meta:
+            return {
+                "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+                         "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
+                "by_gen": [], "series_labels": [], "series_insc": [],
+                "series_leads": [], "series_ingreso": [], "cross_rows": []
+            }
+
+        gid = meta["gid"]
+        job = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("gid", "STRING", gid)]
+        )
+
+        # 1) KPIs por generación
+        q_met = """
+        SELECT gid, label, f_from, f_to, leads, gasto, ventas, ingreso, inscripciones
+        FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
+        WHERE gid = @gid
+        LIMIT 1
+        """
+        row = next(iter(client.query(q_met, job_config=job).result()), None)
+        if not row:
+            return {
+                "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+                         "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
+                "by_gen": [], "series_labels": [], "series_insc": [],
+                "series_leads": [], "series_ingreso": [], "cross_rows": []
+            }
+
+        leads = int(row["leads"] or 0)
+        gasto = float(row["gasto"] or 0.0)
+        ventas = int(row["ventas"] or 0)
+        ingreso = float(row["ingreso"] or 0.0)
+        insc = int(row["inscripciones"] or 0)
+        roas = (ingreso / gasto) if gasto else 0.0
+
+        # 2) Serie diaria (inscripciones + leads)
+        q_ser = """
+        SELECT d, leads, inscripciones
+        FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
+        WHERE gid = @gid
+        ORDER BY d
+        """
+        series_labels, series_insc, series_leads = [], [], []
+        for r in client.query(q_ser, job_config=job).result():
+            d = r["d"]
+            series_labels.append(d.isoformat() if hasattr(
+                d, "isoformat") else str(d))
+            series_insc.append(int(r["inscripciones"] or 0))
+            series_leads.append(int(r["leads"] or 0))
+
+        by_gen = [{
+            "gid": gid,
+            "generacion": (row["label"] or gid),
+            "leads": leads, "gasto": gasto, "ventas": ventas,
+            "ingreso": ingreso, "inscripciones": insc, "roas": roas
+        }]
+
         return {
-            "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
-                     "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
-            "by_gen": [], "series_labels": [], "series_insc": [],
-            "series_leads": [], "series_ingreso": [], "cross_rows": []
+            "kpis": {"leads": leads, "inscripciones": insc, "diagnosticos": 0, "ventas_diag": 0,
+                     "ingreso": ingreso, "gasto": gasto, "roas": roas},
+            "by_gen": by_gen,
+            "series_labels": series_labels,
+            "series_insc": series_insc,
+            "series_leads": series_leads,
+            "series_ingreso": [],
+            "cross_rows": []
         }
-
-    gid = meta["gid"]
-    job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
-    )
-
-    # 1) KPIs por generación
-    q_met = """
-      SELECT gid, label, f_from, f_to, leads, gasto, ventas, ingreso, inscripciones
-      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
-      WHERE gid = @gid
-      LIMIT 1
-    """
-    row = next(iter(client.query(q_met, job_config=job).result()), None)
-    if not row:
-        return {
-            "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
-                     "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
-            "by_gen": [], "series_labels": [], "series_insc": [],
-            "series_leads": [], "series_ingreso": [], "cross_rows": []
-        }
-
-    leads  = int(row["leads"] or 0)
-    gasto  = float(row["gasto"] or 0.0)
-    ventas = int(row["ventas"] or 0)
-    ingreso= float(row["ingreso"] or 0.0)
-    insc   = int(row["inscripciones"] or 0)
-    roas   = (ingreso / gasto) if gasto else 0.0
-
-    # 2) Serie diaria (inscripciones + leads)
-    q_ser = """
-      SELECT d, leads, inscripciones
-      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
-      WHERE gid = @gid
-      ORDER BY d
-    """
-    series_labels, series_insc, series_leads = [], [], []
-    for r in client.query(q_ser, job_config=job).result():
-        d = r["d"]
-        series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
-        series_insc.append(int(r["inscripciones"] or 0))
-        series_leads.append(int(r["leads"] or 0))
-
-    by_gen = [{
-        "gid": gid,
-        "generacion": (row["label"] or gid),
-        "leads": leads, "gasto": gasto, "ventas": ventas,
-        "ingreso": ingreso, "inscripciones": insc, "roas": roas
-    }]
-
-    return {
-        "kpis": {"leads": leads, "inscripciones": insc, "diagnosticos": 0, "ventas_diag": 0,
-                 "ingreso": ingreso, "gasto": gasto, "roas": roas},
-        "by_gen": by_gen,
-        "series_labels": series_labels,
-        "series_insc": series_insc,
-        "series_leads": series_leads,
-        "series_ingreso": [],
-        "cross_rows": []
-    }
-
 
     # ===== CAMINO 2: sin generación → por fechas (lo que ya validaste) =====
     # DM (pauta/leads/ventas/ingreso) por rango
     if isinstance(date_from, str):
-        try: date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-        except: date_from = None
+        try:
+            date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+        except:
+            date_from = None
     if isinstance(date_to, str):
-        try: date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-        except: date_to = None
+        try:
+            date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+        except:
+            date_to = None
 
     dm_params, dm_where = [], []
     if date_from:
         dm_where.append("SAFE_CAST(FECHA AS DATE) >= @from")
-        dm_params.append(bigquery.ScalarQueryParameter("from","DATE",date_from))
+        dm_params.append(bigquery.ScalarQueryParameter(
+            "from", "DATE", date_from))
     if date_to:
         dm_where.append("SAFE_CAST(FECHA AS DATE) <= @to")
-        dm_params.append(bigquery.ScalarQueryParameter("to","DATE",date_to))
+        dm_params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
     dm_clip = ("WHERE " + " AND ".join(dm_where)) if dm_where else ""
 
     q_dm = f"""
@@ -709,8 +719,9 @@ if gen_raw:
       FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
       {dm_clip}
     """
-    dm = {"pauta":0.0,"leads":0,"ventas":0,"ingreso":0.0}
-    r = next(iter(client.query(q_dm, job_config=bigquery.QueryJobConfig(query_parameters=dm_params)).result()), None)
+    dm = {"pauta": 0.0, "leads": 0, "ventas": 0, "ingreso": 0.0}
+    r = next(iter(client.query(q_dm, job_config=bigquery.QueryJobConfig(
+        query_parameters=dm_params)).result()), None)
     if r:
         dm = {
             "pauta": float(r["pauta"] or 0.0),
@@ -723,10 +734,10 @@ if gen_raw:
     dv_params, dv_where = [], []
     if date_from:
         dv_where.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) >= @f")
-        dv_params.append(bigquery.ScalarQueryParameter("f","DATE",date_from))
+        dv_params.append(bigquery.ScalarQueryParameter("f", "DATE", date_from))
     if date_to:
         dv_where.append("SAFE_CAST(FECHA_INSCRIPCION AS DATE) <= @t")
-        dv_params.append(bigquery.ScalarQueryParameter("t","DATE",date_to))
+        dv_params.append(bigquery.ScalarQueryParameter("t", "DATE", date_to))
     dv_clip = ("WHERE " + " AND ".join(dv_where)) if dv_where else ""
 
     q_series_insc = f"""
@@ -748,7 +759,8 @@ if gen_raw:
     series_labels, series_insc = [], []
     for r in client.query(q_series_insc, job_config=bigquery.QueryJobConfig(query_parameters=dv_params)).result():
         d = r["d"]
-        series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
+        series_labels.append(d.isoformat() if hasattr(
+            d, "isoformat") else str(d))
         series_insc.append(int(r["n"] or 0))
 
     roas = (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0
@@ -832,10 +844,11 @@ def back_url(default: str | None = None) -> str:
         return _route_por_rol()
     except Exception:
         return url_for("alumnos_page")
-    
+
 
 # === Readonly guard para invitados ===
 READ_ONLY_BLOCKED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 
 @app.before_request
 def _enforce_guest_readonly():
@@ -865,11 +878,13 @@ def _enforce_guest_readonly():
 def _inject_back_url():
     return {"back_url": back_url}
 
+
 @app.context_processor
 def _inject_readonly_flag():
     u = session.get("user") or {}
     rol = (u.get("rol") or "").strip().lower()
     return {"readonly": (rol == "invitado")}
+
 
 @app.route("/")
 def home():
@@ -961,6 +976,7 @@ def login_firebase():
 def logout():
     session.pop('user', None)  # Elimina al usuario de la sesión
     return redirect(url_for('login_firebase_page'))
+
 
 @app.route('/api/generaciones/opciones')
 def api_generaciones_opciones():
@@ -1069,7 +1085,6 @@ def obtener_generaciones():
     return jsonify([r.GENERACION_PROGRAMA for r in rows])
 
 
-
 @app.route("/catalogo/<catalogo_id>")
 def catalogo_page(catalogo_id):
     return render_template(f"catalogo_{catalogo_id}.html", catalogo_id=catalogo_id)
@@ -1135,8 +1150,8 @@ def api_generaciones():
 
         for col in ['FECHA_INICIO', 'FECHA_FIN']:
             df[col] = pd.to_datetime(df[col], errors='coerce')
-            df[col] = df[col].dt.date.astype('string')  # ISO 'YYYY-MM-DD' o <NA>
-
+            df[col] = df[col].dt.date.astype(
+                'string')  # ISO 'YYYY-MM-DD' o <NA>
 
         for col in df.select_dtypes(include=["object", "string"]).columns:
             df[col] = df[col].fillna("")
@@ -1406,7 +1421,6 @@ def get_alumno_info(correo):
         if (rol or "").lower() == "invitado":
             whatsapp_url = None
 
-
         # -------------------------------------------------
         # 4) Comunidad → SOLO admin/comunidad
         # -------------------------------------------------
@@ -1477,7 +1491,7 @@ def get_alumno_info(correo):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-    
+
 # -------------------- Seguimientos (crear / mover / listar) --------------------
 
 
@@ -1986,7 +2000,8 @@ def adquisicion_insights():
     t = request.args.get("to")
 
     # ⬇️ ACEPTA AMBOS NOMBRES DE PARÁMETRO
-    g = (request.args.get("gen") or request.args.get("generacion") or "").strip() or None
+    g = (request.args.get("gen") or request.args.get(
+        "generacion") or "").strip() or None
 
     date_from = _parse_date(f)
     date_to = _parse_date(t)
@@ -2011,4 +2026,3 @@ def adquisicion_insights():
         app.logger.exception("Error en _adq_insights_data")
 
     return render_template("adquisicion_insights.html", gen=g or "", f_from=f or "", f_to=t or "", **data)
-
