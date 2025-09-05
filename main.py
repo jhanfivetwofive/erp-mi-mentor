@@ -1440,6 +1440,82 @@ def get_alumno_info(correo):
                 print("[WARN] Postventa no disponible:", e)
                 postventa = None
 
+                # -------------------------------------------------
+        # 2.95) Diagnóstico (visible para TODAS las áreas)
+        # -------------------------------------------------
+        diag = None
+        diag_list = []
+        try:
+            # Normaliza correo para el cruce (minúsculas + sin espacios)
+            correo_norm = re.sub(r"\s+", "", (alumno_info.get("CORREO") or correo or "").strip().lower())
+
+            q_diag = """
+            WITH md AS (
+              SELECT DISTINCT
+                REGEXP_REPLACE(LOWER(TRIM(CORREO)), r'\\s+', '') AS correo_norm,
+                UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid,
+                CONCAT('G-', LPAD(REGEXP_EXTRACT(UPPER(TRIM(GENERACION_PROGRAMA)), r'(\\d+)'), 2, '0')) AS gen_norm
+              FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+              WHERE REGEXP_REPLACE(LOWER(TRIM(CORREO)), r'\\s+', '') = @c
+            ),
+            db AS (
+              SELECT
+                REGEXP_REPLACE(LOWER(TRIM(CORREO)), r'\\s+', '') AS correo_norm,
+                CONCAT('G-', LPAD(REGEXP_EXTRACT(UPPER(TRIM(GENERACION)), r'(\\d+)'), 2, '0')) AS gen_norm,
+                SAFE_CAST(FECHA_ENCUESTA AS TIMESTAMP) AS FECHA_ENCUESTA,
+                ESTATUS_VENTA, ESTATUS_VIABLE, CALIFICACION,
+                R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11
+              FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+              WHERE REGEXP_REPLACE(LOWER(TRIM(CORREO)), r'\\s+', '') = @c
+            ),
+            j AS (
+              SELECT
+                db.*, md.gid
+              FROM db
+              LEFT JOIN md
+                ON db.correo_norm = md.correo_norm
+               AND db.gen_norm    = md.gen_norm
+            )
+            SELECT
+              j.gid,
+              j.gen_norm,
+              j.FECHA_ENCUESTA,
+              j.ESTATUS_VENTA, j.ESTATUS_VIABLE, j.CALIFICACION,
+              j.R1,j.R2,j.R3,j.R4,j.R5,j.R6,j.R7,j.R8,j.R9,j.R10,j.R11,
+              -- etiqueta amigable de generación (si hay gid)
+              COALESCE(
+                NULLIF(c.GENERACION_ETIQUETA,''),
+                CONCAT(c.PROGRAMA,' ',REGEXP_REPLACE(c.GENERACION, r'\\s*\\-\\s*',' - '))
+              ) AS GEN_LABEL
+            FROM j
+            LEFT JOIN `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA` c
+              ON UPPER(TRIM(c.ID_GENERACION_PROGRAMA)) = j.gid
+            ORDER BY j.FECHA_ENCUESTA DESC
+            LIMIT 50
+            """
+            job_diag = bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("c","STRING", correo_norm)]
+            )
+            for r in client.query(q_diag, job_config=job_diag).result():
+                item = {
+                    "gid": r.get("gid"),
+                    "gen_norm": r.get("gen_norm"),
+                    "gen_label": r.get("GEN_LABEL") or r.get("gen_norm"),
+                    "fecha": r.get("FECHA_ENCUESTA"),
+                    "estatus_venta": r.get("ESTATUS_VENTA"),
+                    "estatus_viable": r.get("ESTATUS_VIABLE"),
+                    "calificacion": r.get("CALIFICACION"),
+                    "R": {k: r.get(k) for k in ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10","R11"]}
+                }
+                diag_list.append(item)
+
+            if diag_list:
+                diag = diag_list[0]  # el más reciente
+        except Exception:
+            app.logger.exception("Error cargando diagnóstico del alumno")
+            diag, diag_list = None, []
+
+
         # -------------------------------------------------
         # 3) Seguimientos → SOLO admin/postventa
         # -------------------------------------------------
@@ -1555,7 +1631,9 @@ def get_alumno_info(correo):
             chart_values=chart_values,        # vacío para postventa
             postventa=postventa,              # vacío para comunidad
             whatsapp_url=whatsapp_url,       # vacío para postventa
-            rol_usuario=rol
+            rol_usuario=rol,
+            diag=diag,                   # ⬅️ NUEVO
+            diag_list=diag_list          # ⬅️ NUEVO
         )
 
     except Exception as e:

@@ -141,6 +141,99 @@
     </div>
   </div>
 
+    {# ========= DIAGNÓSTICO (todas las áreas) ========= #}
+  {% if diag %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white border-0 d-flex align-items-center">
+      <h5 class="mb-0"><i class="bi bi-clipboard2-pulse text-success me-2"></i> Diagnóstico</h5>
+      <span class="ms-2 badge
+        {% if diag.estatus_viable=='VIABLE' %}text-bg-success
+        {% elif diag.estatus_viable=='REQUIERE AJUSTE' %}text-bg-warning
+        {% elif diag.estatus_viable=='NO VIABLE' %}text-bg-danger
+        {% else %}text-bg-secondary{% endif %}">
+        {{ diag.estatus_viable or '—' }}
+      </span>
+      <span class="ms-2 badge {{ 'text-bg-success' if (diag.estatus_venta|int)==1 else 'text-bg-secondary' }}">
+        {{ venta_text(diag.estatus_venta) }}
+      </span>
+      <span class="ms-2 text-muted small">
+        {{ (diag.fecha|string)[:16] if diag.fecha else '' }}
+      </span>
+      <button class="btn btn-outline-secondary btn-sm ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#diagDetalle" aria-expanded="false">
+        Ver detalle
+      </button>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <div class="small text-muted">Generación</div>
+          <div class="fw-semibold">{{ diag.gen_label or diag.gen_norm or '—' }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Calificación</div>
+          <div class="fw-semibold">{{ diag.calificacion or 0 }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Venta</div>
+          <div>{{ venta_text(diag.estatus_venta) }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Fecha</div>
+          <div>{{ (diag.fecha|string)[:19] if diag.fecha else '—' }}</div>
+        </div>
+      </div>
+
+      <div id="diagDetalle" class="collapse mt-3">
+        <div class="row g-3">
+          {# Detalle R1..R11 del diagnóstico más reciente #}
+          <div class="col-lg-6">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead class="table-light"><tr><th>Pregunta</th><th>Respuesta</th></tr></thead>
+                <tbody>
+                  {% for k,v in diag.R.items() %}
+                    <tr>
+                      <td class="small fw-semibold">{{ k }}</td>
+                      <td class="small">{{ score_to_label(k, v) or v }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {# Historial (últimos) #}
+          <div class="col-lg-6">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>Fecha</th><th>Gen</th><th>Viable</th><th>Venta</th><th>Calif</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for d in diag_list[:20] %}
+                    <tr>
+                      <td class="small">{{ (d.fecha|string)[:16] if d.fecha else '—' }}</td>
+                      <td class="small">{{ d.gen_label or d.gen_norm or '—' }}</td>
+                      <td class="small">{{ d.estatus_viable or '—' }}</td>
+                      <td class="small">{{ venta_text(d.estatus_venta) }}</td>
+                      <td class="small">{{ d.calificacion or 0 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="text-muted small">Mostrando {{ diag_list|length if diag_list else 0 }} registro(s).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+
   {# ========= PARTICIPACIÓN ========= #}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-white border-0">
