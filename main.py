@@ -677,15 +677,47 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             "ingreso": ingreso, "inscripciones": insc, "roas": roas
         }]
 
+        # --- Diagnósticos (POSTVENTA) por generación seleccionada ---
+        # Tomamos la generación corta tipo G-01 a partir del label/gid
+        gen_short = _format_generacion(meta.get("label") or meta.get("gid") or "")
+
+        diag_where = ["GENERACION = @g"]
+        diag_params = [bigquery.ScalarQueryParameter("g", "STRING", gen_short)]
+
+        # Opcional: acotar por la ventana de la generación
+        if meta.get("from"):
+            diag_where.append("DATE(FECHA_ENCUESTA) >= @df")
+            diag_params.append(bigquery.ScalarQueryParameter("df", "DATE", meta["from"]))
+        if meta.get("to"):
+            diag_where.append("DATE(FECHA_ENCUESTA) <= @dt")
+            diag_params.append(bigquery.ScalarQueryParameter("dt", "DATE", meta["to"]))
+
+        q_diag = f"""
+          SELECT COUNT(*) AS n_diag,
+                 COUNTIF(ESTATUS_VENTA = 1) AS n_ventas_diag
+          FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+          WHERE {" AND ".join(diag_where)}
+        """
+        drow = next(iter(client.query(q_diag, job_config=bigquery.QueryJobConfig(
+            query_parameters=diag_params)).result()), None)
+        n_diag = int(drow["n_diag"] or 0) if drow else 0
+        n_ventas_diag = int(drow["n_ventas_diag"] or 0) if drow else 0
+
         return {
-            "kpis": {"leads": leads, "inscripciones": insc, "diagnosticos": 0, "ventas_diag": 0,
-                     "ingreso": ingreso, "gasto": gasto, "roas": roas},
-            "by_gen": by_gen,
-            "series_labels": series_labels,
-            "series_insc": series_insc,
-            "series_leads": series_leads,
-            "series_ingreso": [],
-            "cross_rows": []
+            "kpis": {
+                    "leads": leads, 
+                    "inscripciones": insc, 
+                    "diagnosticos": n_diag,
+                    "ventas_diag": n_ventas_diag,
+                    "ingreso": ingreso, 
+                    "gasto": gasto, 
+                    "roas": roas},
+                    "by_gen": by_gen,
+                    "series_labels": series_labels,
+                    "series_insc": series_insc,
+                    "series_leads": series_leads,
+                    "series_ingreso": [],
+                    "cross_rows": []
         }
 
     # ===== CAMINO 2: sin generación → por fechas (lo que ya validaste) =====
@@ -838,14 +870,37 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     except Exception:
         app.logger.exception(
             "Error construyendo ranking por generación (camino general)")
+    
+    # --- Diagnósticos (POSTVENTA) por rango de fechas ---
+    diag_where = []
+    diag_params = []
+    if date_from:
+        diag_where.append("DATE(FECHA_ENCUESTA) >= @df")
+        diag_params.append(bigquery.ScalarQueryParameter("df", "DATE", date_from))
+    if date_to:
+        diag_where.append("DATE(FECHA_ENCUESTA) <= @dt")
+        diag_params.append(bigquery.ScalarQueryParameter("dt", "DATE", date_to))
+
+    diag_clip = ("WHERE " + " AND ".join(diag_where)) if diag_where else ""
+    q_diag = f"""
+      SELECT COUNT(*) AS n_diag,
+             COUNTIF(ESTATUS_VENTA = 1) AS n_ventas_diag
+      FROM `fivetwofive-20.POSTVENTA.DM_ENCUESTA_DIAGNOSTICO_POSTVENTA`
+      {diag_clip}
+    """
+    drow = next(iter(client.query(q_diag, job_config=bigquery.QueryJobConfig(
+        query_parameters=diag_params)).result()), None)
+    n_diag = int(drow["n_diag"] or 0) if drow else 0
+    n_ventas_diag = int(drow["n_ventas_diag"] or 0) if drow else 0
+
 
     return {
         "kpis": {
             "leads": dm["leads"],
             # ← total correcto, ya no truncado
             "inscripciones": sum(series_insc),
-            "diagnosticos": 0,
-            "ventas_diag": 0,
+            "diagnosticos": n_diag,       
+            "ventas_diag": n_ventas_diag,  
             "ingreso": dm["ingreso"],           # **DM**
             "gasto": dm["pauta"],               # **DM**
             "roas": roas
