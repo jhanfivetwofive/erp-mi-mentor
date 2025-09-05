@@ -531,6 +531,25 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+def _resolve_gid(any_id_or_label: str) -> dict | None:
+    s = (any_id_or_label or "").strip().upper()
+    if not s:
+        return None
+    q = """
+      SELECT gid, label, f_from, f_to
+      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_VENTANA`
+      WHERE gid = @s OR label = @s
+      LIMIT 1
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("s","STRING",s)]
+    )
+    row = next(iter(client.query(q, job_config=job).result()), None)
+    if row:
+        return {"gid": row["gid"], "label": row["label"], "from": row["f_from"], "to": row["f_to"]}
+    return None
+
+
 # ⬇️ Añade esto junto a _gen_date_range (puedes reemplazar _gen_date_range por esto)
 def _gen_meta(gid: str) -> dict | None:
     gid = (gid or "").strip().upper()
@@ -591,82 +610,77 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     gen_id = (generacion or "").strip().upper()
 
     # ===== CAMINO 1: filtro por GENERACION (usar "sábana") =====
-    if gen_id:
-        job = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gen_id)]
-        )
-
-        # 1) KPIs por generación (DM + DV dedupe)
-        q_met = """
-          SELECT gid, label, f_from, f_to, leads, gasto, ventas, ingreso, inscripciones
-          FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
-          WHERE gid = @gid
-          LIMIT 1
-        """
-        row = next(iter(client.query(q_met, job_config=job).result()), None)
-
-        if not row:
-            # ID no está en catálogo → vacíos controlados
-            return {
-                "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
-                         "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
-                "by_gen": [], "series_labels": [], "series_insc": [],
-                "series_leads": [], "series_ventas": [], "series_pauta": [],
-                "series_ingreso": [], "cross_rows": []
-            }
-
-        leads = int(row["leads"] or 0)
-        gasto = float(row["gasto"] or 0.0)              # DM
-        ventas = int(row["ventas"] or 0)                # DM
-        ingreso = float(row["ingreso"] or 0.0)          # DM
-        insc = int(row["inscripciones"] or 0)           # DV (dedupe)
-        roas = (ingreso / gasto) if gasto else 0.0
-
-        # 2) Serie diaria (solo inscripciones para la línea del gráfico)
-        q_ser = """
-            SELECT d, leads, inscripciones
-            FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
-            WHERE gid = @gid
-            ORDER BY d
-            """
-        series_labels, series_insc, series_leads = [], [], []
-        try:
-            for r in client.query(q_ser, job_config=job).result():
-                d = r["d"]
-                series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
-                series_insc.append(int(r["inscripciones"] or 0))
-                series_leads.append(int(r["leads"] or 0))
-        except Exception:
-            app.logger.exception("Error al leer serie diaria para %s", gen_id)
-
-        by_gen = [{
-            "gid": gen_id,
-            "generacion": (row["label"] or gen_id),
-            "leads": leads,
-            "gasto": gasto,
-            "ventas": ventas,
-            "ingreso": ingreso,
-            "inscripciones": insc,
-            "roas": roas
-        }]
-
+gen_raw = (generacion or "").strip()
+if gen_raw:
+    meta = _resolve_gid(gen_raw)  # ← acepta ID **o** etiqueta
+    if not meta:
         return {
-            "kpis": {
-                "leads": leads,
-                "inscripciones": insc,
-                "diagnosticos": 0,
-                "ventas_diag": 0,
-                "ingreso": ingreso,   # **DM**
-                "gasto": gasto,       # **DM**
-                "roas": roas
-            },
-            "by_gen": by_gen,
-            "series_labels": series_labels,
-            "series_insc": series_insc,
-            "series_leads": series_leads,
-            "series_ingreso": [],
-            "cross_rows": []
+            "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+                     "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
+            "by_gen": [], "series_labels": [], "series_insc": [],
+            "series_leads": [], "series_ingreso": [], "cross_rows": []
         }
+
+    gid = meta["gid"]
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
+    )
+
+    # 1) KPIs por generación
+    q_met = """
+      SELECT gid, label, f_from, f_to, leads, gasto, ventas, ingreso, inscripciones
+      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_METRICAS`
+      WHERE gid = @gid
+      LIMIT 1
+    """
+    row = next(iter(client.query(q_met, job_config=job).result()), None)
+    if not row:
+        return {
+            "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
+                     "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
+            "by_gen": [], "series_labels": [], "series_insc": [],
+            "series_leads": [], "series_ingreso": [], "cross_rows": []
+        }
+
+    leads  = int(row["leads"] or 0)
+    gasto  = float(row["gasto"] or 0.0)
+    ventas = int(row["ventas"] or 0)
+    ingreso= float(row["ingreso"] or 0.0)
+    insc   = int(row["inscripciones"] or 0)
+    roas   = (ingreso / gasto) if gasto else 0.0
+
+    # 2) Serie diaria (inscripciones + leads)
+    q_ser = """
+      SELECT d, leads, inscripciones
+      FROM `fivetwofive-20.INSUMOS.VW_ADQ_GENERACION_SERIE_DIA`
+      WHERE gid = @gid
+      ORDER BY d
+    """
+    series_labels, series_insc, series_leads = [], [], []
+    for r in client.query(q_ser, job_config=job).result():
+        d = r["d"]
+        series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
+        series_insc.append(int(r["inscripciones"] or 0))
+        series_leads.append(int(r["leads"] or 0))
+
+    by_gen = [{
+        "gid": gid,
+        "generacion": (row["label"] or gid),
+        "leads": leads, "gasto": gasto, "ventas": ventas,
+        "ingreso": ingreso, "inscripciones": insc, "roas": roas
+    }]
+
+    return {
+        "kpis": {"leads": leads, "inscripciones": insc, "diagnosticos": 0, "ventas_diag": 0,
+                 "ingreso": ingreso, "gasto": gasto, "roas": roas},
+        "by_gen": by_gen,
+        "series_labels": series_labels,
+        "series_insc": series_insc,
+        "series_leads": series_leads,
+        "series_ingreso": [],
+        "cross_rows": []
+    }
+
 
     # ===== CAMINO 2: sin generación → por fechas (lo que ya validaste) =====
     # DM (pauta/leads/ventas/ingreso) por rango
