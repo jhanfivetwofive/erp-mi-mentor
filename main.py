@@ -536,7 +536,9 @@ def _gen_meta(gid: str) -> dict | None:
     gid = (gid or "").strip().upper()
     if not gid:
         return None
-    q = """
+
+    # 1) Catálogo
+    q_cat = """
       SELECT
         UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid,
         UPPER(TRIM(
@@ -551,24 +553,43 @@ def _gen_meta(gid: str) -> dict | None:
       WHERE UPPER(TRIM(ID_GENERACION_PROGRAMA)) = @gid
       LIMIT 1
     """
-    job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
+    job_cat = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("gid","STRING",gid)]
     )
-    row = next(iter(client.query(q, job_config=job).result()), None)
-    if not row:
-        return None
-    return {"gid": row["gid"], "label": row["label"], "from": row["f_from"], "to": row["f_to"]}
+    row = next(iter(client.query(q_cat, job_config=job_cat).result()), None)
+    if row and row["f_from"]:
+        return {"gid": row["gid"], "label": row["label"], "from": row["f_from"], "to": row["f_to"]}
 
+    # 2) Fallback con DV (por si el catálogo no tiene la fila o fechas vacías)
+    q_dv = """
+      SELECT
+        UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid,
+        UPPER(TRIM(MAX(GENERACION_PROGRAMA))) AS label,  -- ej. INVERSIONES INFINITAS G - 01
+        MIN(SAFE_CAST(FECHA_INICIO AS DATE)) AS f_from,
+        COALESCE(MAX(SAFE_CAST(NULLIF(FECHA_FIN,'') AS DATE)), CURRENT_DATE()) AS f_to
+      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+      WHERE UPPER(TRIM(ID_GENERACION_PROGRAMA)) = @gid
+      GROUP BY gid
+      LIMIT 1
+    """
+    job_dv = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("gid","STRING",gid)]
+    )
+    row2 = next(iter(client.query(q_dv, job_config=job_dv).result()), None)
+    if row2 and row2["f_from"]:
+        return {"gid": row2["gid"], "label": row2["label"], "from": row2["f_from"], "to": row2["f_to"]}
 
+    return None
 
 def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, date_to=None):
-    gen_id = (generacion or "").strip()
+    gen_id = (generacion or "").strip().upper()
     meta = None
 
-    # Si hay ID de generación, usar ventana del catálogo
+    # Si llega ID de generación, resolvemos ventana desde catálogo (o DV fallback)
     if gen_id:
         meta = _gen_meta(gen_id)
         if not meta:
+            # Si no existe la generación, devuelve estructura vacía controlada
             return {
                 "kpis": {"leads": 0, "inscripciones": 0, "diagnosticos": 0, "ventas_diag": 0,
                          "ingreso": 0.0, "gasto": 0.0, "roas": 0.0},
@@ -577,7 +598,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
             }
         date_from, date_to = meta["from"], meta["to"]
 
-    # Parse seguro de fechas si vienen como string
+    # Parse seguro de fechas si vinieron como string
     if isinstance(date_from, str):
         try: date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
         except: date_from = None
@@ -585,22 +606,22 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         try: date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
         except: date_to = None
 
-    # ---------- DM: KPIs (PAUTA/LEADS/VENTAS/INGRESO) por ventana/fechas ----------
+    # ---------- DM: KPIs (pauta/leads/ventas/ingreso) ----------
     dm_params, dm_where = [], []
     if date_from:
         dm_where.append("SAFE_CAST(FECHA AS DATE) >= @from")
-        dm_params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+        dm_params.append(bigquery.ScalarQueryParameter("from","DATE",date_from))
     if date_to:
         dm_where.append("SAFE_CAST(FECHA AS DATE) <= @to")
-        dm_params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
+        dm_params.append(bigquery.ScalarQueryParameter("to","DATE",date_to))
     dm_clip = ("WHERE " + " AND ".join(dm_where)) if dm_where else ""
 
     q_dm_kpis = f"""
       SELECT
-        IFNULL(SUM(PAUTA),0.0)      AS pauta,
-        IFNULL(SUM(LEADS),0)        AS leads,
-        IFNULL(SUM(VENTAS),0)       AS ventas,
-        IFNULL(SUM(INGRESO),0.0)    AS ingreso
+        IFNULL(SUM(PAUTA),0.0)    AS pauta,
+        IFNULL(SUM(LEADS),0)      AS leads,
+        IFNULL(SUM(VENTAS),0)     AS ventas,
+        IFNULL(SUM(INGRESO),0.0)  AS ingreso
       FROM `fivetwofive-20.RETRO_SEM_MI_MENTOR.DM_METRICAS_WEBINAR_X_FECHA_DIA`
       {dm_clip}
     """
@@ -615,7 +636,7 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     except Exception:
         app.logger.exception("Error KPIs (DM)")
 
-    # ---------- DV: dedupe por ID_INSCRIPCION para inscripciones y serie ----------
+    # ---------- DV: inscripciones reales (dedupe por ID_INSCRIPCION) ----------
     dv_params, dv_where = [], []
     if gen_id:
         dv_where.append("UPPER(TRIM(ID_GENERACION_PROGRAMA)) = UPPER(TRIM(@gid))")
@@ -629,21 +650,21 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     dv_clip = ("WHERE " + " AND ".join(dv_where)) if dv_where else ""
 
     dv_cte = f"""
-    WITH base AS (
-      SELECT
-        ID_INSCRIPCION,
-        SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d,
-        UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid
-      FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-      {dv_clip}
-    ),
-    dedup AS (
-      SELECT gid, ANY_VALUE(d) AS d
-      FROM base
-      GROUP BY gid, ID_INSCRIPCION
-    )
+      WITH base AS (
+        SELECT
+          ID_INSCRIPCION,
+          SAFE_CAST(FECHA_INSCRIPCION AS DATE) AS d,
+          UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid
+        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+        {dv_clip}
+      ),
+      dedup AS (
+        SELECT gid, ANY_VALUE(d) AS d
+        FROM base
+        GROUP BY gid, ID_INSCRIPCION
+      )
     """
-    # KPIs: inscripciones reales (dedup)
+    # KPI inscripciones
     q_dv_insc = dv_cte + "SELECT COUNT(*) AS inscripciones FROM dedup"
     inscripciones = 0
     try:
@@ -651,9 +672,9 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         if r:
             inscripciones = int(r["inscripciones"] or 0)
     except Exception:
-        app.logger.exception("Error KPIs inscripciones (DV dedup)")
+        app.logger.exception("Error inscripciones (DV dedup)")
 
-    # Serie: inscripciones por día (dedup)
+    # Serie inscripciones por día (dedupe)
     q_series_insc = dv_cte + """
       SELECT d, COUNT(*) AS n
       FROM dedup
@@ -668,19 +689,23 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
     except Exception:
         app.logger.exception("Error serie inscripciones (DV dedup)")
 
-    # ---------- Ranking por ventana del catálogo ----------
-    # DM por ventana: leads, pauta (gasto), ventas, ingreso (todos de DM)
+    # ---------- Ranking por generación (ventanas del catálogo) ----------
     rank_params, gen_filter = [], ""
-    if meta:
+    if meta:  # si hay filtro, regresamos solo esa fila en ranking
         gen_filter = "WHERE UPPER(TRIM(ID_GENERACION_PROGRAMA)) = UPPER(TRIM(@g))"
         rank_params.append(bigquery.ScalarQueryParameter("g","STRING",meta["gid"]))
 
+    # DM por ventana
     q_rank_dm = f"""
       WITH g AS (
         SELECT
           UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid,
-          UPPER(TRIM(COALESCE(NULLIF(GENERACION_ETIQUETA,''),
-                CONCAT(PROGRAMA,' ',REGEXP_REPLACE(GENERACION, r'\\s*\\-\\s*',' - '))))) AS label,
+          UPPER(TRIM(
+            COALESCE(
+              NULLIF(GENERACION_ETIQUETA,''),
+              CONCAT(PROGRAMA,' ',REGEXP_REPLACE(GENERACION, r'\\s*\\-\\s*',' - '))
+            )
+          )) AS label,
           SAFE_CAST(FECHA_INICIO AS DATE) AS f_from,
           COALESCE(SAFE_CAST(NULLIF(FECHA_FIN,'') AS DATE), CURRENT_DATE()) AS f_to
         FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
@@ -692,22 +717,20 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
       )
       SELECT
         g.gid, g.label AS generacion,
-        IFNULL(SUM(m.LEADS),0)    AS leads,
-        IFNULL(SUM(m.PAUTA),0.0)  AS gasto,
-        IFNULL(SUM(m.VENTAS),0)   AS ventas,
+        IFNULL(SUM(m.LEADS),0)     AS leads,
+        IFNULL(SUM(m.PAUTA),0.0)   AS gasto,
+        IFNULL(SUM(m.VENTAS),0)    AS ventas,
         IFNULL(SUM(m.INGRESO),0.0) AS ingreso
       FROM g
       LEFT JOIN m ON m.d BETWEEN g.f_from AND g.f_to
       GROUP BY gid, generacion
     """
 
-    # DV por ventana: solo inscripciones (dedup)
+    # DV por ventana: solo inscripciones dedup
     q_rank_dv = f"""
       WITH g AS (
         SELECT
           UPPER(TRIM(ID_GENERACION_PROGRAMA)) AS gid,
-          UPPER(TRIM(COALESCE(NULLIF(GENERACION_ETIQUETA,''),
-                CONCAT(PROGRAMA,' ',REGEXP_REPLACE(GENERACION, r'\\s*\\-\\s*',' - '))))) AS label,
           SAFE_CAST(FECHA_INICIO AS DATE) AS f_from,
           COALESCE(SAFE_CAST(NULLIF(FECHA_FIN,'') AS DATE), CURRENT_DATE()) AS f_to
         FROM `fivetwofive-20.INSUMOS.CAT_GENERACION_PROGRAMA`
@@ -724,10 +747,10 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         FROM a
         GROUP BY gid, ID_INSCRIPCION
       )
-      SELECT g.gid, g.label AS generacion, COUNT(dedup.d) AS inscripciones
+      SELECT g.gid, COUNT(dedup.d) AS inscripciones
       FROM g
       LEFT JOIN dedup ON dedup.gid = g.gid AND dedup.d BETWEEN g.f_from AND g.f_to
-      GROUP BY gid, generacion
+      GROUP BY gid
     """
 
     bygen = {}
@@ -740,20 +763,19 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
                 "leads": int(r["leads"] or 0),
                 "gasto": float(r["gasto"] or 0.0),
                 "ventas": int(r["ventas"] or 0),
-                "ingreso": float(r["ingreso"] or 0.0),
+                "ingreso": float(r["ingreso"] or 0.0),  # ==> de DM
                 "inscripciones": 0,
                 "roas": 0.0
             }
         for r in client.query(q_rank_dv, job_config=bigquery.QueryJobConfig(query_parameters=rank_params)).result():
             key = (r["gid"] or "").strip()
-            base = bygen.setdefault(key, {"gid": key, "generacion": (r["generacion"] or "").strip(),
-                                          "leads": 0, "gasto": 0.0, "ventas": 0, "ingreso": 0.0,
-                                          "inscripciones": 0, "roas": 0.0})
+            base = bygen.setdefault(key, {"gid": key, "generacion": key, "leads": 0, "gasto": 0.0,
+                                          "ventas": 0, "ingreso": 0.0, "inscripciones": 0, "roas": 0.0})
             base["inscripciones"] = int(r["inscripciones"] or 0)
 
         for v in bygen.values():
             gasto = float(v["gasto"] or 0.0)
-            ingreso = float(v["ingreso"] or 0.0)  # de DM
+            ingreso = float(v["ingreso"] or 0.0)  # ingreso de DM
             v["roas"] = (ingreso / gasto) if gasto else 0.0
 
         bygen_rows = sorted(bygen.values(), key=lambda x: x["generacion"])
@@ -761,25 +783,26 @@ def _adq_insights_data(generacion=None, generacion_num=None, date_from=None, dat
         app.logger.exception("Error ranking por generación")
         bygen_rows = []
 
-    # ---------- KPIs finales (ingreso de DM, inscripciones de DV) ----------
+    # ---------- KPIs finales ----------
     kpis_out = {
-        "leads": dm["leads"],
-        "inscripciones": inscripciones,
+        "leads": dm["leads"],              # DM
+        "inscripciones": inscripciones,    # DV dedup
         "diagnosticos": 0,
         "ventas_diag": 0,
-        "ingreso": dm["ingreso"],        # << ingreso desde DM, como pediste
-        "gasto": dm["pauta"],
+        "ingreso": dm["ingreso"],          # DM (lo que pediste)
+        "gasto": dm["pauta"],              # DM
         "roas": (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0
     }
 
     return {
         "kpis": kpis_out,
         "by_gen": bygen_rows,
-        "series_labels": series_labels,  # días
-        "series_insc": series_insc,      # inscripciones/día (DV dedup)
+        "series_labels": series_labels,
+        "series_insc": series_insc,
         "series_leads": [], "series_ventas": [], "series_pauta": [], "series_ingreso": [],
         "cross_rows": [],
     }
+
 
 # === BACK URL ROBUSTO (ATRÁS) ===
 def _is_safe_internal_url(target: str) -> bool:
