@@ -205,17 +205,32 @@
     })
     .catch(()=>{}); // no bloquea la vista si falla
 
-  // Serie de inscripciones
-  const sLabels = {{ series_labels|default([])|tojson }};
-  const sData   = {{ series_insc|default([])|tojson }};
-  const elS = document.getElementById('chartSerie');
-  if (elS && Array.isArray(sLabels) && sLabels.length) {
-    new Chart(elS.getContext('2d'), {
-      type: 'line',
-      data: { labels:gLabels, datasets:[{ label:'Inscripciones (ventas)', data:gInsc, borderWidth:1 }] },
-      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ maxTicksLimit:12 } } } }
-    });
-  }
+// Serie de inscripciones
+const sLabels = {{ series_labels|default([])|tojson }};
+const sData   = {{ series_insc|default([])|tojson }};
+const elS = document.getElementById('chartSerie');
+if (elS && Array.isArray(sLabels) && sLabels.length) {
+  new Chart(elS.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: sLabels,
+      datasets: [{
+        label: 'Inscripciones (ventas)',
+        data: sData,
+        borderWidth: 2,
+        tension: .2,
+        fill: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { ticks: { maxTicksLimit: 12 } } }
+    }
+  });
+}
+
 
     // Serie de leads (separada de inscripciones)
   const sLeads = {{ series_leads|default([])|tojson }};
