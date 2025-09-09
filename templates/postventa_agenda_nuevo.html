@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Agendar diagnóstico{% endblock %}
+
+{% block content %}
+<div class="container py-3" style="max-width: 760px;">
+  <h5 class="mb-3">Agendar diagnóstico</h5>
+
+  <div id="msg" class="alert d-none"></div>
+
+  <form id="frm">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Nombre del cliente *</label>
+        <input class="form-control" name="nombre" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Teléfono</label>
+        <input class="form-control" name="numero" placeholder="10 dígitos">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Correo *</label>
+        <input class="form-control" type="email" name="correo" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Asesor *</label>
+        <input class="form-control" name="asesor" value="{{ default_asesor }}" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Fecha *</label>
+        <input class="form-control" type="date" name="fecha" value="{{ default_fecha }}" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Hora *</label>
+        <input class="form-control" type="time" name="hora" value="{{ default_hora }}" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Calificación</label>
+        <input class="form-control" type="number" name="calificacion" min="0" max="100" step="1">
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Semáforo</label>
+        <select class="form-select" name="semaforo">
+          <option value="">—</option>
+          <option>Verde</option>
+          <option>Amarillo</option>
+          <option>Rojo</option>
+          <option>Agendada</option>
+          <option>Reagendar</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Estatus compra</label>
+        <input class="form-control" name="status_compra" placeholder="p. ej. Pago Realizado">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">¿Asistió?</label>
+        <select class="form-select" name="asistio">
+          <option value="">—</option>
+          <option value="true">Sí</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Notas</label>
+        <textarea class="form-control" name="notas" rows="3" placeholder="Comentarios o acuerdos"></textarea>
+      </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+      <button id="btn-save" class="btn btn-primary">Guardar</button>
+      <a href="{{ url_for('postventa_agenda_page') }}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const frm = document.getElementById('frm');
+  const msg = document.getElementById('msg');
+  const btn = document.getElementById('btn-save');
+
+  function showMsg(text, type='success') {
+    msg.className = 'alert alert-' + type;
+    msg.textContent = text;
+  }
+  function hideMsg() {
+    msg.className = 'alert d-none';
+    msg.textContent = '';
+  }
+
+  frm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideMsg();
+    btn.disabled = true;
+
+    const fd = new FormData(frm);
+    const payload = Object.fromEntries(fd.entries());
+
+    // Normaliza asistio
+    if (payload.asistio === '') delete payload.asistio;
+
+    try {
+      const r = await fetch('/api/postventa/agenda', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await r.json().catch(() => ({}));
+
+      if (r.ok) {
+        showMsg('Diagnóstico agendado.');
+        setTimeout(() => window.location.href = "{{ url_for('postventa_agenda_page') }}", 600);
+      } else {
+        showMsg(data.error || 'No se pudo guardar.', 'danger');
+        btn.disabled = false;
+      }
+    } catch (err) {
+      showMsg(err?.message || 'Error de red.', 'danger');
+      btn.disabled = false;
+    }
+  });
+</script>
+{% endblock %}

@@ -64,16 +64,18 @@
         {% set path = request.path %}
 
         {# -------- Fallback para botón "Atrás" (según sección actual) -------- #}
-        {% set fallback_url = None %}
+          {% set fallback_url = None %}
         {% if path.startswith('/comunidad/') %}
-        {% set fallback_url = url_for('comunidad_list') %}
+          {% set fallback_url = url_for('comunidad_list') %}
         {% elif path.startswith('/alumno/') %}
-        {% set fallback_url = url_for('alumnos_page') %}
+          {% set fallback_url = url_for('alumnos_page') %}
         {% elif path.startswith('/catalogo/') %}
-        {% set fallback_url = url_for('catalogo_programas') %}
+          {% set fallback_url = url_for('catalogo_programas') %}
+        {% elif path.startswith('/postventa/agenda') %}
+          {% set fallback_url = url_for('postventa_agenda_page') %}
         {% elif path.startswith('/postventa/') %}
         {# En postventa, el fallback siempre será Alumnos #}
-        {% set fallback_url = url_for('alumnos_page') %}
+          {% set fallback_url = url_for('alumnos_page') %}
         {% endif %}
 
         <!-- Menú izquierdo -->
@@ -123,9 +125,32 @@
             </a>
             <ul class="dropdown-menu" aria-labelledby="navPostventa">
               <li>
+                <a class="dropdown-item {{ 'active' if request.path.startswith(url_for('postventa_agenda_page')) else '' }}"
+                  href="{{ url_for('postventa_agenda_page') }}">
+                  Agenda (calendario)
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item"
+                  href="{{ url_for('postventa_agenda_page', mine=1) }}">
+                  Mi agenda (solo mis eventos)
+                </a>
+              </li>
+              <li><hr class="dropdown-divider"></li>
+
+              <li>
+                <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_agenda_nuevo_page') else '' }}"
+                  href="{{ url_for('postventa_agenda_nuevo_page') }}">
+                  Agendar diagnóstico (nuevo)
+                </a>
+              </li>
+
+              <li><hr class="dropdown-divider"></li>
+
+              <li>
                 <a class="dropdown-item {{ 'active' if request.path == url_for('postventa_diagnostico') else '' }}"
                   href="{{ url_for('postventa_diagnostico') }}">
-                  Diagnóstico (nuevo)
+                  Diagnóstico (cuestionario)
                 </a>
               </li>
               <li>

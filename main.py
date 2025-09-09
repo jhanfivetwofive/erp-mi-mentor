@@ -549,6 +549,21 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         "gen_rows": gen_rows,
     }
 
+# === Postventa: Agenda de Diagnósticos ===
+AGENDA_TABLA = "fivetwofive-20.POSTVENTA.DB_AGENDA_DIAGNOSTICOS"
+MEX_TZ = "America/Mexico_City"
+
+# Paleta determinística por asesor
+_AGENDA_PALETTE = [
+    "#2563eb","#16a34a","#f59e0b","#ef4444","#8b5cf6",
+    "#0ea5e9","#10b981","#f97316","#dc2626","#84cc16","#14b8a6","#d946ef"
+]
+def _color_for_asesor(name: str) -> str:
+    s = (name or "").strip()
+    if not s: return "#6b7280"
+    idx = sum(ord(c) for c in s) % len(_AGENDA_PALETTE)
+    return _AGENDA_PALETTE[idx]
+
 
 def _resolve_gid(any_id_or_label: str) -> dict | None:
     s = (any_id_or_label or "").strip().upper()
@@ -2035,6 +2050,209 @@ def postventa_insights():
             "Falta la plantilla templates/postventa_insights.html en la imagen (o nombre distinto).",
             status=500, mimetype="text/plain"
         )
+    
+
+@app.route("/postventa/agenda")
+@role_required("postventa", "admin")
+def postventa_agenda_page():
+    # Carga lista de asesores para el filtro
+    q = f"""
+      SELECT DISTINCT ASESOR
+      FROM `{AGENDA_TABLA}`
+      WHERE ASESOR IS NOT NULL AND ASESOR != ''
+      ORDER BY ASESOR
+    """
+    asesores = []
+    try:
+        for r in client.query(q).result():
+            asesores.append(r["ASESOR"])
+    except Exception:
+        asesores = []
+    u = get_user_from_session()
+    return render_template("postventa_agenda.html", asesores=asesores, usuario=u)
+
+@app.route("/postventa/agenda/nuevo")
+@role_required("postventa", "admin")
+def postventa_agenda_nuevo_page():
+    # Defaults: hoy 09:00 y asesor = usuario logueado (si trae nombre)
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    default_hora = "09:00"
+    u = get_user_from_session()
+    default_asesor = (u.get("nombre") or u.get("correo") or "").strip()
+    return render_template("postventa_agenda_nuevo.html",
+                           default_fecha=hoy, default_hora=default_hora,
+                           default_asesor=default_asesor)
+
+@app.route("/api/postventa/agenda", methods=["POST"])
+def api_postventa_agenda_create():
+    try:
+        # Autorización
+        rol = current_user_role()
+        if rol not in ("postventa", "admin"):
+            return jsonify({"error": "No autorizado"}), 403
+
+        data = request.get_json(force=True) or {}
+        # Campos requeridos
+        nombre = (data.get("nombre") or "").strip()
+        numero_raw = (data.get("numero") or "").strip()
+        correo = _normalize_email(data.get("correo") or "")
+        asesor = (data.get("asesor") or "").strip()
+        fecha = (data.get("fecha") or "").strip()          # YYYY-MM-DD
+        hora = (data.get("hora") or "").strip()            # HH:MM
+        calificacion = data.get("calificacion")
+        semaforo = (data.get("semaforo") or "").strip()    # Verde/Amarillo/Rojo/Reagendar/Agendada
+        status_compra = (data.get("status_compra") or "").strip()
+        asistio = data.get("asistio", None)                # True/False/None
+        notas = (data.get("notas") or "").strip()
+
+        errors = []
+        if not nombre: errors.append("Falta el nombre.")
+        if not correo: errors.append("Falta el correo.")
+        if not asesor: errors.append("Falta el asesor.")
+        if not fecha: errors.append("Falta la fecha (YYYY-MM-DD).")
+        if not hora: errors.append("Falta la hora (HH:MM).")
+        if errors:
+            return jsonify({"error": " | ".join(errors)}), 400
+
+        # Normaliza teléfono y tipos
+        numero = _normalize_phone(numero_raw)
+        try:
+            calificacion = int(calificacion) if calificacion not in (None, "") else None
+        except Exception:
+            calificacion = None
+        if isinstance(asistio, str):
+            asistio = asistio.strip().lower() in {"1","true","si","sí","yes","y"}
+
+        row = {
+            "ID": str(uuid.uuid4()),
+            "NOMBRE": nombre,
+            "NUMERO": numero,
+            "CORREO": correo,
+            "ASESOR": asesor,
+            "FECHA": fecha,   # DATE en BQ
+            "HORA": hora,     # TIME en BQ
+            "CALIFICACION": calificacion,
+            "SEMAFORO": semaforo,
+            "STATUS_COMPRA": status_compra,
+            "ASISTIO": asistio,
+            "NOTAS": notas,
+            "CREATED_AT": _now_iso_utc(),
+            "CREATED_BY": (get_user_from_session().get("correo") or ""),
+            "CANCELADO": False
+        }
+
+        errors_bq = client.insert_rows_json(AGENDA_TABLA, [row])
+        if errors_bq:
+            return jsonify({"error": f"BigQuery insert: {errors_bq}"}), 500
+
+        return jsonify({"message": "Diagnóstico agendado", "id": row["ID"]}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/postventa/agenda/events")
+def api_postventa_agenda_events():
+    """
+    FullCalendar llamará con ?start=YYYY-MM-DD&end=YYYY-MM-DD (UTC/ISO).
+    Filtros opcionales:
+      - asesor: nombre exacto del asesor
+      - mine=1  (muestra solo mis eventos, según usuario en sesión)
+    """
+    try:
+        if "user" not in session:
+            return jsonify([]), 200  # FC no se rompe, pero no revela datos
+
+        start = (request.args.get("start") or "").split("T")[0]
+        end = (request.args.get("end") or "").split("T")[0]
+        asesor_filtro = (request.args.get("asesor") or "").strip()
+        mine = (request.args.get("mine") or "").strip() in {"1","true","si","sí"}
+
+        # Si piden "mis" eventos, forzamos filtro por asesor = nombre/correo del usuario
+        user = get_user_from_session()
+        asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
+
+        wh = ["CANCELADO IS NOT TRUE"]
+        params = []
+        if start:
+            wh.append("SAFE_CAST(FECHA AS DATE) >= @d1")
+            params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
+        if end:
+            # FullCalendar usa end-exclusivo; filtramos <= end - 1 día
+            wh.append("SAFE_CAST(FECHA AS DATE) <= @d2")
+            params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
+        if mine and asesor_mio:
+            wh.append("LOWER(ASESOR) = LOWER(@a)")
+            params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
+        elif asesor_filtro:
+            wh.append("LOWER(ASESOR) = LOWER(@a2)")
+            params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
+
+        where_sql = "WHERE " + " AND ".join(wh) if wh else ""
+
+        q = f"""
+          WITH base AS (
+            SELECT
+              ID, NOMBRE, NUMERO, CORREO, ASESOR,
+              SAFE_CAST(FECHA AS DATE) AS FECHA,
+              SAFE_CAST(HORA  AS TIME) AS HORA,
+              CALIFICACION, SEMAFORO, STATUS_COMPRA, ASISTIO, NOTAS
+            FROM `{AGENDA_TABLA}`
+            {where_sql}
+          ),
+          t AS (
+            SELECT
+              *,
+              TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+              TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 1 HOUR) AS end_ts
+            FROM base
+          )
+          SELECT * FROM t
+          ORDER BY FECHA, HORA
+        """
+        job = bigquery.QueryJobConfig(query_parameters=params)
+        rows = client.query(q, job_config=job).result()
+
+        out = []
+        for r in rows:
+            asesor = r["ASESOR"]
+            semaforo = (r["SEMAFORO"] or "").strip().lower()
+            # Colores por asesor + borde por semáforo
+            color = _color_for_asesor(asesor)
+            border = {"verde":"#16a34a","amarillo":"#f59e0b","rojo":"#ef4444"}.get(semaforo, "#64748b")
+
+            wa = ""
+            try:
+                e164 = to_whatsapp_e164(r["NUMERO"] or "")
+                if e164:
+                    msg = f"Hola {r['NOMBRE']}, tenemos tu diagnóstico agendado."
+                    wa = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+            except Exception:
+                pass
+
+            out.append({
+                "id": r["ID"],
+                "title": f"{str(r['HORA'])[:5]} – {r['NOMBRE']}",
+                "start": r["start_ts"].isoformat() if r["start_ts"] else None,
+                "end": r["end_ts"].isoformat() if r["end_ts"] else None,
+                "backgroundColor": color,
+                "borderColor": border,
+                "extendedProps": {
+                    "asesor": asesor,
+                    "correo": r["CORREO"],
+                    "numero": r["NUMERO"],
+                    "calificacion": r["CALIFICACION"],
+                    "semaforo": r["SEMAFORO"],
+                    "status_compra": r["STATUS_COMPRA"],
+                    "asistio": r["ASISTIO"],
+                    "notas": r["NOTAS"],
+                    "wa_url": wa
+                }
+            })
+        return jsonify(out), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
+
 
 # -------------------- Comunidad: Lista y Panel --------------------
 
@@ -2223,3 +2441,4 @@ def adquisicion_insights():
         app.logger.exception("Error en _adq_insights_data")
 
     return render_template("adquisicion_insights.html", gen=g or "", f_from=f or "", f_to=t or "", **data)
+

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Agenda de Diagnósticos{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+<style>
+  .fc .fc-toolbar-title { font-size: 1.1rem; }
+  .legend-dot { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; }
+</style>
+
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="m-0">Agenda de Diagnósticos</h5>
+    <div>
+      <a href="{{ url_for('postventa_agenda_nuevo_page') }}" class="btn btn-success btn-sm">
+        + Agendar diagnóstico
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-2 mb-2">
+    <div class="col-12 col-md-6">
+      <div class="input-group input-group-sm">
+        <label class="input-group-text">Asesor</label>
+        <select id="f-asesor" class="form-select">
+          <option value="">Todos</option>
+          {% if usuario and (usuario.nombre or usuario.correo) %}
+          <option value="__mine">Mis eventos</option>
+          {% endif %}
+          {% for a in asesores %}
+            <option value="{{ a }}">{{ a }}</option>
+          {% endfor %}
+        </select>
+        <button id="btn-aplicar" class="btn btn-outline-secondary">Aplicar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="calendar"></div>
+</div>
+
+<!-- Modal detalle -->
+<div class="modal fade" id="evtModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Detalle de diagnóstico</h6>
+        <button class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-0" id="evtData">
+          <!-- se llena por JS -->
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <a id="evtWA" href="#" target="_blank" class="btn btn-success btn-sm d-none">WhatsApp</a>
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+  // Preselecciona filtro según la URL (?mine=1 o ?asesor=Nombre)
+  (function presetFiltro() {
+    const qs = new URLSearchParams(location.search);
+    const mine = qs.get('mine');
+    const asesor = qs.get('asesor');
+    const sel = document.getElementById('f-asesor');
+    if (mine === '1') {
+      sel.value = '__mine';
+    } else if (asesor) {
+      sel.value = asesor;
+    }
+  })();
+</script>
+<script>
+  const calendarEl = document.getElementById('calendar');
+
+  function buildFeedUrl(info) {
+    const params = new URLSearchParams();
+    if (info && info.start && info.end) {
+      params.set('start', info.start.toISOString());
+      params.set('end', info.end.toISOString());
+    }
+    const sel = document.getElementById('f-asesor').value || '';
+    if (sel === '__mine') {
+      params.set('mine','1');
+    } else if (sel) {
+      params.set('asesor', sel);
+    }
+    return '/api/postventa/agenda/events?' + params.toString();
+  }
+
+  let currentFeedUrl = null;
+  const calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: 'timeGridWeek',
+    slotMinTime: '08:00:00',
+    slotMaxTime: '21:00:00',
+    locale: 'es',
+    firstDay: 1,
+    height: 'auto',
+    nowIndicator: true,
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,timeGridDay'
+    },
+    events: function(info, success, failure) {
+      const url = buildFeedUrl(info);
+      currentFeedUrl = url;
+      fetch(url).then(r => r.json()).then(data => success(data)).catch(failure);
+    },
+    eventClick: function(arg) {
+      const e = arg.event;
+      const x = e.extendedProps || {};
+      const $dl = document.getElementById('evtData');
+      $dl.innerHTML = `
+        <dt class="col-5">Cliente</dt><dd class="col-7">${e.title.split('–').slice(1).join('–').trim()}</dd>
+        <dt class="col-5">Fecha</dt><dd class="col-7">${new Date(e.start).toLocaleString('es-MX')}</dd>
+        <dt class="col-5">Asesor</dt><dd class="col-7">${x.asesor || ''}</dd>
+        <dt class="col-5">Correo</dt><dd class="col-7">${x.correo || ''}</dd>
+        <dt class="col-5">Teléfono</dt><dd class="col-7">${x.numero || ''}</dd>
+        <dt class="col-5">Calificación</dt><dd class="col-7">${x.calificacion ?? ''}</dd>
+        <dt class="col-5">Semáforo</dt><dd class="col-7">${x.semaforo || ''}</dd>
+        <dt class="col-5">Estatus</dt><dd class="col-7">${x.status_compra || ''}</dd>
+        <dt class="col-5">Asistió</dt><dd class="col-7">${x.asistio === true ? 'Sí' : (x.asistio === false ? 'No' : '')}</dd>
+        <dt class="col-5">Notas</dt><dd class="col-7">${x.notas || ''}</dd>
+      `;
+      const waBtn = document.getElementById('evtWA');
+      if (x.wa_url) {
+        waBtn.classList.remove('d-none');
+        waBtn.href = x.wa_url;
+      } else {
+        waBtn.classList.add('d-none');
+        waBtn.removeAttribute('href');
+      }
+      const modal = new bootstrap.Modal(document.getElementById('evtModal'));
+      modal.show();
+    }
+  });
+  calendar.render();
+
+  document.getElementById('btn-aplicar').addEventListener('click', () => {
+    calendar.refetchEvents();
+  });
+</script>
+{% endblock %}
