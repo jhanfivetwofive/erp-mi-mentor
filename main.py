@@ -2289,6 +2289,50 @@ def api_postventa_agenda_events():
     except Exception as e:
         traceback.print_exc()
         return jsonify([]), 200
+    
+@app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_update(event_id):
+    try:
+        data = request.get_json(force=True) or {}
+        # Campos permitidos
+        up = {}
+        if "fecha" in data:        up["fecha"] = data["fecha"]              # YYYY-MM-DD
+        if "hora" in data:         up["hora"] = data["hora"]                # HH:MM
+        if "asistio" in data:      up["asistio"] = bool(data["asistio"])
+        if "semaforo" in data:     up["semaforo"] = (data["semaforo"] or "").strip()
+        if "status_compra" in data:up["status_compra"] = (data["status_compra"] or "").strip()
+        if "notas" in data:        up["notas"] = data["notas"]
+
+        if not up:
+            return jsonify({"error": "Nada que actualizar"}), 400
+
+        sets, params = [], [bigquery.ScalarQueryParameter("id", "STRING", event_id)]
+        i = 0
+        for k, v in up.items():
+            i += 1
+            if   k == "fecha": t = "DATE"
+            elif k == "hora":  t = "TIME"
+            elif k == "asistio": t = "BOOL"
+            else: t = "STRING"
+            sets.append(f"{k} = @p{i}")
+            params.append(bigquery.ScalarQueryParameter(f"p{i}", t, v))
+
+        sets.append("updated_at = CURRENT_TIMESTAMP()")
+        set_sql = ", ".join(sets)
+
+        q = f"""
+          UPDATE `{AGENDA_TABLA}`
+          SET {set_sql}
+          WHERE CAST(event_id AS STRING) = @id OR CAST(ID AS STRING) = @id
+        """
+        job = bigquery.QueryJobConfig(query_parameters=params)
+        client.query(q, job_config=job).result()
+        return jsonify({"ok": True})
+    except Exception as e:
+        app.logger.exception("PATCH agenda failed")
+        return jsonify({"error": str(e)}), 500
+
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
