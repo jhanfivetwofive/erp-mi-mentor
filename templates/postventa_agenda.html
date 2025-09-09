@@ -22,9 +22,10 @@
   /* Asistido: borde y opacidad suave */
   .evt-asistio { border:2px solid #16a34a !important; opacity:.92; }
 
-  /* Leyenda */
+  /* Leyenda (semáforo arriba del calendario) */
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
   .legend-dot { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; }
-  .legend .item { margin-right:16px; font-size:.9rem; }
+  .legend .item { font-size:.9rem; background:#fff; border:1px solid #e9ecef; border-radius:10px; padding:6px 10px; }
 </style>
 
 <div class="container py-3">
@@ -53,12 +54,14 @@
         <button id="btn-aplicar" class="btn btn-outline-secondary">Aplicar</button>
       </div>
     </div>
-    <!-- Leyenda colores por asesor -->
-    <div class="col-12 col-md-6 text-md-end legend">
-      <span class="item"><span class="legend-dot" style="background:#0ea5e9"></span>Fernando</span>
-      <span class="item"><span class="legend-dot" style="background:#16a34a"></span>Elias</span>
-      <span class="item"><span class="legend-dot" style="background:#16a34a;border:2px solid #16a34a"></span>Asistido</span>
-    </div>
+  </div>
+
+  <!-- Leyenda de semáforo SUBIDA arriba del calendario -->
+  <div class="legend">
+    <span class="item"><span class="legend-dot" style="background:#16a34a"></span>Verde</span>
+    <span class="item"><span class="legend-dot" style="background:#f59e0b"></span>Amarillo</span>
+    <span class="item"><span class="legend-dot" style="background:#ef4444"></span>Rojo</span>
+    <span class="item"><span class="legend-dot" style="background:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.35)"></span>Entrevistado</span>
   </div>
 
   <div id="calendar"></div>
@@ -145,7 +148,6 @@
       hour:'2-digit', minute:'2-digit', hour12:false
     }).format(d);
   }
-
   function pad2(n){ return String(n).padStart(2,'0'); }
 
   const calendar = new FullCalendar.Calendar(calendarEl, {
@@ -184,8 +186,20 @@
       } catch (e) { failure(e); }
     },
 
+    /* Aplica clases por semáforo + asistido para colores/bordes */
+    eventClassNames: (arg) => {
+      const x = arg.event.extendedProps || {};
+      const s = (x.semaforo || '').toLowerCase();
+      const cls = [];
+      if (s.startsWith('verde')) cls.push('sem-verde');
+      else if (s.startsWith('amarillo')) cls.push('sem-amarillo');
+      else if (s.startsWith('rojo')) cls.push('sem-rojo');
+      if (x.asistio === true) cls.push('evt-asistio');
+      return cls;
+    },
+
     eventDidMount: (info) => {
-      // Inserta el “pill” del semáforo al inicio del texto
+      // Inserta el “pill” del semáforo al inicio del título
       const pill = document.createElement('span');
       pill.className = 'pill';
       const titleEl = info.el.querySelector('.fc-event-title');
@@ -201,7 +215,7 @@
       document.getElementById('evtNombre').textContent = nombre;
       document.getElementById('evtFecha').textContent = fmtFechaHora(e.start);
       document.getElementById('evtAsesor').textContent = x.asesor || '';
-      document.getElementById('evtCorreo').textContent = x.correo || '';   // <-- correo asegurado
+      document.getElementById('evtCorreo').textContent = x.correo || '';
       document.getElementById('evtTel').textContent = x.numero || '';
       document.getElementById('evtCalif').textContent = (x.calificacion ?? '') || '';
       document.getElementById('evtSem').textContent = x.semaforo || '';
@@ -223,7 +237,7 @@
       const d = info.event.start;
       const payload = {
         fecha: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
-        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}` // el backend añade :00 y zero-pad
+        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}:00` // segundos para TIME seguro
       };
       try {
         const res = await fetch(`/api/postventa/agenda/${encodeURIComponent(info.event.id)}`, {
