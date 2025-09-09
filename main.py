@@ -2164,24 +2164,17 @@ def api_postventa_agenda_create():
         if errors_bq:
             return jsonify({"error": f"BigQuery insert: {errors_bq}"}), 500
 
-        return jsonify({"message": "Diagnóstico agendado", "id": row["ID"]}), 200
+        return jsonify({"message": "Diagnóstico agendado", "id": event_id}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/postventa/agenda/events")
 def api_postventa_agenda_events():
-    """
-    FullCalendar llama con ?start=YYYY-MM-DD(THH:MM:SSZ)&end=...
-    Filtros:
-      - asesor (opcional)
-      - mine=1 (solo mis eventos, según usuario en sesión)
-    """
     try:
         if "user" not in session:
             return jsonify([]), 200
 
-        # Normaliza fechas (acepta ISO con Z)
         def _to_date(x):
             if not x: return None
             x = x.replace("Z", "")
@@ -2203,7 +2196,6 @@ def api_postventa_agenda_events():
             wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
         if end:
-            # end exclusivo como espera FullCalendar
             wh.append("SAFE_CAST(fecha AS DATE) < @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
         if mine and asesor_mio:
@@ -2217,7 +2209,7 @@ def api_postventa_agenda_events():
 
         q = f"""
         WITH base AS (
-        SELECT
+          SELECT
             CAST(event_id AS STRING) AS ID,
             nombre        AS NOMBRE,
             telefono      AS NUMERO,
@@ -2230,27 +2222,23 @@ def api_postventa_agenda_events():
             status_compra AS STATUS_COMPRA,
             asistio       AS ASISTIO,
             notas         AS NOTAS
-        FROM `{AGENDA_TABLA}`
-        {where_sql}
+          FROM `{AGENDA_TABLA}`
+          {where_sql}
         ),
         filtrado AS (
-        -- ¡clave! evita que DATETIME(FECHA, HORA) truene
-        SELECT *
-        FROM base
-        WHERE FECHA IS NOT NULL
-            AND HORA  IS NOT NULL
+          SELECT * FROM base
+          WHERE FECHA IS NOT NULL AND HORA IS NOT NULL
         ),
         t AS (
-        SELECT
+          SELECT
             *,
             TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
             TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 60 MINUTE) AS end_ts
-        FROM filtrado
+          FROM filtrado
         )
         SELECT * FROM t
         ORDER BY FECHA, HORA, ASESOR, NOMBRE
         """
-
 
         job = bigquery.QueryJobConfig(query_parameters=params)
         rows = client.query(q, job_config=job).result()
@@ -2260,9 +2248,9 @@ def api_postventa_agenda_events():
             classes = []
             sem = (r["SEMAFORO"] or "").strip().lower()
             if sem in ("verde","amarillo","rojo"):
-                classes.append(f"sem-{sem}")
+                classes.append(f"sem-{sem}")  # para colorear el “pill” en el front
             if r["ASISTIO"] is True:
-                classes.append("evt-asistio")
+                classes.append("evt-asistio") # borde verde en el front
 
             wa = ""
             try:
@@ -2275,11 +2263,11 @@ def api_postventa_agenda_events():
 
             out.append({
                 "id": r["ID"] or str(uuid.uuid4()),
-                "title": f"{str(r['HORA'])[:5]} – {r['NOMBRE']}",
+                # ✅ deja sólo el nombre; FullCalendar ya imprime la hora
+                "title": r["NOMBRE"],
                 "start": r["start_ts"].isoformat() if r["start_ts"] else None,
                 "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
-                "backgroundColor": color,
-                "borderColor": border,
+                # ❌ eliminamos backgroundColor/borderColor que estaban rompiendo
                 "classNames": classes,
                 "extendedProps": {
                     "asesor": r["ASESOR"],
@@ -2298,6 +2286,7 @@ def api_postventa_agenda_events():
     except Exception as e:
         traceback.print_exc()
         return jsonify([]), 200
+
     
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
 @role_required("postventa", "admin")
