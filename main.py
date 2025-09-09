@@ -559,11 +559,16 @@ _AGENDA_PALETTE = [
     "#2563eb","#16a34a","#f59e0b","#ef4444","#8b5cf6",
     "#0ea5e9","#10b981","#f97316","#dc2626","#84cc16","#14b8a6","#d946ef"
 ]
+
+# reemplaza _color_for_asesor por esto:
 def _color_for_asesor(name: str) -> str:
-    s = (name or "").strip()
-    if not s: return "#6b7280"
-    idx = sum(ord(c) for c in s) % len(_AGENDA_PALETTE)
-    return _AGENDA_PALETTE[idx]
+    n = (name or "").strip().lower()
+    if n.startswith("fernando"):
+        return "#0ea5e9"  # celeste
+    if n.startswith("elias"):
+        return "#16a34a"  # verde
+    # fallback
+    return "#6b7280"
 
 
 def _resolve_gid(any_id_or_label: str) -> dict | None:
@@ -2252,9 +2257,12 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
+            classes = []
             sem = (r["SEMAFORO"] or "").strip().lower()
-            color = _color_for_asesor(r["ASESOR"])
-            border = {"verde":"#16a34a","amarillo":"#f59e0b","rojo":"#ef4444"}.get(sem, "#64748b")
+            if sem in ("verde","amarillo","rojo"):
+                classes.append(f"sem-{sem}")
+            if r["ASISTIO"] is True:
+                classes.append("evt-asistio")
 
             wa = ""
             try:
@@ -2272,6 +2280,7 @@ def api_postventa_agenda_events():
                 "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
                 "backgroundColor": color,
                 "borderColor": border,
+                "classNames": classes,
                 "extendedProps": {
                     "asesor": r["ASESOR"],
                     "correo": r["CORREO"],
@@ -2294,18 +2303,21 @@ def api_postventa_agenda_events():
 @role_required("postventa", "admin")
 def api_postventa_agenda_update(event_id):
     try:
-        import re
         data = request.get_json(force=True) or {}
 
-        # Normalizaciones
+        def _norm_time(hhmm_or_hhmmss: str) -> str:
+            s = (hhmm_or_hhmmss or "").strip()
+            m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
+            if not m:
+                return "09:00:00"
+            h, mnt, sec = m.group(1), m.group(2), m.group(3) or "00"
+            return f"{int(h):02d}:{mnt}:{sec}"
+
         up = {}
-        if "fecha" in data and data["fecha"]:
-            up["fecha"] = (data["fecha"] or "").strip()            # YYYY-MM-DD
-        if "hora" in data and data["hora"]:
-            h = (data["hora"] or "").strip()                       # HH:MM o HH:MM:SS
-            if re.fullmatch(r"\d{1,2}:\d{2}", h):
-                h += ":00"
-            up["hora"] = h                                         # HH:MM:SS
+        if data.get("fecha"):
+            up["fecha"] = (data["fecha"] or "").strip()
+        if data.get("hora"):
+            up["hora"] = _norm_time(data["hora"])
         if "asistio" in data:
             up["asistio"] = bool(data["asistio"])
         if "semaforo" in data:
@@ -2318,7 +2330,6 @@ def api_postventa_agenda_update(event_id):
         if not up:
             return jsonify({"error": "Nada que actualizar"}), 400
 
-        # Construir SET usando CAST/SAFE_CAST cuando toca
         sets, params = [], [bigquery.ScalarQueryParameter("id", "STRING", event_id)]
         i = 0
         for k, v in up.items():
@@ -2337,11 +2348,9 @@ def api_postventa_agenda_update(event_id):
                 params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
 
         sets.append("updated_at = CURRENT_TIMESTAMP()")
-        set_sql = ", ".join(sets)
-
         q = f"""
           UPDATE `{AGENDA_TABLA}`
-          SET {set_sql}
+          SET {', '.join(sets)}
           WHERE CAST(event_id AS STRING) = @id OR CAST(ID AS STRING) = @id
         """
         job = bigquery.QueryJobConfig(query_parameters=params)
