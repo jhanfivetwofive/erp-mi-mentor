@@ -2162,7 +2162,7 @@ def api_postventa_agenda_events():
         if "user" not in session:
             return jsonify([]), 200
 
-        # Normaliza fechas (acepta ISO con 'Z')
+        # Normaliza fechas (acepta ISO con Z)
         def _to_date(x):
             if not x: return None
             x = x.replace("Z", "")
@@ -2174,50 +2174,49 @@ def api_postventa_agenda_events():
         start = _to_date(request.args.get("start"))
         end   = _to_date(request.args.get("end"))
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "sí", "si"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
 
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        wh, params = ["COALESCE(CANCELADO, FALSE) IS NOT TRUE"], []
+        wh, params = [], []
         if start:
-            wh.append("SAFE_CAST(COALESCE(FECHA, fecha) AS DATE) >= @d1")
+            wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
         if end:
-            # end exclusivo
-            wh.append("SAFE_CAST(COALESCE(FECHA, fecha) AS DATE) < @d2")
+            # end exclusivo como espera FullCalendar
+            wh.append("SAFE_CAST(fecha AS DATE) < @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
         if mine and asesor_mio:
-            wh.append("LOWER(COALESCE(ASESOR, asesor)) = LOWER(@a)")
+            wh.append("LOWER(asesor) = LOWER(@a)")
             params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
         elif asesor_filtro:
-            wh.append("LOWER(COALESCE(ASESOR, asesor)) = LOWER(@a2)")
+            wh.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
 
-        where_sql = "WHERE " + " AND ".join(wh)
+        where_sql = ("WHERE " + " AND ".join(wh)) if wh else ""
 
         q = f"""
         WITH base AS (
           SELECT
-            COALESCE(ID, event_id)                           AS ID,
-            COALESCE(NOMBRE, nombre)                         AS NOMBRE,
-            COALESCE(NUMERO, telefono)                       AS NUMERO,
-            COALESCE(CORREO, correo)                         AS CORREO,
-            COALESCE(ASESOR, asesor)                         AS ASESOR,
-            SAFE_CAST(COALESCE(FECHA, fecha) AS DATE)        AS FECHA,
-            SAFE_CAST(COALESCE(HORA,  hora)  AS TIME)        AS HORA,
-            COALESCE(CALIFICACION, calificacion)             AS CALIFICACION,
-            COALESCE(SEMAFORO,     semaforo)                 AS SEMAFORO,
-            COALESCE(STATUS_COMPRA,status_compra)            AS STATUS_COMPRA,
-            COALESCE(ASISTIO,      asistio)                  AS ASISTIO,
-            COALESCE(NOTAS,        notas)                    AS NOTAS
+            CAST(event_id AS STRING)                         AS ID,
+            nombre                                           AS NOMBRE,
+            telefono                                         AS NUMERO,
+            correo                                           AS CORREO,
+            asesor                                           AS ASESOR,
+            SAFE_CAST(fecha AS DATE)                         AS FECHA,
+            SAFE_CAST(hora  AS TIME)                         AS HORA,
+            calificacion                                     AS CALIFICACION,
+            semaforo                                         AS SEMAFORO,
+            status_compra                                    AS STATUS_COMPRA,
+            asistio                                          AS ASISTIO,
+            notas                                            AS NOTAS
           FROM `{AGENDA_TABLA}`
           {where_sql}
         ),
         t AS (
           SELECT
             *,
-            -- interpreta FECHA/HORA en zona MX y convierte a TIMESTAMP UTC
             TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
             TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 60 MINUTE) AS end_ts
           FROM base
@@ -2267,9 +2266,7 @@ def api_postventa_agenda_events():
 
     except Exception as e:
         traceback.print_exc()
-        # Devuelve lista vacía para que FullCalendar no truene
         return jsonify([]), 200
-
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
