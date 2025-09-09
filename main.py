@@ -2153,72 +2153,87 @@ def api_postventa_agenda_create():
 @app.route("/api/postventa/agenda/events")
 def api_postventa_agenda_events():
     """
-    FullCalendar llamará con ?start=YYYY-MM-DD&end=YYYY-MM-DD (UTC/ISO).
-    Filtros opcionales:
-      - asesor: nombre exacto del asesor
-      - mine=1  (muestra solo mis eventos, según usuario en sesión)
+    FullCalendar llama con ?start=YYYY-MM-DD(THH:MM:SSZ)&end=...
+    Filtros:
+      - asesor (opcional)
+      - mine=1 (solo mis eventos, según usuario en sesión)
     """
     try:
         if "user" not in session:
-            return jsonify([]), 200  # FC no se rompe, pero no revela datos
+            return jsonify([]), 200
 
-        start = (request.args.get("start") or "").split("T")[0]
-        end = (request.args.get("end") or "").split("T")[0]
+        # Normaliza fechas (acepta ISO con 'Z')
+        def _to_date(x):
+            if not x: return None
+            x = x.replace("Z", "")
+            try:
+                return datetime.fromisoformat(x).date()
+            except Exception:
+                return datetime.strptime(x[:10], "%Y-%m-%d").date()
+
+        start = _to_date(request.args.get("start"))
+        end   = _to_date(request.args.get("end"))
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip() in {"1","true","si","sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "sí", "si"}
 
-        # Si piden "mis" eventos, forzamos filtro por asesor = nombre/correo del usuario
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        wh = ["CANCELADO IS NOT TRUE"]
-        params = []
+        wh, params = ["COALESCE(CANCELADO, FALSE) IS NOT TRUE"], []
         if start:
-            wh.append("SAFE_CAST(FECHA AS DATE) >= @d1")
+            wh.append("SAFE_CAST(COALESCE(FECHA, fecha) AS DATE) >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
         if end:
-            # FullCalendar usa end-exclusivo; filtramos <= end - 1 día
-            wh.append("SAFE_CAST(FECHA AS DATE) <= @d2")
+            # end exclusivo
+            wh.append("SAFE_CAST(COALESCE(FECHA, fecha) AS DATE) < @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
         if mine and asesor_mio:
-            wh.append("LOWER(ASESOR) = LOWER(@a)")
+            wh.append("LOWER(COALESCE(ASESOR, asesor)) = LOWER(@a)")
             params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
         elif asesor_filtro:
-            wh.append("LOWER(ASESOR) = LOWER(@a2)")
+            wh.append("LOWER(COALESCE(ASESOR, asesor)) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
 
-        where_sql = "WHERE " + " AND ".join(wh) if wh else ""
+        where_sql = "WHERE " + " AND ".join(wh)
 
         q = f"""
-          WITH base AS (
-            SELECT
-              ID, NOMBRE, NUMERO, CORREO, ASESOR,
-              SAFE_CAST(FECHA AS DATE) AS FECHA,
-              SAFE_CAST(HORA  AS TIME) AS HORA,
-              CALIFICACION, SEMAFORO, STATUS_COMPRA, ASISTIO, NOTAS
-            FROM `{AGENDA_TABLA}`
-            {where_sql}
-          ),
-          t AS (
-            SELECT
-              *,
-              TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-              TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 1 HOUR) AS end_ts
-            FROM base
-          )
-          SELECT * FROM t
-          ORDER BY FECHA, HORA
+        WITH base AS (
+          SELECT
+            COALESCE(ID, event_id)                           AS ID,
+            COALESCE(NOMBRE, nombre)                         AS NOMBRE,
+            COALESCE(NUMERO, telefono)                       AS NUMERO,
+            COALESCE(CORREO, correo)                         AS CORREO,
+            COALESCE(ASESOR, asesor)                         AS ASESOR,
+            SAFE_CAST(COALESCE(FECHA, fecha) AS DATE)        AS FECHA,
+            SAFE_CAST(COALESCE(HORA,  hora)  AS TIME)        AS HORA,
+            COALESCE(CALIFICACION, calificacion)             AS CALIFICACION,
+            COALESCE(SEMAFORO,     semaforo)                 AS SEMAFORO,
+            COALESCE(STATUS_COMPRA,status_compra)            AS STATUS_COMPRA,
+            COALESCE(ASISTIO,      asistio)                  AS ASISTIO,
+            COALESCE(NOTAS,        notas)                    AS NOTAS
+          FROM `{AGENDA_TABLA}`
+          {where_sql}
+        ),
+        t AS (
+          SELECT
+            *,
+            -- interpreta FECHA/HORA en zona MX y convierte a TIMESTAMP UTC
+            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+            TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 60 MINUTE) AS end_ts
+          FROM base
+        )
+        SELECT * FROM t
+        ORDER BY FECHA, HORA, ASESOR, NOMBRE
         """
+
         job = bigquery.QueryJobConfig(query_parameters=params)
         rows = client.query(q, job_config=job).result()
 
         out = []
         for r in rows:
-            asesor = r["ASESOR"]
-            semaforo = (r["SEMAFORO"] or "").strip().lower()
-            # Colores por asesor + borde por semáforo
-            color = _color_for_asesor(asesor)
-            border = {"verde":"#16a34a","amarillo":"#f59e0b","rojo":"#ef4444"}.get(semaforo, "#64748b")
+            sem = (r["SEMAFORO"] or "").strip().lower()
+            color = _color_for_asesor(r["ASESOR"])
+            border = {"verde":"#16a34a","amarillo":"#f59e0b","rojo":"#ef4444"}.get(sem, "#64748b")
 
             wa = ""
             try:
@@ -2230,14 +2245,14 @@ def api_postventa_agenda_events():
                 pass
 
             out.append({
-                "id": r["ID"],
+                "id": r["ID"] or str(uuid.uuid4()),
                 "title": f"{str(r['HORA'])[:5]} – {r['NOMBRE']}",
                 "start": r["start_ts"].isoformat() if r["start_ts"] else None,
-                "end": r["end_ts"].isoformat() if r["end_ts"] else None,
+                "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
                 "backgroundColor": color,
                 "borderColor": border,
                 "extendedProps": {
-                    "asesor": asesor,
+                    "asesor": r["ASESOR"],
                     "correo": r["CORREO"],
                     "numero": r["NUMERO"],
                     "calificacion": r["CALIFICACION"],
@@ -2249,9 +2264,12 @@ def api_postventa_agenda_events():
                 }
             })
         return jsonify(out), 200
+
     except Exception as e:
         traceback.print_exc()
+        # Devuelve lista vacía para que FullCalendar no truene
         return jsonify([]), 200
+
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
