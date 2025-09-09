@@ -24,6 +24,7 @@ import urllib.parse
 import traceback
 from flask import Response
 from decimal import Decimal
+import hashlib
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
@@ -550,7 +551,7 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     }
 
 # === Postventa: Agenda de Diagnósticos ===
-AGENDA_TABLA = "fivetwofive-20.POSTVENTA.DB_AGENDA_DIAGNOSTICOS"
+AGENDA_TABLA = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS"
 MEX_TZ = "America/Mexico_City"
 
 # Paleta determinística por asesor
@@ -2123,24 +2124,37 @@ def api_postventa_agenda_create():
         if isinstance(asistio, str):
             asistio = asistio.strip().lower() in {"1","true","si","sí","yes","y"}
 
-        row = {
-            "ID": str(uuid.uuid4()),
-            "NOMBRE": nombre,
-            "NUMERO": numero,
-            "CORREO": correo,
-            "ASESOR": asesor,
-            "FECHA": fecha,   # DATE en BQ
-            "HORA": hora,     # TIME en BQ
-            "CALIFICACION": calificacion,
-            "SEMAFORO": semaforo,
-            "STATUS_COMPRA": status_compra,
-            "ASISTIO": asistio,
-            "NOTAS": notas,
-            "CREATED_AT": _now_iso_utc(),
-            "CREATED_BY": (get_user_from_session().get("correo") or ""),
-            "CANCELADO": False
-        }
+        # ...después de validar...
+        hora_norm = hora if len(hora)==8 else (hora + ":00" if len(hora)==5 else "09:00:00")
+        try:
+            dow_idx = datetime.strptime(fecha, "%Y-%m-%d").weekday()
+            dow_es = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"][dow_idx]
+        except Exception:
+            dow_es = None
 
+        event_id = str(uuid.uuid4())
+        natural_key = hashlib.md5(f"{correo}|{fecha}|{hora_norm}".encode()).hexdigest()
+        now_iso = _now_iso_utc()
+
+        row = {
+            "natural_key": natural_key,
+            "event_id": event_id,
+            "nombre": nombre,
+            "telefono": numero,
+            "correo": correo,
+            "asesor": asesor,
+            "fecha": fecha,
+            "fecha_dow": dow_es,
+            "hora": hora_norm,
+            "calificacion": calificacion,
+            "semaforo": semaforo,
+            "status_compra": status_compra,
+            "asistio": asistio,
+            "notas": notas,
+            "source": "app",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
         errors_bq = client.insert_rows_json(AGENDA_TABLA, [row])
         if errors_bq:
             return jsonify({"error": f"BigQuery insert: {errors_bq}"}), 500
@@ -2198,32 +2212,40 @@ def api_postventa_agenda_events():
 
         q = f"""
         WITH base AS (
-          SELECT
-            CAST(event_id AS STRING)                         AS ID,
-            nombre                                           AS NOMBRE,
-            telefono                                         AS NUMERO,
-            correo                                           AS CORREO,
-            asesor                                           AS ASESOR,
-            SAFE_CAST(fecha AS DATE)                         AS FECHA,
-            SAFE_CAST(hora  AS TIME)                         AS HORA,
-            calificacion                                     AS CALIFICACION,
-            semaforo                                         AS SEMAFORO,
-            status_compra                                    AS STATUS_COMPRA,
-            asistio                                          AS ASISTIO,
-            notas                                            AS NOTAS
-          FROM `{AGENDA_TABLA}`
-          {where_sql}
+        SELECT
+            CAST(event_id AS STRING) AS ID,
+            nombre        AS NOMBRE,
+            telefono      AS NUMERO,
+            correo        AS CORREO,
+            asesor        AS ASESOR,
+            SAFE_CAST(fecha AS DATE) AS FECHA,
+            SAFE_CAST(hora  AS TIME) AS HORA,
+            calificacion  AS CALIFICACION,
+            semaforo      AS SEMAFORO,
+            status_compra AS STATUS_COMPRA,
+            asistio       AS ASISTIO,
+            notas         AS NOTAS
+        FROM `{AGENDA_TABLA}`
+        {where_sql}
+        ),
+        filtrado AS (
+        -- ¡clave! evita que DATETIME(FECHA, HORA) truene
+        SELECT *
+        FROM base
+        WHERE FECHA IS NOT NULL
+            AND HORA  IS NOT NULL
         ),
         t AS (
-          SELECT
+        SELECT
             *,
             TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
             TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 60 MINUTE) AS end_ts
-          FROM base
+        FROM filtrado
         )
         SELECT * FROM t
         ORDER BY FECHA, HORA, ASESOR, NOMBRE
         """
+
 
         job = bigquery.QueryJobConfig(query_parameters=params)
         rows = client.query(q, job_config=job).result()
