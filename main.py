@@ -2169,14 +2169,22 @@ def api_postventa_agenda_create():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/postventa/agenda/events")
 def api_postventa_agenda_events():
+    """
+    FullCalendar llama con ?start=...&end=...
+    Filtros:
+      - asesor (opcional)
+      - mine=1 (solo mis eventos)
+    """
     try:
         if "user" not in session:
             return jsonify([]), 200
 
         def _to_date(x):
-            if not x: return None
+            if not x:
+                return None
             x = x.replace("Z", "")
             try:
                 return datetime.fromisoformat(x).date()
@@ -2226,7 +2234,8 @@ def api_postventa_agenda_events():
           {where_sql}
         ),
         filtrado AS (
-          SELECT * FROM base
+          SELECT *
+          FROM base
           WHERE FECHA IS NOT NULL AND HORA IS NOT NULL
         ),
         t AS (
@@ -2245,13 +2254,15 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
-            classes = []
-            sem = (r["SEMAFORO"] or "").strip().lower()
-            if sem in ("verde","amarillo","rojo"):
-                classes.append(f"sem-{sem}")  # para colorear el “pill” en el front
-            if r["ASISTIO"] is True:
-                classes.append("evt-asistio") # borde verde en el front
+            # Color por asesor (definido)
+            color = _color_for_asesor(r["ASESOR"] or "")
+            border = color
 
+            classes = []
+            if r["ASISTIO"] is True:
+                classes.append("evt-asistio")  # 👈 mantenemos solo esta clase
+
+            # URL de WhatsApp
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["NUMERO"] or "")
@@ -2263,18 +2274,19 @@ def api_postventa_agenda_events():
 
             out.append({
                 "id": r["ID"] or str(uuid.uuid4()),
-                # ✅ deja sólo el nombre; FullCalendar ya imprime la hora
+                # Deja que FullCalendar pinte la hora; el título será solo el nombre
                 "title": r["NOMBRE"],
                 "start": r["start_ts"].isoformat() if r["start_ts"] else None,
                 "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
-                # ❌ eliminamos backgroundColor/borderColor que estaban rompiendo
+                "backgroundColor": color,
+                "borderColor": border,
                 "classNames": classes,
                 "extendedProps": {
                     "asesor": r["ASESOR"],
                     "correo": r["CORREO"],
                     "numero": r["NUMERO"],
                     "calificacion": r["CALIFICACION"],
-                    "semaforo": r["SEMAFORO"],
+                    "semaforo": r["SEMAFORO"],       # no se usa en el front, lo dejamos por si acaso
                     "status_compra": r["STATUS_COMPRA"],
                     "asistio": r["ASISTIO"],
                     "notas": r["NOTAS"],
@@ -2337,17 +2349,20 @@ def api_postventa_agenda_update(event_id):
                 params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
 
         sets.append("updated_at = CURRENT_TIMESTAMP()")
+
         q = f"""
           UPDATE `{AGENDA_TABLA}`
           SET {', '.join(sets)}
-          WHERE CAST(event_id AS STRING) = @id OR CAST(ID AS STRING) = @id
-        """
+          WHERE CAST(event_id AS STRING) = @id
+        """  # 👈 quitar el OR CAST(ID AS STRING) = @id
+
         job = bigquery.QueryJobConfig(query_parameters=params)
         client.query(q, job_config=job).result()
         return jsonify({"ok": True})
     except Exception as e:
         app.logger.exception("PATCH agenda failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
