@@ -3,29 +3,29 @@
 
 {% block content %}
 <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+
 <style>
-  /* Encabezado con dos líneas: día (texto) y número */
+  /* Contenedor del calendario para evitar que nada se encime */
+  .calendar-wrap{background:#fff;border:1px solid #e9ecef;border-radius:12px;padding:12px;box-shadow:0 1px 6px rgba(0,0,0,.06)}
+  .legend{display:flex;flex-wrap:wrap;gap:.5rem 1rem}
+  .legend-dot{width:10px;height:10px;border-radius:999px;display:inline-block;margin-right:6px}
+  .legend .item{font-size:.9rem}
+
+  /* FullCalendar ajustes visuales */
+  .fc .fc-toolbar-title{font-size:1.15rem}
+  .fc .fc-button{border-radius:10px}
+  .fc .fc-timegrid-slot{height:2.25rem}
+  .fc .fc-timegrid-axis-cushion{font-size:.8rem;color:#6c757d}
+  .fc .fc-now-indicator-line{border-color:#0d6efd;border-width:2px}
+  .fc .fc-event{border-radius:10px;overflow:hidden}
+
+  /* Marcado de asistido (se conserva) */
+  .evt-asistio{border:2px solid #16a34a !important; opacity:.95}
+
+  /* Encabezado de día en dos líneas (español) */
   .fc-col-header-cell .fc-scrollgrid-sync-inner { padding: 8px 0 10px; }
   .fc-dow { font-weight:600; text-transform: capitalize; line-height:1; }
   .fc-daynum { font-size:.95rem; opacity:.85; margin-top:3px; line-height:1; }
-
-  /* Evento compacto con “pill” de semáforo y marcas de asistió */
-  .fc-event { border-radius:10px; overflow:hidden; }
-  .fc-event .pill {
-    display:inline-block; width:8px; height:8px; border-radius:999px; margin-right:6px;
-    vertical-align:middle;
-  }
-  .sem-verde  .pill{ background:#16a34a; }
-  .sem-amarillo .pill{ background:#f59e0b; }
-  .sem-rojo .pill{ background:#ef4444; }
-
-  /* Asistido: borde y opacidad suave */
-  .evt-asistio { border:2px solid #16a34a !important; opacity:.92; }
-
-  /* Leyenda (semáforo arriba del calendario) */
-  .legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
-  .legend-dot { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; }
-  .legend .item { font-size:.9rem; background:#fff; border:1px solid #e9ecef; border-radius:10px; padding:6px 10px; }
 </style>
 
 <div class="container py-3">
@@ -45,7 +45,7 @@
         <select id="f-asesor" class="form-select">
           <option value="">Todos</option>
           {% if usuario and (usuario.nombre or usuario.correo) %}
-          <option value="__mine">Mis eventos</option>
+            <option value="__mine">Mis eventos</option>
           {% endif %}
           {% for a in asesores %}
             <option value="{{ a }}">{{ a }}</option>
@@ -54,20 +54,21 @@
         <button id="btn-aplicar" class="btn btn-outline-secondary">Aplicar</button>
       </div>
     </div>
+    <div class="col-12 col-md-6 text-md-end">
+      <div class="legend">
+        <span class="item"><span class="legend-dot" style="background:#0ea5e9"></span>Fernando</span>
+        <span class="item"><span class="legend-dot" style="background:#16a34a"></span>Elias</span>
+        <span class="item"><span class="legend-dot" style="background:#16a34a;border:2px solid #16a34a"></span>Asistido</span>
+      </div>
+    </div>
   </div>
 
-  <!-- Leyenda de semáforo SUBIDA arriba del calendario -->
-  <div class="legend">
-    <span class="item"><span class="legend-dot" style="background:#16a34a"></span>Verde</span>
-    <span class="item"><span class="legend-dot" style="background:#f59e0b"></span>Amarillo</span>
-    <span class="item"><span class="legend-dot" style="background:#ef4444"></span>Rojo</span>
-    <span class="item"><span class="legend-dot" style="background:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.35)"></span>Entrevistado</span>
+  <div class="calendar-wrap">
+    <div id="calendar"></div>
   </div>
-
-  <div id="calendar"></div>
 </div>
 
-<!-- Modal detalle tipo “card” -->
+<!-- Modal detalle -->
 <div class="modal fade" id="evtModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-0 shadow">
@@ -93,8 +94,8 @@
               <div class="col-12 col-md-6"><strong>Correo:</strong> <span id="evtCorreo"></span></div>
               <div class="col-12 col-md-6"><strong>Teléfono:</strong> <span id="evtTel"></span></div>
               <div class="col-12 col-md-6"><strong>Calificación:</strong> <span id="evtCalif"></span></div>
-              <div class="col-12 col-md-6"><strong>Semáforo:</strong> <span id="evtSem"></span></div>
               <div class="col-12 col-md-6"><strong>Estatus:</strong> <span id="evtStatus"></span></div>
+              <!-- Semáforo eliminado deliberadamente -->
             </div>
             <div class="mt-3">
               <strong>Notas:</strong>
@@ -118,23 +119,21 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales-all.global.min.js"></script>
 <script>
-  // Preseleccionar filtro desde la URL
-  (function () {
+  // Filtro desde la URL
+  (function(){
     const qs = new URLSearchParams(location.search);
-    const mine = qs.get('mine');
-    const asesor = qs.get('asesor');
     const sel = document.getElementById('f-asesor');
-    if (mine === '1') sel.value = '__mine';
-    else if (asesor) sel.value = asesor;
+    if (qs.get('mine')==='1') sel.value='__mine';
+    else if (qs.get('asesor')) sel.value = qs.get('asesor');
   })();
 
   const calendarEl = document.getElementById('calendar');
 
-  function buildFeedUrl(info) {
+  function buildFeedUrl(info){
     const p = new URLSearchParams();
-    if (info?.start && info?.end) {
+    if (info?.start && info?.end){
       p.set('start', info.start.toISOString());
-      p.set('end', info.end.toISOString());
+      p.set('end',   info.end.toISOString());
     }
     const sel = document.getElementById('f-asesor').value || '';
     if (sel === '__mine') p.set('mine','1');
@@ -142,16 +141,21 @@
     return '/api/postventa/agenda/events?' + p.toString();
   }
 
-  function fmtFechaHora(d){
-    return new Intl.DateTimeFormat('es-MX',{
-      weekday:'long', year:'numeric', month:'long', day:'numeric',
-      hour:'2-digit', minute:'2-digit', hour12:false
-    }).format(d);
-  }
-  function pad2(n){ return String(n).padStart(2,'0'); }
+  const fmtFechaHora = (d)=> new Intl.DateTimeFormat('es-MX',{
+    weekday:'long', year:'numeric', month:'long', day:'numeric',
+    hour:'2-digit', minute:'2-digit', hour12:false
+  }).format(d);
+
+  const pad2 = n => String(n).padStart(2,'0');
 
   const calendar = new FullCalendar.Calendar(calendarEl, {
+    // === Español forzado ===
     locale: 'es',
+    buttonText: { today:'Hoy', month:'Mes', week:'Semana', day:'Día', list:'Agenda' },
+    noEventsText: 'No hay eventos para mostrar',
+    allDayText: 'Todo el día',
+    moreLinkText: 'más',
+
     firstDay: 1,
     height: 'auto',
     nowIndicator: true,
@@ -159,9 +163,9 @@
     slotMinTime: '08:00:00',
     slotMaxTime: '21:00:00',
     dayMaxEvents: true,
-    editable: true,                 // permite drag & drop
-    eventDurationEditable: false,   // solo mover inicio
-    eventStartEditable: true,
+    editable: true,
+    eventDurationEditable: false,
+    eventTimeFormat: { hour:'2-digit', minute:'2-digit', hour12:false },
 
     headerToolbar: {
       left: 'prev,next today',
@@ -169,7 +173,7 @@
       right: 'dayGridMonth,timeGridWeek,timeGridDay'
     },
 
-    // Encabezado de día: "lunes" y abajo el número
+    // Encabezado de día (dos líneas en español)
     dayHeaderContent: (arg) => {
       const dow = arg.date.toLocaleDateString('es-MX', { weekday:'long' });
       const num = arg.date.getDate();
@@ -179,51 +183,27 @@
     slotLabelFormat: { hour:'2-digit', minute:'2-digit', hour12:false },
 
     events: async (info, success, failure) => {
-      try {
-        const url = buildFeedUrl(info);
-        const r = await fetch(url);
-        success(await r.json());
-      } catch (e) { failure(e); }
+      try { const r = await fetch(buildFeedUrl(info)); success(await r.json()); }
+      catch(e){ failure(e); }
     },
 
-    /* Aplica clases por semáforo + asistido para colores/bordes */
-    eventClassNames: (arg) => {
-      const x = arg.event.extendedProps || {};
-      const s = (x.semaforo || '').toLowerCase();
-      const cls = [];
-      if (s.startsWith('verde')) cls.push('sem-verde');
-      else if (s.startsWith('amarillo')) cls.push('sem-amarillo');
-      else if (s.startsWith('rojo')) cls.push('sem-rojo');
-      if (x.asistio === true) cls.push('evt-asistio');
-      return cls;
-    },
-
-    eventDidMount: (info) => {
-      // Inserta el “pill” del semáforo al inicio del título
-      const pill = document.createElement('span');
-      pill.className = 'pill';
-      const titleEl = info.el.querySelector('.fc-event-title');
-      if (titleEl) titleEl.prepend(pill);
-    },
+    // ⚠️ Semáforos visuales removidos: no eventDidMount ni pills
 
     eventClick: (arg) => {
       const e = arg.event, x = e.extendedProps || {};
-      // nombre = parte después del guión en title
-      const parts = (e.title || '').split('–');
-      const nombre = parts.length > 1 ? parts.slice(1).join('–').trim() : (e.title || '');
+      const nombre = (e.title || '').trim();
 
-      document.getElementById('evtNombre').textContent = nombre;
-      document.getElementById('evtFecha').textContent = fmtFechaHora(e.start);
+      document.getElementById('evtNombre').textContent = nombre || '—';
+      document.getElementById('evtFecha').textContent = e.start ? fmtFechaHora(e.start) : '—';
       document.getElementById('evtAsesor').textContent = x.asesor || '';
       document.getElementById('evtCorreo').textContent = x.correo || '';
       document.getElementById('evtTel').textContent = x.numero || '';
       document.getElementById('evtCalif').textContent = (x.calificacion ?? '') || '';
-      document.getElementById('evtSem').textContent = x.semaforo || '';
       document.getElementById('evtStatus').textContent = x.status_compra || '';
       document.getElementById('evtNotas').textContent = x.notas || '';
 
       const badge = document.getElementById('evtBadgeAsistio');
-      if (x.asistio === true) badge.classList.remove('d-none'); else badge.classList.add('d-none');
+      (x.asistio === true) ? badge.classList.remove('d-none') : badge.classList.add('d-none');
 
       const waBtn = document.getElementById('evtWA');
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
@@ -232,32 +212,26 @@
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
 
-    // Reagendar (drag & drop) -> PATCH
+    // Reagendar por drag & drop
     eventDrop: async (info) => {
       const d = info.event.start;
-      const payload = {
-        fecha: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
-        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}:00` // segundos para TIME seguro
-      };
+      const payload = { fecha: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
+                        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}` };
       try {
         const res = await fetch(`/api/postventa/agenda/${encodeURIComponent(info.event.id)}`, {
-          method:'PATCH',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
+          method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
         });
         const j = await res.json().catch(()=>({}));
         if (!res.ok || j.error) throw new Error(j.error || 'Error');
       } catch (e) {
-        info.revert();
-        alert('No se pudo reagendar: ' + e.message);
+        info.revert(); alert('No se pudo reagendar: ' + e.message);
       }
     }
   });
 
   calendar.render();
 
-  document.getElementById('btn-aplicar').addEventListener('click', () => {
-    calendar.refetchEvents();
-  });
+  document.getElementById('btn-aplicar').addEventListener('click', () => calendar.refetchEvents());
+  document.getElementById('f-asesor').addEventListener('change', () => calendar.refetchEvents());
 </script>
 {% endblock %}
