@@ -3,29 +3,79 @@
 
 {% block content %}
 <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+
 <style>
-  .fc .fc-toolbar-title { font-size: 1.1rem; }
-  .legend-dot { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; }
+  :root{
+    --sem-verde:#16a34a;
+    --sem-amarillo:#f59e0b;
+    --sem-rojo:#ef4444;
+    --sem-neutro:#64748b;
+  }
+  .calendar-wrap{
+    background:#fff;
+    border:1px solid #e9ecef;
+    border-radius:14px;
+    padding:16px;
+    box-shadow:0 1px 6px rgba(0,0,0,.06);
+  }
+  .fc .fc-toolbar-title{ font-size:1.15rem; }
+  .fc .fc-button{ border-radius:10px; }
+  .fc .fc-timegrid-slot{ height: 2.25rem; }
+  .fc .fc-timegrid-axis-cushion{ font-size:.8rem; color:#6c757d; }
+  .fc .fc-now-indicator-line{ border-color:#0d6efd; border-width:2px; }
+  .fc .fc-event{
+    border-radius:12px;
+    border:1px solid rgba(0,0,0,.08);
+    padding:2px 4px;
+    box-shadow:0 1px 2px rgba(0,0,0,.04);
+    overflow:hidden;
+  }
+  .evt-chip{
+    display:flex; flex-direction:column; gap:2px;
+    font-size:.8rem; line-height:1.1;
+  }
+  .evt-top{ display:flex; align-items:center; gap:6px; font-weight:600; }
+  .evt-dot{ width:8px; height:8px; border-radius:999px; border:2px solid #fff; box-shadow:0 0 0 2px rgba(0,0,0,.1); }
+  .evt-sub{ opacity:.9; font-size:.72rem; }
+  .legend{ display:flex; flex-wrap:wrap; gap:10px; }
+  .legend .item{ display:flex; align-items:center; gap:8px; font-size:.85rem; background:#fff; padding:6px 10px; border:1px solid #eee; border-radius:10px; }
+  .legend .swatch{ width:14px; height:14px; border-radius:4px; border:1px solid rgba(0,0,0,.1); }
+  .legend .dot{ width:10px; height:10px; border-radius:999px; }
+
+  /* Modal “tarjeta” */
+  .card-modal .modal-content{ border-radius:16px; overflow:hidden; }
+  .card-modal .modal-header{
+    background:linear-gradient(135deg,#f8fafc,#eef6ff);
+    border-bottom:1px solid #eef2f7;
+  }
+  .badge-semaforo{ font-weight:600; letter-spacing:.2px; }
+  .badge-verde{ background:rgba(22,163,74,.12); color:var(--sem-verde); }
+  .badge-amarillo{ background:rgba(245,158,11,.12); color:var(--sem-amarillo); }
+  .badge-rojo{ background:rgba(239,68,68,.12); color:var(--sem-rojo); }
+  .copy-btn{ border:1px dashed #dee2e6; }
 </style>
 
 <div class="container py-3">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="m-0">Agenda de Diagnósticos</h5>
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
     <div>
+      <h5 class="m-0">Agenda de Diagnósticos</h5>
+      <div class="small text-muted">Semana / Mes · arrastra para navegar · clic para detalle</div>
+    </div>
+    <div class="d-flex gap-2">
       <a href="{{ url_for('postventa_agenda_nuevo_page') }}" class="btn btn-success btn-sm">
-        + Agendar diagnóstico
+        <i class="bi bi-plus-lg me-1"></i> Agendar diagnóstico
       </a>
     </div>
   </div>
 
-  <div class="row g-2 mb-2">
-    <div class="col-12 col-md-6">
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-md-7">
       <div class="input-group input-group-sm">
         <label class="input-group-text">Asesor</label>
         <select id="f-asesor" class="form-select">
           <option value="">Todos</option>
           {% if usuario and (usuario.nombre or usuario.correo) %}
-          <option value="__mine">Mis eventos</option>
+            <option value="__mine">Mis eventos</option>
           {% endif %}
           {% for a in asesores %}
             <option value="{{ a }}">{{ a }}</option>
@@ -34,26 +84,106 @@
         <button id="btn-aplicar" class="btn btn-outline-secondary">Aplicar</button>
       </div>
     </div>
+    <div class="col-12 col-md-5">
+      <div class="legend">
+        <div class="item">
+          <span class="dot" style="background:var(--sem-verde)"></span> Verde
+        </div>
+        <div class="item">
+          <span class="dot" style="background:var(--sem-amarillo)"></span> Amarillo
+        </div>
+        <div class="item">
+          <span class="dot" style="background:var(--sem-rojo)"></span> Rojo
+        </div>
+        <div class="item">
+          <span class="swatch" id="lg-elias"></span> <span>Elias</span>
+        </div>
+        <div class="item">
+          <span class="swatch" id="lg-fernando"></span> <span>Fernando</span>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div id="calendar"></div>
+  <div class="calendar-wrap">
+    <div id="calendar"></div>
+  </div>
 </div>
 
-<!-- Modal detalle -->
-<div class="modal fade" id="evtModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+<!-- Modal Detalle -->
+<div class="modal fade card-modal" id="evtModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title">Detalle de diagnóstico</h6>
+      <div class="modal-header align-items-start">
+        <div>
+          <h6 class="modal-title mb-1" id="evtTitle">Detalle de diagnóstico</h6>
+          <div class="small text-muted" id="evtSub"></div>
+        </div>
         <button class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <dl class="row mb-0" id="evtData">
-          <!-- se llena por JS -->
-        </dl>
+        <div class="row g-3">
+          <div class="col-12 col-lg-8">
+            <div class="border rounded-3 p-3">
+              <div class="row gy-2">
+                <div class="col-6">
+                  <div class="text-muted small">Cliente</div>
+                  <div class="fw-semibold" id="m-nombre">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted small">Asesor</div>
+                  <div id="m-asesor">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted small">Fecha y hora</div>
+                  <div id="m-fecha">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted small">Semáforo / Estatus</div>
+                  <div id="m-semaforo">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted small">Calificación</div>
+                  <div id="m-calificacion">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted small">Asistió</div>
+                  <div id="m-asistio">—</div>
+                </div>
+                <div class="col-12">
+                  <div class="text-muted small">Notas</div>
+                  <div id="m-notas" class="border rounded p-2 bg-light-subtle">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="border rounded-3 p-3 h-100 d-flex flex-column gap-2">
+              <div class="text-muted small">Contacto</div>
+              <div>
+                <div class="small text-muted">Correo</div>
+                <div class="d-flex align-items-center gap-2">
+                  <a id="m-correo" href="#" class="link-primary small">—</a>
+                  <button class="btn btn-light btn-sm copy-btn" data-copy="correo"><i class="bi bi-clipboard"></i></button>
+                </div>
+              </div>
+              <div>
+                <div class="small text-muted">Teléfono</div>
+                <div class="d-flex align-items-center gap-2">
+                  <span id="m-tel" class="small">—</span>
+                  <button class="btn btn-light btn-sm copy-btn" data-copy="tel"><i class="bi bi-clipboard"></i></button>
+                </div>
+              </div>
+              <div class="mt-2 d-grid gap-2">
+                <a id="btn-wa" class="btn btn-success btn-sm" target="_blank"><i class="bi bi-whatsapp me-1"></i> WhatsApp</a>
+                <a id="btn-mail" class="btn btn-outline-primary btn-sm" target="_blank"><i class="bi bi-envelope me-1"></i> Enviar correo</a>
+                <a id="btn-panel" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="bi bi-person-vcard me-1"></i> Panel del alumno</a>
+              </div>
+            </div>
+          </div>
+        </div> <!-- /row -->
       </div>
       <div class="modal-footer">
-        <a id="evtWA" href="#" target="_blank" class="btn btn-success btn-sm d-none">WhatsApp</a>
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
       </div>
     </div>
@@ -64,21 +194,16 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script>
-  // Preselecciona filtro según la URL (?mine=1 o ?asesor=Nombre)
+  // Preselección desde la URL (?mine=1 / ?asesor=Nombre)
   (function presetFiltro() {
     const qs = new URLSearchParams(location.search);
-    const mine = qs.get('mine');
-    const asesor = qs.get('asesor');
     const sel = document.getElementById('f-asesor');
-    if (mine === '1') {
-      sel.value = '__mine';
-    } else if (asesor) {
-      sel.value = asesor;
-    }
+    if (qs.get('mine') === '1') sel.value = '__mine';
+    if (qs.get('asesor')) sel.value = qs.get('asesor');
   })();
-</script>
-<script>
+
   const calendarEl = document.getElementById('calendar');
+  let asesorColors = {}; // { 'Elias': '#cfe8ff', ... } mapeado desde los eventos
 
   function buildFeedUrl(info) {
     const params = new URLSearchParams();
@@ -95,7 +220,22 @@
     return '/api/postventa/agenda/events?' + params.toString();
   }
 
-  let currentFeedUrl = null;
+  function semColor(semaforo){
+    const s = (semaforo||'').toLowerCase();
+    if (s.startsWith('verde'))   return 'var(--sem-verde)';
+    if (s.startsWith('amarillo'))return 'var(--sem-amarillo)';
+    if (s.startsWith('rojo'))    return 'var(--sem-rojo)';
+    return 'var(--sem-neutro)';
+  }
+  function badgeSem(semaforo){
+    const s = (semaforo||'').toLowerCase();
+    if (s.startsWith('verde'))   return '<span class="badge badge-semaforo badge-verde">Verde</span>';
+    if (s.startsWith('amarillo'))return '<span class="badge badge-semaforo badge-amarillo">Amarillo</span>';
+    if (s.startsWith('rojo'))    return '<span class="badge badge-semaforo badge-rojo">Rojo</span>';
+    return '<span class="badge text-bg-secondary">—</span>';
+  }
+
+  // FullCalendar
   const calendar = new FullCalendar.Calendar(calendarEl, {
     initialView: 'timeGridWeek',
     slotMinTime: '08:00:00',
@@ -103,48 +243,128 @@
     locale: 'es',
     firstDay: 1,
     height: 'auto',
+    expandRows: true,
     nowIndicator: true,
+    stickyHeaderDates: true,
+    eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
     headerToolbar: {
       left: 'prev,next today',
       center: 'title',
       right: 'dayGridMonth,timeGridWeek,timeGridDay'
     },
+    loading: function(isLoading){
+      calendarEl.style.opacity = isLoading ? .6 : 1;
+    },
     events: function(info, success, failure) {
       const url = buildFeedUrl(info);
-      currentFeedUrl = url;
-      fetch(url).then(r => r.json()).then(data => success(data)).catch(failure);
+      fetch(url).then(r => r.json()).then(data => {
+        // Construir leyenda por asesor desde los eventos
+        asesorColors = {};
+        data.forEach(ev => {
+          if (ev.extendedProps && ev.extendedProps.asesor && ev.backgroundColor) {
+            asesorColors[ev.extendedProps.asesor.trim()] = ev.backgroundColor;
+          }
+        });
+        // Pintar swatches si existen
+        const elias = document.getElementById('lg-elias');
+        const fern = document.getElementById('lg-fernando');
+        if (elias) elias.style.background = asesorColors['Elias'] || '#e9ecef';
+        if (fern)  fern.style.background  = asesorColors['Fernando'] || '#e9ecef';
+
+        success(data);
+      }).catch(failure);
+    },
+    eventContent: function(arg){
+      const x = arg.event.extendedProps || {};
+      const dot = document.createElement('div');
+      dot.className = 'evt-dot';
+      dot.style.background = semColor(x.semaforo);
+      const top = document.createElement('div');
+      top.className = 'evt-top';
+      top.appendChild(dot);
+      const time = document.createElement('span');
+      time.textContent = arg.timeText || '';
+      top.appendChild(time);
+      const name = document.createElement('span');
+      name.textContent = ' · ' + (arg.event.title?.split('–').slice(1).join('–').trim() || '');
+      top.appendChild(name);
+
+      const sub = document.createElement('div');
+      sub.className = 'evt-sub';
+      sub.textContent = (x.asesor ? x.asesor + ' · ' : '') + (x.status_compra || '');
+
+      const wrap = document.createElement('div');
+      wrap.className = 'evt-chip';
+      wrap.appendChild(top);
+      wrap.appendChild(sub);
+      return { domNodes:[wrap] };
+    },
+    eventDidMount: function(info){
+      // Tooltip (Bootstrap)
+      const x = info.event.extendedProps || {};
+      const title = `
+        <div class="mb-1"><strong>${info.event.title?.split('–').slice(1).join('–').trim() || 'Cliente'}</strong></div>
+        <div class="small">${new Date(info.event.start).toLocaleString('es-MX')}</div>
+        <div class="small">Asesor: ${x.asesor || ''}</div>
+        <div class="small">Semáforo: ${x.semaforo || '—'}</div>
+        <div class="small">Estatus: ${x.status_compra || '—'}</div>
+      `;
+      const tt = new bootstrap.Tooltip(info.el, { title, html: true, placement:'top', container:'body' });
+      info.el.addEventListener('hidden.bs.modal', ()=> tt.dispose());
     },
     eventClick: function(arg) {
-      const e = arg.event;
-      const x = e.extendedProps || {};
-      const $dl = document.getElementById('evtData');
-      $dl.innerHTML = `
-        <dt class="col-5">Cliente</dt><dd class="col-7">${e.title.split('–').slice(1).join('–').trim()}</dd>
-        <dt class="col-5">Fecha</dt><dd class="col-7">${new Date(e.start).toLocaleString('es-MX')}</dd>
-        <dt class="col-5">Asesor</dt><dd class="col-7">${x.asesor || ''}</dd>
-        <dt class="col-5">Correo</dt><dd class="col-7">${x.correo || ''}</dd>
-        <dt class="col-5">Teléfono</dt><dd class="col-7">${x.numero || ''}</dd>
-        <dt class="col-5">Calificación</dt><dd class="col-7">${x.calificacion ?? ''}</dd>
-        <dt class="col-5">Semáforo</dt><dd class="col-7">${x.semaforo || ''}</dd>
-        <dt class="col-5">Estatus</dt><dd class="col-7">${x.status_compra || ''}</dd>
-        <dt class="col-5">Asistió</dt><dd class="col-7">${x.asistio === true ? 'Sí' : (x.asistio === false ? 'No' : '')}</dd>
-        <dt class="col-5">Notas</dt><dd class="col-7">${x.notas || ''}</dd>
-      `;
-      const waBtn = document.getElementById('evtWA');
-      if (x.wa_url) {
-        waBtn.classList.remove('d-none');
-        waBtn.href = x.wa_url;
-      } else {
-        waBtn.classList.add('d-none');
-        waBtn.removeAttribute('href');
-      }
-      const modal = new bootstrap.Modal(document.getElementById('evtModal'));
-      modal.show();
+      const e = arg.event, x = e.extendedProps || {};
+      // Encabezado
+      const nombre = (e.title?.split('–').slice(1).join('–').trim()) || '—';
+      document.getElementById('evtTitle').textContent = nombre;
+      document.getElementById('evtSub').innerHTML =
+        `${badgeSem(x.semaforo)} <span class="ms-2">${x.status_compra || ''}</span>`;
+
+      // Campos
+      document.getElementById('m-nombre').textContent = nombre;
+      document.getElementById('m-asesor').textContent = x.asesor || '—';
+      document.getElementById('m-fecha').textContent = e.start ? new Date(e.start).toLocaleString('es-MX') : '—';
+      document.getElementById('m-semaforo').innerHTML = `${badgeSem(x.semaforo)}`;
+      document.getElementById('m-calificacion').textContent = (x.calificacion ?? '—');
+      document.getElementById('m-asistio').textContent = (x.asistio === true ? 'Sí' : (x.asistio === false ? 'No' : '—'));
+      document.getElementById('m-notas').textContent = x.notas || '—';
+
+      // Acciones
+      const correo = x.correo || '';
+      const tel = x.numero || '';
+      const wa = x.wa_url || '';
+      const mailHref = correo ? `mailto:${encodeURIComponent(correo)}?subject=Seguimiento%20diagnóstico` : '#';
+      document.getElementById('m-correo').textContent = correo || '—';
+      document.getElementById('m-correo').href = mailHref;
+      document.getElementById('m-tel').textContent = tel || '—';
+      document.getElementById('btn-wa').href = wa || '#';
+      document.getElementById('btn-wa').classList.toggle('disabled', !wa);
+      document.getElementById('btn-mail').href = mailHref;
+      const panelHref = correo ? ('/alumno/' + encodeURIComponent(correo)) : '#';
+      document.getElementById('btn-panel').href = panelHref;
+      document.getElementById('btn-panel').classList.toggle('disabled', !correo);
+
+      // Copiar
+      document.querySelectorAll('.copy-btn').forEach(btn=>{
+        btn.onclick = async () => {
+          const kind = btn.getAttribute('data-copy');
+          const val = kind === 'correo' ? correo : tel;
+          if (!val) return;
+          try { await navigator.clipboard.writeText(val); btn.innerHTML = '<i class="bi bi-check2"></i>'; setTimeout(()=>btn.innerHTML='<i class="bi bi-clipboard"></i>', 1200); } catch(_){}
+        };
+      });
+
+      new bootstrap.Modal(document.getElementById('evtModal')).show();
     }
   });
   calendar.render();
 
+  // Filtros
   document.getElementById('btn-aplicar').addEventListener('click', () => {
+    calendar.refetchEvents();
+  });
+  document.getElementById('f-asesor').addEventListener('change', () => {
+    // auto-aplicar al cambiar selección
     calendar.refetchEvents();
   });
 </script>
