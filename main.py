@@ -2294,29 +2294,47 @@ def api_postventa_agenda_events():
 @role_required("postventa", "admin")
 def api_postventa_agenda_update(event_id):
     try:
+        import re
         data = request.get_json(force=True) or {}
-        # Campos permitidos
+
+        # Normalizaciones
         up = {}
-        if "fecha" in data:        up["fecha"] = data["fecha"]              # YYYY-MM-DD
-        if "hora" in data:         up["hora"] = data["hora"]                # HH:MM
-        if "asistio" in data:      up["asistio"] = bool(data["asistio"])
-        if "semaforo" in data:     up["semaforo"] = (data["semaforo"] or "").strip()
-        if "status_compra" in data:up["status_compra"] = (data["status_compra"] or "").strip()
-        if "notas" in data:        up["notas"] = data["notas"]
+        if "fecha" in data and data["fecha"]:
+            up["fecha"] = (data["fecha"] or "").strip()            # YYYY-MM-DD
+        if "hora" in data and data["hora"]:
+            h = (data["hora"] or "").strip()                       # HH:MM o HH:MM:SS
+            if re.fullmatch(r"\d{1,2}:\d{2}", h):
+                h += ":00"
+            up["hora"] = h                                         # HH:MM:SS
+        if "asistio" in data:
+            up["asistio"] = bool(data["asistio"])
+        if "semaforo" in data:
+            up["semaforo"] = (data["semaforo"] or "").strip()
+        if "status_compra" in data:
+            up["status_compra"] = (data["status_compra"] or "").strip()
+        if "notas" in data:
+            up["notas"] = data["notas"]
 
         if not up:
             return jsonify({"error": "Nada que actualizar"}), 400
 
+        # Construir SET usando CAST/SAFE_CAST cuando toca
         sets, params = [], [bigquery.ScalarQueryParameter("id", "STRING", event_id)]
         i = 0
         for k, v in up.items():
             i += 1
-            if   k == "fecha": t = "DATE"
-            elif k == "hora":  t = "TIME"
-            elif k == "asistio": t = "BOOL"
-            else: t = "STRING"
-            sets.append(f"{k} = @p{i}")
-            params.append(bigquery.ScalarQueryParameter(f"p{i}", t, v))
+            if k == "fecha":
+                sets.append(f"{k} = SAFE_CAST(@p{i} AS DATE)")
+                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
+            elif k == "hora":
+                sets.append(f"{k} = SAFE_CAST(@p{i} AS TIME)")
+                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
+            elif k == "asistio":
+                sets.append(f"{k} = @p{i}")
+                params.append(bigquery.ScalarQueryParameter(f"p{i}", "BOOL", v))
+            else:
+                sets.append(f"{k} = @p{i}")
+                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
 
         sets.append("updated_at = CURRENT_TIMESTAMP()")
         set_sql = ", ".join(sets)
@@ -2332,7 +2350,6 @@ def api_postventa_agenda_update(event_id):
     except Exception as e:
         app.logger.exception("PATCH agenda failed")
         return jsonify({"error": str(e)}), 500
-
 
 
 # -------------------- Comunidad: Lista y Panel --------------------

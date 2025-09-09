@@ -179,6 +179,8 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales-all.global.min.js"></script>
+
 <script>
   // Preselección desde URL
   (function(){
@@ -237,6 +239,22 @@
     eventDurationEditable: false,      // duración fija 1h
     eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
     headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
+    buttonText: {                // por si quieres forzar etiquetas
+        today: 'Hoy',
+        month: 'Mes',
+        week: 'Semana',
+        day: 'Día',
+        list: 'Agenda'
+    },
+    dayHeaderFormat: {           // nombres completos de días
+        weekday: 'long'            // "lunes", "martes", etc.
+    },
+    titleFormat: {               // título con mes en español
+        year: 'numeric', month: 'long'
+    },
+    slotLabelFormat: {           // etiquetas de slots
+        hour: '2-digit', minute: '2-digit', hour12: false
+    },
     loading: isLoading => calendarEl.style.opacity = isLoading ? .6 : 1,
     events: (info, success, failure) => {
       fetch(buildFeedUrl(info)).then(r=>r.json()).then(data=>{
@@ -266,19 +284,20 @@
       return { domNodes:[wrap] };
     },
     eventDrop: async (info) => {
-      // Reagendar por drag & drop
-      const d = info.event.start;
-      const p = toLocalDateParts(d);
-      const payload = { fecha: `${p.Y}-${p.M}-${p.D}`, hora: `${p.h}:${p.m}` };
-      try{
+    const d = info.event.start;
+    const p = { Y:d.getFullYear(), M:String(d.getMonth()+1).padStart(2,'0'), D:String(d.getDate()).padStart(2,'0'),
+                h:String(d.getHours()).padStart(2,'0'), m:String(d.getMinutes()).padStart(2,'0') };
+    const payload = { fecha: `${p.Y}-${p.M}-${p.D}`, hora: `${p.h}:${p.m}` }; // el backend ya agrega :00
+    try {
         const res = await fetch(`/api/postventa/agenda/${encodeURIComponent(info.event.id)}`, {
-          method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+        method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
         });
         const j = await res.json();
-        if (!res.ok || j.error){ throw new Error(j.error || 'Error'); }
-      }catch(e){
-        info.revert(); alert('No se pudo reagendar: ' + e.message);
-      }
+        if (!res.ok || j.error) throw new Error(j.error || 'Error');
+    } catch (e) {
+        info.revert();
+        alert('No se pudo reagendar: ' + e.message);
+    }
     },
     eventClick: (arg) => {
       const e = arg.event, x = e.extendedProps || {};
