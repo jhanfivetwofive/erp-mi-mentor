@@ -75,6 +75,19 @@ app.config['SESSION_COOKIE_SECURE'] = False
 app.debug = True
 load_dotenv()
 
+# === Flags de producción (usa variables de entorno) ===
+IS_PROD = os.getenv("ENV", "").lower() in {"prod", "production", "live"}
+
+app.debug = not IS_PROD
+# En Cloud Run con HTTPS real, debe ser True
+app.config['SESSION_COOKIE_SECURE'] = bool(
+    os.getenv("SESSION_COOKIE_SECURE", "1" if IS_PROD else "0")
+)
+# Opcional: fuerza HTTPS (redirecciones) detrás de proxy si lo necesitas
+# from werkzeug.middleware.proxy_fix import ProxyFix
+# app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+
 # =========================================================
 # 2) Helpers, Firebase, BigQuery (manteniendo tus nombres)
 # =========================================================
@@ -131,11 +144,14 @@ def _to_float(x, default=0.0):
 def login_required(f):
     @wraps(f)
     def _wrap(*args, **kwargs):
-        if "user" not in session:
-            return redirect(url_for("login_firebase_page"))  # GET del login
+        u = session.get("user")
+        if not u:
+            return redirect(url_for("login_firebase_page"))
+        if not email_allowed(u.get("correo", "")):
+            session.pop("user", None)
+            return redirect(url_for("login_firebase_page", msg="Solo cuentas @fivetwofive.mx"))
         return f(*args, **kwargs)
     return _wrap
-
 
 def role_required(*roles):
     roles_norm = {r.strip().lower() for r in roles}
@@ -939,6 +955,26 @@ def _enforce_guest_readonly():
         # fail-closed no, preferimos no romper navegación
         pass
 
+@app.before_request
+def _enforce_email_domain_allowlist():
+    try:
+        # Endpoints que deben quedar libres para cargar el login, estáticos y health
+        if request.endpoint in {"login_firebase_page", "login_firebase", "__health"}:
+            return
+        if request.path.startswith("/static/"):
+            return
+
+        u = session.get("user") or {}
+        correo = normalize_email(u.get("correo") or "")
+        if correo and not email_allowed(correo):
+            # Si por alguna razón llegó a tener sesión inválida, la purgamos
+            session.pop("user", None)
+            # Puedes pasar un msg al login si quieres mostrarlo en plantilla
+            return redirect(url_for("login_firebase_page", msg="Solo cuentas @fivetwofive.mx"))
+    except Exception:
+        # Preferimos no romper navegación si hay un error inesperado aquí
+        pass
+
 
 # =========================================================
 # 4) Rutas
@@ -974,6 +1010,14 @@ def __health():
 def dashboard():
     return redirect(url_for("alumnos_page"))
 
+# Solo correos corporativos permitidos
+ALLOWED_EMAIL_SUFFIXES = {"@fivetwofive.mx"}
+
+def email_allowed(email: str) -> bool:
+    e = normalize_email(email)
+    return any(e.endswith(suf) for suf in ALLOWED_EMAIL_SUFFIXES)
+
+
 # --- Comunidad (ya trabajando)
 
 
@@ -988,7 +1032,7 @@ def comunidad_insights():
 @app.route("/login_firebase", methods=["GET"])
 def login_firebase_page():
     try:
-        return render_template("login_firebase.html")
+        return render_template("login_firebase.html", msg=request.args.get("msg", ""))
     except TemplateNotFound:
         # Fallback minimal para confirmar que la ruta funciona
         return """
@@ -1002,7 +1046,6 @@ def login_firebase_page():
 
 # --- Login Firebase: POST (verifica token, guarda sesión)
 
-
 @app.route("/login_firebase", methods=["POST"])
 def login_firebase():
     try:
@@ -1014,10 +1057,15 @@ def login_firebase():
         name = decoded.get("name", email.split("@")[0])
         uid = decoded.get("uid", "")
 
+        # ⛔ Bloqueo por dominio corporativo
+        if not email_allowed(email):
+            # No escribimos nada en BQ ni creamos sesión
+            return jsonify({"error": "Solo cuentas @fivetwofive.mx pueden iniciar sesión."}), 403
+
         # 1) Rol desde BQ (normalizado)
         role = fetch_role_from_bq(email)
 
-        # 2) Si no existe en BQ, lo creamos como invitado
+        # 2) Si no existe en BQ, dar de alta como invitado
         if role is None:
             table_id = "fivetwofive-20.INSUMOS.DB_USUARIO"
             rows_to_insert = [{
@@ -1033,15 +1081,15 @@ def login_firebase():
 
         # 3) Guardar en sesión
         session.clear()
-        session["user"] = {"correo": email,
-                           "nombre": name, "rol": role, "uid": uid}
-        session.permanent = False  # cookie de sesión: expira al cerrar navegador
+        session["user"] = {"correo": email, "nombre": name, "rol": role, "uid": uid}
+        session.permanent = False
 
         return jsonify({"message": "Login exitoso", "role": role}), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 401
-
+        # Log interno y respuesta neutra hacia el cliente
+        app.logger.exception("Error en login_firebase")
+        return jsonify({"error": "No se pudo iniciar sesión."}), 401
 
 @app.route('/logout')
 def logout():
@@ -1155,18 +1203,18 @@ def obtener_generaciones():
     rows = client.query(query).result()
     return jsonify([r.GENERACION_PROGRAMA for r in rows])
 
-
 @app.route("/catalogo/<catalogo_id>")
 def catalogo_page(catalogo_id):
+    # Solo ids seguros tipo slug
+    if not re.fullmatch(r"[a-z0-9_-]+", catalogo_id):
+        abort(404)
     return render_template(f"catalogo_{catalogo_id}.html", catalogo_id=catalogo_id)
-
 
 @app.route("/catalogo/programas")
 def catalogo_programas():
     if 'user' not in session:
         return redirect(url_for('login_firebase_page'))
     return render_template("cat_programas.html")
-
 
 @app.route("/catalogo/generaciones")
 def catalogo_generaciones():

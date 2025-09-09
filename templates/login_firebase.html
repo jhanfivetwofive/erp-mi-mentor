@@ -3,42 +3,46 @@
 
 {% block content %}
 <style>
-    .login-container {
-        max-width: 450px;
-        margin: 10% auto;
-        background-color: #f8f9fa;
-        padding: 30px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        text-align: center;
-    }
-    .login-logo img {
-        width: 100px;
-        margin-bottom: 20px;
-    }
-    .login-header {
-        font-size: 1.8rem;
-        color: #8eb015ff;
-        margin-bottom: 20px;
-    }
+  .login-container {
+    max-width: 450px;
+    margin: 10% auto;
+    background-color: #f8f9fa;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0,0,0,.1);
+    text-align: center;
+  }
+  .login-logo img { width: 100px; margin-bottom: 20px; }
+  .login-header { font-size: 1.8rem; color: #8eb015ff; margin-bottom: 16px; }
 </style>
 
 <div class="login-container">
-    <div class="login-logo">
-        <img src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}" alt="Logo Mi Mentor">
-    </div>
-    <div class="login-header">Inicia sesión con Google</div>
+  <div class="login-logo">
+    <img src="{{ url_for('static', filename='images/logo_mimentor.jpg') }}" alt="Logo Mi Mentor">
+  </div>
 
-    <button class="btn btn-outline-danger w-100 mt-4" onclick="loginWithGoogle()">
-        <i class="bi bi-google"></i> Iniciar sesión con Google
-    </button>
+  <div class="login-header">Inicia sesión con Google</div>
+
+  <!-- Aviso que puede mandar el backend via ?msg=... -->
+  {% if msg %}
+    <div id="login-alert" class="alert alert-warning mb-3" role="alert">{{ msg }}</div>
+  {% else %}
+    <div id="login-alert" class="d-none"></div>
+  {% endif %}
+
+  <button id="btn-google" class="btn btn-outline-danger w-100 mt-2" onclick="loginWithGoogle()">
+    <i class="bi bi-google"></i> Iniciar sesión con Google
+  </button>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<!-- Firebase (compat) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+
 <script>
+  // --- Firebase ---
   const firebaseConfig = {
     apiKey: "AIzaSyCVnGrLvUYx_BnhUn-MmNk9N97WA84r7QI",
     authDomain: "mimentorerp.firebaseapp.com",
@@ -46,41 +50,87 @@
   };
   firebase.initializeApp(firebaseConfig);
 
+  // --- Helpers UI ---
+  function setBusy(isBusy) {
+    const btn = document.getElementById('btn-google');
+    if (!btn) return;
+    btn.disabled = isBusy;
+    btn.classList.toggle('disabled', isBusy);
+    btn.innerHTML = isBusy
+      ? '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Conectando...'
+      : '<i class="bi bi-google"></i> Iniciar sesión con Google';
+  }
+
+  function showMessage(msg, type='danger') {
+    const box = document.getElementById('login-alert');
+    if (!box) return;
+    box.className = `alert alert-${type} mb-3`;
+    box.textContent = msg;
+  }
+
+  function hideMessage() {
+    const box = document.getElementById('login-alert');
+    if (!box) return;
+    box.className = 'd-none';
+    box.textContent = '';
+  }
+
   async function loginWithGoogle() {
+    setBusy(true);
+    hideMessage();
+
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
+      // Mejora UX: sugiere cuentas del dominio y fuerza selector de cuenta
+      provider.setCustomParameters({ hd: "fivetwofive.mx", prompt: "select_account" });
+
       const result = await firebase.auth().signInWithPopup(provider);
-      const idToken = await result.user.getIdToken();
+      const user = result.user;
+      const email = (user?.email || '').toLowerCase();
+
+      // Pre-check de dominio (UX; seguridad real está en backend)
+      if (!email.endsWith('@fivetwofive.mx')) {
+        await firebase.auth().signOut().catch(() => {});
+        showMessage('Solo cuentas @fivetwofive.mx pueden iniciar sesión.', 'warning');
+        setBusy(false);
+        return;
+      }
+
+      const idToken = await user.getIdToken();
 
       const resp = await fetch("/login_firebase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin", // mismo origen
         body: JSON.stringify({ idToken })
       });
 
-      // intenta leer JSON incluso si es 403
       let data = {};
       try { data = await resp.json(); } catch (_) {}
 
       if (resp.ok) {
-        // login exitoso
-        window.location.href = "/alumnos";
+        // Cookie de sesión Flask creada -> redirige al home
+        window.location.assign("/");
         return;
       }
 
-      // manejo especial cuando el backend auto-registra como "pendiente"
-      if (data && data.status === "pending") {
-        alert("Tu cuenta fue registrada.");
-        // opcional: cerrar sesión de Firebase para evitar confusiones
-        try { await firebase.auth().signOut(); } catch (_) {}
+      // 403 del backend (dominio no permitido o similar)
+      if (resp.status === 403) {
+        showMessage(data.error || 'No autorizado.', 'warning');
+        await firebase.auth().signOut().catch(() => {});
+        setBusy(false);
         return;
       }
 
-      // otros errores (no autorizado, etc.)
-      alert(data.error || "No autorizado. Si crees que es un error, contacta al administrador.");
+      // Otros errores
+      showMessage(data.error || 'No se pudo iniciar sesión.', 'danger');
+      await firebase.auth().signOut().catch(() => {});
+      setBusy(false);
 
     } catch (err) {
-      alert("Error al iniciar sesión con Google: " + err.message);
+      showMessage('Error al iniciar sesión con Google: ' + (err?.message || err), 'danger');
+      try { await firebase.auth().signOut(); } catch (_) {}
+      setBusy(false);
     }
   }
 </script>
