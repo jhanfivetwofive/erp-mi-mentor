@@ -597,15 +597,21 @@ def _agenda_norm_time(hhmm_or_hhmmss: str) -> str:
     h, mnt, sec = m.group(1), m.group(2), m.group(3) or "00"
     return f"{int(h):02d}:{mnt}:{sec}"
 
+# === helpers de esquema ===
 _SCHEMA_CACHE = {}
 
-def _allowed_fields(table_id: str):
-    s = _SCHEMA_CACHE.get(table_id)
-    if s: return s
-    tbl = client.get_table(table_id)
-    s = {f.name for f in tbl.schema}
-    _SCHEMA_CACHE[table_id] = s
-    return s
+def _allowed_fields(table_id: str, refresh: bool = False):
+    if refresh or table_id not in _SCHEMA_CACHE:
+        tbl = client.get_table(table_id)
+        _SCHEMA_CACHE[table_id] = {f.name for f in tbl.schema}
+    return _SCHEMA_CACHE[table_id]
+
+def _has_col(table_id: str, col: str) -> bool:
+    s = _allowed_fields(table_id)
+    if col not in s:
+        # refresca por si añadieron columnas sin reiniciar la app
+        s = _allowed_fields(table_id, refresh=True)
+    return col in s
 
 def _agenda_insert_version(row: dict):
     now_iso = _now_iso_utc()
@@ -2457,7 +2463,8 @@ def api_postventa_agenda_update(event_id):
                 newv["calificacion"] = None
 
         # marca explícitamente no borrado
-        newv["is_deleted"] = False
+        if _has_col(AGENDA_TABLA, "is_deleted"):
+            newv["is_deleted"] = False
 
         _agenda_insert_version(newv)
         return jsonify({"ok": True})
@@ -2491,6 +2498,12 @@ def api_postventa_agenda_delete(event_id):
             else:
                 raise
 
+        if _has_col(AGENDA_TABLA, "is_deleted"):
+            newv["is_deleted"] = True
+        else:
+            newv["status_compra"] = "__DELETED__"
+
+        _agenda_insert_version(newv)
         return jsonify({"ok": True})
     except Exception as e:
         app.logger.exception("DELETE agenda (append-only) failed")
