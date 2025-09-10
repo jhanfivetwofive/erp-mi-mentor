@@ -81,7 +81,7 @@
 {% block scripts %}
 <script>
   // Flag readonly desde contexto
-  const READONLY = {{ (readonly if readonly is defined else ((session.get('user', {}).get('rol', '') | lower) == 'invitado')) | tojson }}; // FIX
+  const READONLY = {{ readonly | tojson }}; // FIX
 </script>
 
 <script>

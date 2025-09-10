@@ -1063,7 +1063,11 @@
     @app.before_request
     def _enforce_email_domain_allowlist():
         try:
-            # Endpoints que deben quedar libres para cargar el login, estáticos y health
+            # ⬅️ En dev/staging no forzamos el dominio
+            if not IS_PROD:
+                return
+
+            # Endpoints libres
             if request.endpoint in {"login_firebase_page", "login_firebase", "__health"}:
                 return
             if request.path.startswith("/static/"):
@@ -1072,13 +1076,12 @@
             u = session.get("user") or {}
             correo = normalize_email(u.get("correo") or "")
             if correo and not email_allowed(correo):
-                # Si por alguna razón llegó a tener sesión inválida, la purgamos
                 session.pop("user", None)
-                # Puedes pasar un msg al login si quieres mostrarlo en plantilla
                 return redirect(url_for("login_firebase_page", msg="Solo cuentas @fivetwofive.mx"))
         except Exception:
-            # Preferimos no romper navegación si hay un error inesperado aquí
+            # No rompas la navegación si algo raro pasa aquí
             pass
+
 
 
     # =========================================================
