@@ -18,7 +18,7 @@ import firebase_admin
 from google.cloud import secretmanager
 from google.api_core.exceptions import BadRequest
 from firebase_admin import auth as firebase_auth
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date, time  # <- date, time
 import uuid
 import re
 import urllib.parse
@@ -614,17 +614,41 @@ def _has_col(table_id: str, col: str) -> bool:
     return col in s
 
 def _agenda_insert_version(row: dict):
+    """
+    Inserta una nueva versión del evento en AGENDA_TABLA.
+    - Asegura updated_at y (si falta) created_at
+    - Filtra a campos existentes en el schema
+    - Normaliza tipos no JSON (date/time/datetime/Decimal) a string/float
+    """
     now_iso = _now_iso_utc()
     row = {**row, "updated_at": now_iso}
     row.setdefault("created_at", now_iso)
 
-    # 🔑 filtra campos a los que realmente existen en BQ
     allowed = _allowed_fields(AGENDA_TABLA)
-    clean = {k: v for k, v in row.items() if k in allowed}
+
+    def _to_bq_json(v):
+        if isinstance(v, datetime):
+            # ISO 8601; para TIMESTAMP/DATETIME BQ acepta string
+            return v.isoformat()
+        if isinstance(v, date):
+            # YYYY-MM-DD
+            return v.isoformat()
+        if isinstance(v, time):
+            # HH:MM:SS
+            return v.strftime("%H:%M:%S")
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
+    # Quita cualquier artefacto del SELECT con window functions (por si se coló)
+    row.pop("rn", None)
+
+    clean = {k: _to_bq_json(v) for k, v in row.items() if k in allowed}
 
     errors = client.insert_rows_json(AGENDA_TABLA, [clean])
     if errors:
         raise RuntimeError(str(errors))
+
 
 
 #-------------------------------------------------------------
