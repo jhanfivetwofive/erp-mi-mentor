@@ -2470,7 +2470,6 @@ def api_postventa_agenda_update(event_id):
 
         # clona el registro actual como base de la nueva versión
         newv = {**cur}
-        # quita campos del window function si vinieran del SELECT
         newv.pop("rn", None)
 
         # aplica cambios permitidos
@@ -2487,7 +2486,7 @@ def api_postventa_agenda_update(event_id):
                 if vv in {"1","true","sí","si","yes","y"}: v = True
                 elif vv in {"0","false","no","n"}:         v = False
                 else:                                      v = None
-            elif v in (1, 0):  # por si viniera numérico
+            elif v in (1, 0):
                 v = bool(v)
             elif v is not None and not isinstance(v, bool):
                 v = None
@@ -2502,7 +2501,7 @@ def api_postventa_agenda_update(event_id):
         if "notas" in data:
             newv["notas"] = data["notas"]
 
-        # campos extra editables
+        # extra editables
         if "nombre" in data:
             newv["nombre"] = (data["nombre"] or "").strip()
         if "telefono" in data:
@@ -2517,12 +2516,15 @@ def api_postventa_agenda_update(event_id):
             except:
                 newv["calificacion"] = None
 
-        # marca explícitamente no borrado si existe la col
         if _has_col(AGENDA_TABLA, "is_deleted"):
             newv["is_deleted"] = False
 
         _agenda_insert_version(newv)
         return jsonify({"ok": True})
+    except Exception as e:
+        app.logger.exception("PATCH agenda (append-only) failed")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
 @role_required("postventa", "admin")
