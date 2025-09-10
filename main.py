@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 from firebase_admin import credentials, auth
 import firebase_admin
 from google.cloud import secretmanager
+from google.api_core.exceptions import BadRequest
 from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -596,14 +597,26 @@ def _agenda_norm_time(hhmm_or_hhmmss: str) -> str:
     h, mnt, sec = m.group(1), m.group(2), m.group(3) or "00"
     return f"{int(h):02d}:{mnt}:{sec}"
 
+_SCHEMA_CACHE = {}
+
+def _allowed_fields(table_id: str):
+    s = _SCHEMA_CACHE.get(table_id)
+    if s: return s
+    tbl = client.get_table(table_id)
+    s = {f.name for f in tbl.schema}
+    _SCHEMA_CACHE[table_id] = s
+    return s
+
 def _agenda_insert_version(row: dict):
-    # asegura timestamps ISO
     now_iso = _now_iso_utc()
-    row = {**row}
-    row["updated_at"] = now_iso
+    row = {**row, "updated_at": now_iso}
     row.setdefault("created_at", now_iso)
-    # insert
-    errors = client.insert_rows_json(AGENDA_TABLA, [row])
+
+    # 🔑 filtra campos a los que realmente existen en BQ
+    allowed = _allowed_fields(AGENDA_TABLA)
+    clean = {k: v for k, v in row.items() if k in allowed}
+
+    errors = client.insert_rows_json(AGENDA_TABLA, [clean])
     if errors:
         raise RuntimeError(str(errors))
 
@@ -2104,7 +2117,7 @@ def postventa_insights():
 @app.route("/api/postventa/agenda/grid")
 @role_required("postventa", "admin")
 def api_postventa_agenda_grid():
-    q = f"""
+    q_with_flag = f"""
       SELECT *
       FROM (
         SELECT
@@ -2122,12 +2135,38 @@ def api_postventa_agenda_grid():
       ORDER BY fecha DESC, hora DESC
       LIMIT 1000
     """
-    rows = client.query(q).result()
+    q_no_flag = f"""
+      SELECT *
+      FROM (
+        SELECT
+          CAST(event_id AS STRING) AS event_id,
+          nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, status_compra, asistio, notas,
+          updated_at,
+          ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        FROM `{AGENDA_TABLA}`
+        WHERE IFNULL(status_compra,'') != "__DELETED__"
+      )
+      WHERE rn = 1
+      ORDER BY fecha DESC, hora DESC
+      LIMIT 1000
+    """
+    try:
+        rows = client.query(q_with_flag).result()
+    except BadRequest as e:
+        # Si el error es “Unrecognized name: is_deleted”, caemos al plan B
+        if "is_deleted" in str(e):
+            rows = client.query(q_no_flag).result()
+        else:
+            raise
+
     out = []
     for r in rows:
         d = dict(r)
-        d["fecha"] = d["fecha"].isoformat() if d.get("fecha") else ""
-        d["hora"]  = d["hora"].strftime("%H:%M") if d.get("hora") else ""
+        d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
+        d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
         out.append(d)
     return jsonify(out)
     
@@ -2433,15 +2472,30 @@ def api_postventa_agenda_delete(event_id):
     try:
         cur = _agenda_get_latest(event_id)
         if not cur:
-            return jsonify({"error":"No existe el evento"}), 404
+            return jsonify({"error": "No existe el evento"}), 404
+
+        # Clonamos la última versión y marcamos borrado lógico
         newv = {**cur}
-        newv.pop("rn", None)
-        newv["is_deleted"] = True
-        _agenda_insert_version(newv)
+        newv.pop("rn", None)              # quita el row_number del SELECT
+        newv["is_deleted"] = True         # ✅ intento 1: columna real
+
+        try:
+            _agenda_insert_version(newv)  # inserta nueva versión
+        except RuntimeError as e:
+            # 🔁 Fallback: si la tabla NO tiene is_deleted, usa sentinela en status_compra
+            msg = str(e).lower()
+            if "is_deleted" in msg or "no such field" in msg:
+                newv.pop("is_deleted", None)
+                newv["status_compra"] = "__DELETED__"
+                _agenda_insert_version(newv)
+            else:
+                raise
+
         return jsonify({"ok": True})
     except Exception as e:
         app.logger.exception("DELETE agenda (append-only) failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
