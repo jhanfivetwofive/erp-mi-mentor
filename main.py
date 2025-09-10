@@ -1180,51 +1180,6 @@ def api_generaciones_opciones():
         })
     return jsonify(out)
 
-# -----------------------------------------------------------------------------
-# -------------------- Postventa para Agendar Diagnosticos --------------------
-
-@app.route("/api/postventa/agenda/grid")
-@role_required("postventa", "admin")
-def api_postventa_agenda_grid():
-    q = f"""
-      SELECT *
-      FROM (
-        SELECT
-          CAST(event_id AS STRING) AS event_id,
-          nombre, telefono, correo, asesor,
-          SAFE_CAST(fecha AS DATE) AS fecha,
-          SAFE_CAST(hora  AS TIME) AS hora,
-          calificacion, status_compra, asistio, notas,
-          IFNULL(is_deleted, FALSE) AS is_deleted,
-          updated_at,
-          ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
-        FROM `{AGENDA_TABLA}`
-      )
-      WHERE rn = 1 AND is_deleted = FALSE
-      ORDER BY fecha DESC, hora DESC
-      LIMIT 1000
-    """
-    rows = client.query(q).result()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["fecha"] = d["fecha"].isoformat() if d.get("fecha") else ""
-        d["hora"]  = d["hora"].strftime("%H:%M") if d.get("hora") else ""
-        out.append(d)
-    return jsonify(out)
-
-
-
-@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
-@role_required("postventa", "admin")
-def api_postventa_agenda_delete(event_id):
-    q = f"DELETE FROM `{AGENDA_TABLA}` WHERE CAST(event_id AS STRING) = @id"
-    job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("id","STRING", event_id)]
-    )
-    client.query(q, job_config=job).result()
-    return jsonify({"ok": True}), 200
-
 
 # -------------------- Alumnos y catálogos --------------------
 
@@ -1966,6 +1921,7 @@ def api_listar_seguimientos():
         })
     return jsonify(out)
 
+
 # -------------------- Postventa: Diagnóstico (form + list) --------------------
 
 
@@ -2140,6 +2096,40 @@ def postventa_insights():
             "Falta la plantilla templates/postventa_insights.html en la imagen (o nombre distinto).",
             status=500, mimetype="text/plain"
         )
+    
+
+# -----------------------------------------------------------------------------
+# -------------------- Postventa para Agendar Diagnosticos --------------------
+
+@app.route("/api/postventa/agenda/grid")
+@role_required("postventa", "admin")
+def api_postventa_agenda_grid():
+    q = f"""
+      SELECT *
+      FROM (
+        SELECT
+          CAST(event_id AS STRING) AS event_id,
+          nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, status_compra, asistio, notas,
+          IFNULL(is_deleted, FALSE) AS is_deleted,
+          updated_at,
+          ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        FROM `{AGENDA_TABLA}`
+      )
+      WHERE rn = 1 AND is_deleted = FALSE
+      ORDER BY fecha DESC, hora DESC
+      LIMIT 1000
+    """
+    rows = client.query(q).result()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["fecha"] = d["fecha"].isoformat() if d.get("fecha") else ""
+        d["hora"]  = d["hora"].strftime("%H:%M") if d.get("hora") else ""
+        out.append(d)
+    return jsonify(out)
     
 
 @app.route("/postventa/agenda")
