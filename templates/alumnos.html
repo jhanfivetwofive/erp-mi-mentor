@@ -191,6 +191,8 @@
       url: "/api/alumnos",
       method: "GET",
       data: filtros,
+      dataType: "json",
+      cache: false,
       success: function (data) {
         const total = Array.isArray(data) ? data.length : 0;
         $('#totalBadge').text(`${total.toLocaleString('es-MX')} registros`);
@@ -397,7 +399,9 @@
         });
       },
       error: function (err) {
-        console.error("Error al cargar alumnos:", err);
+        console.error("API /api/alumnos falló:",
+          xhr.status, xhr.statusText,
+          (xhr.responseJSON || xhr.responseText || ''));
         $('#tablaAlumnos').html('<div class="alert alert-danger mb-0">Error al cargar datos.</div>');
       }
     });
