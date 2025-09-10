@@ -18,7 +18,7 @@
     from google.cloud import secretmanager
     from google.api_core.exceptions import BadRequest
     from firebase_admin import auth as firebase_auth
-    from datetime import datetime, timezone, timedelta, date, time  # <- date, time
+    from datetime import datetime, timezone, timedelta, date
     import uuid
     import re
     import urllib.parse
@@ -1233,9 +1233,18 @@
     @app.route('/alumnos')
     def alumnos_page():
         if 'user' not in session:
-            # Redirige si no hay sesión activa
             return redirect(url_for('login_firebase_page'))
-        return render_template("alumnos.html")
+        try:
+            # pasa readonly explícito por si la plantilla lo espera
+            rol = (session.get("user", {}).get("rol") or "").strip().lower()
+            return render_template("alumnos.html", readonly=(rol == "invitado"))
+        except Exception:
+            # si añades ?debug=1 verás el traceback directo; si no, se relanza y usa tu handler global
+            if request.args.get("debug") == "1":
+                import traceback
+                return Response(f"<pre>{traceback.format_exc()}</pre>", status=500, mimetype="text/html")
+            raise
+
 
 
     @app.route("/api/alumnos")
