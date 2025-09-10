@@ -104,10 +104,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-  // Flag readonly inyectado por context_processor (no hacer lógica aquí)
-  const READONLY = {{ readonly | tojson }};
-</script>
+
 
 <script>
   // Orden y nombres visibles de columnas (incluye ROI)
