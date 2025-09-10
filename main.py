@@ -1280,18 +1280,34 @@ def api_alumnos():
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64")
 
-    # Convertir fechas de manera segura
-    for col in df.select_dtypes(include=["datetime64[ns]", "object"]).columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].apply(lambda x: x.strftime(
-                '%Y-%m-%d') if pd.notnull(x) else "")
+    # --- Fechas: convierte TODO lo datetime (con o sin TZ) y DATE a string ISO ---
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_datetime64_any_dtype(s) or pd.api.types.is_datetime64tz_dtype(s):
+            s = pd.to_datetime(s, errors="coerce")
+            s = s.dt.tz_localize(None)  # quita TZ si la trae
+            df[col] = s.dt.strftime("%Y-%m-%d")
+            continue
+        # BigQuery a veces devuelve DATE como object con datetime/date
+        if s.dtype == "object" and s.map(lambda v: isinstance(v, (datetime, date, pd.Timestamp))).any():
+            def _d(v):
+                if v is None or pd.isna(v): return ""
+                if isinstance(v, pd.Timestamp): return v.date().isoformat()
+                if isinstance(v, datetime):     return v.date().isoformat()
+                if isinstance(v, date):         return v.isoformat()
+                return str(v)
+            df[col] = s.map(_d)
 
-    # Rellenar valores vacíos en columnas tipo texto
+    # Rellenar textos
     for col in df.select_dtypes(include=["object", "string"]).columns:
         df[col] = df[col].fillna("")
 
+    # ⚠️ Evita NaN/NaT en JSON (ponlos en None)
+    df = df.where(pd.notnull(df), None)
+
     alumnos = df.to_dict(orient="records")
     return jsonify(alumnos)
+
 
 
 @app.route('/api/generaciones')
@@ -2459,19 +2475,34 @@ def api_postventa_agenda_update(event_id):
 
         # aplica cambios permitidos
         if "fecha" in data and data["fecha"]:
-            newv["fecha"] = data["fecha"]
+            newv["fecha"] = (data["fecha"] or "").strip()
+
         if "hora" in data and data["hora"]:
-            newv["hora"] = _agenda_norm_time(data["hora"])
+            newv["hora"] = _agenda_norm_time(data["hora"])  # HH:MM:SS
+
         if "asistio" in data:
-            newv["asistio"] = bool(data["asistio"])
+            v = data["asistio"]
+            if isinstance(v, str):
+                vv = v.strip().lower()
+                if vv in {"1","true","sí","si","yes","y"}: v = True
+                elif vv in {"0","false","no","n"}:         v = False
+                else:                                      v = None
+            elif v in (1, 0):  # por si viniera numérico
+                v = bool(v)
+            elif v is not None and not isinstance(v, bool):
+                v = None
+            newv["asistio"] = v
+
         if "semaforo" in data:
             newv["semaforo"] = (data["semaforo"] or "").strip()
+
         if "status_compra" in data:
             newv["status_compra"] = (data["status_compra"] or "").strip()
+
         if "notas" in data:
             newv["notas"] = data["notas"]
 
-        # campos que pediste editar también
+        # campos extra editables
         if "nombre" in data:
             newv["nombre"] = (data["nombre"] or "").strip()
         if "telefono" in data:
@@ -2486,16 +2517,12 @@ def api_postventa_agenda_update(event_id):
             except:
                 newv["calificacion"] = None
 
-        # marca explícitamente no borrado
+        # marca explícitamente no borrado si existe la col
         if _has_col(AGENDA_TABLA, "is_deleted"):
             newv["is_deleted"] = False
 
         _agenda_insert_version(newv)
         return jsonify({"ok": True})
-    except Exception as e:
-        app.logger.exception("PATCH agenda (append-only) failed")
-        return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
 @role_required("postventa", "admin")
@@ -2505,34 +2532,20 @@ def api_postventa_agenda_delete(event_id):
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # Clonamos la última versión y marcamos borrado lógico
         newv = {**cur}
-        newv.pop("rn", None)              # quita el row_number del SELECT
-        newv["is_deleted"] = True         # ✅ intento 1: columna real
-
-        try:
-            _agenda_insert_version(newv)  # inserta nueva versión
-        except RuntimeError as e:
-            # 🔁 Fallback: si la tabla NO tiene is_deleted, usa sentinela en status_compra
-            msg = str(e).lower()
-            if "is_deleted" in msg or "no such field" in msg:
-                newv.pop("is_deleted", None)
-                newv["status_compra"] = "__DELETED__"
-                _agenda_insert_version(newv)
-            else:
-                raise
+        newv.pop("rn", None)
 
         if _has_col(AGENDA_TABLA, "is_deleted"):
             newv["is_deleted"] = True
+            _agenda_insert_version(newv)
         else:
             newv["status_compra"] = "__DELETED__"
+            _agenda_insert_version(newv)
 
-        _agenda_insert_version(newv)
         return jsonify({"ok": True})
     except Exception as e:
         app.logger.exception("DELETE agenda (append-only) failed")
         return jsonify({"error": str(e)}), 500
-
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
