@@ -570,6 +570,46 @@ def _color_for_asesor(name: str) -> str:
     # fallback
     return "#6b7280"
 
+def _agenda_get_latest(event_id: str):
+    q = f"""
+      SELECT *
+      FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        FROM `{AGENDA_TABLA}`
+        WHERE CAST(event_id AS STRING) = @id
+      )
+      WHERE rn = 1
+      LIMIT 1
+    """
+    job = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("id","STRING", event_id)
+    ])
+    row = next(iter(client.query(q, job_config=job).result()), None)
+    return dict(row) if row else None
+
+def _agenda_norm_time(hhmm_or_hhmmss: str) -> str:
+    s = (hhmm_or_hhmmss or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
+    if not m:
+        return "09:00:00"
+    h, mnt, sec = m.group(1), m.group(2), m.group(3) or "00"
+    return f"{int(h):02d}:{mnt}:{sec}"
+
+def _agenda_insert_version(row: dict):
+    # asegura timestamps ISO
+    now_iso = _now_iso_utc()
+    row = {**row}
+    row["updated_at"] = now_iso
+    row.setdefault("created_at", now_iso)
+    # insert
+    errors = client.insert_rows_json(AGENDA_TABLA, [row])
+    if errors:
+        raise RuntimeError(str(errors))
+
+
+#-------------------------------------------------------------
+
 
 def _resolve_gid(any_id_or_label: str) -> dict | None:
     s = (any_id_or_label or "").strip().upper()
@@ -1147,13 +1187,20 @@ def api_generaciones_opciones():
 @role_required("postventa", "admin")
 def api_postventa_agenda_grid():
     q = f"""
-      SELECT
-        CAST(event_id AS STRING) AS event_id,
-        nombre, telefono, correo, asesor,
-        SAFE_CAST(fecha AS DATE) AS fecha,
-        SAFE_CAST(hora  AS TIME) AS hora,
-        calificacion, status_compra, asistio, notas
-      FROM `{AGENDA_TABLA}`
+      SELECT *
+      FROM (
+        SELECT
+          CAST(event_id AS STRING) AS event_id,
+          nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, status_compra, asistio, notas,
+          IFNULL(is_deleted, FALSE) AS is_deleted,
+          updated_at,
+          ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        FROM `{AGENDA_TABLA}`
+      )
+      WHERE rn = 1 AND is_deleted = FALSE
       ORDER BY fecha DESC, hora DESC
       LIMIT 1000
     """
@@ -1165,6 +1212,7 @@ def api_postventa_agenda_grid():
         d["hora"]  = d["hora"].strftime("%H:%M") if d.get("hora") else ""
         out.append(d)
     return jsonify(out)
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
@@ -2341,71 +2389,69 @@ def api_postventa_agenda_events():
 def api_postventa_agenda_update(event_id):
     try:
         data = request.get_json(force=True) or {}
+        cur = _agenda_get_latest(event_id)
+        if not cur:
+            return jsonify({"error":"No existe el evento"}), 404
 
-        def _norm_time(hhmm_or_hhmmss: str) -> str:
-            s = (hhmm_or_hhmmss or "").strip()
-            m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
-            if not m:
-                return "09:00:00"
-            h, mnt, sec = m.group(1), m.group(2), m.group(3) or "00"
-            return f"{int(h):02d}:{mnt}:{sec}"
+        # clona el registro actual como base de la nueva versión
+        newv = {**cur}
+        # quita campos del window function si vinieran del SELECT
+        newv.pop("rn", None)
 
-        up = {}
-        if data.get("fecha"):
-            up["fecha"] = (data["fecha"] or "").strip()
-        if data.get("hora"):
-            up["hora"] = _norm_time(data["hora"])
+        # aplica cambios permitidos
+        if "fecha" in data and data["fecha"]:
+            newv["fecha"] = data["fecha"]
+        if "hora" in data and data["hora"]:
+            newv["hora"] = _agenda_norm_time(data["hora"])
         if "asistio" in data:
-            up["asistio"] = bool(data["asistio"])
+            newv["asistio"] = bool(data["asistio"])
         if "semaforo" in data:
-            up["semaforo"] = (data["semaforo"] or "").strip()
+            newv["semaforo"] = (data["semaforo"] or "").strip()
         if "status_compra" in data:
-            up["status_compra"] = (data["status_compra"] or "").strip()
+            newv["status_compra"] = (data["status_compra"] or "").strip()
         if "notas" in data:
-            up["notas"] = data["notas"]
+            newv["notas"] = data["notas"]
 
-        if not up:
-            return jsonify({"error": "Nada que actualizar"}), 400
+        # campos que pediste editar también
+        if "nombre" in data:
+            newv["nombre"] = (data["nombre"] or "").strip()
+        if "telefono" in data:
+            newv["telefono"] = _normalize_phone(data["telefono"] or "")
+        if "correo" in data:
+            newv["correo"] = _normalize_email(data["correo"] or "")
+        if "asesor" in data:
+            newv["asesor"] = (data["asesor"] or "").strip()
+        if "calificacion" in data:
+            try:
+                newv["calificacion"] = int(data["calificacion"]) if data["calificacion"] not in ("", None) else None
+            except:
+                newv["calificacion"] = None
 
-        sets, params = [], [bigquery.ScalarQueryParameter("id", "STRING", event_id)]
-        i = 0
-        for k, v in up.items():
-            i += 1
-            if k == "fecha":
-                sets.append(f"{k} = SAFE_CAST(@p{i} AS DATE)")
-                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
-            elif k == "hora":
-                sets.append(f"{k} = SAFE_CAST(@p{i} AS TIME)")
-                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
-            elif k == "asistio":
-                sets.append(f"{k} = @p{i}")
-                params.append(bigquery.ScalarQueryParameter(f"p{i}", "BOOL", v))
-            else:
-                sets.append(f"{k} = @p{i}")
-                params.append(bigquery.ScalarQueryParameter(f"p{i}", "STRING", v))
+        # marca explícitamente no borrado
+        newv["is_deleted"] = False
 
-        sets.append("updated_at = CURRENT_TIMESTAMP()")
-
-        q = f"""
-          UPDATE `{AGENDA_TABLA}`
-          SET {', '.join(sets)}
-          WHERE CAST(event_id AS STRING) = @id
-        """  # 👈 quitar el OR CAST(ID AS STRING) = @id
-
-        job = bigquery.QueryJobConfig(query_parameters=params)
-        client.query(q, job_config=job).result()
+        _agenda_insert_version(newv)
         return jsonify({"ok": True})
-
-        # ... dentro de api_postventa_agenda_update(event_id)
-        if "nombre"   in data: up["nombre"]   = (data["nombre"]   or "").strip()
-        if "telefono" in data: up["telefono"] = _normalize_phone(data["telefono"] or "")
-        if "correo"   in data: up["correo"]   = _normalize_email(data["correo"] or "")
-        if "asesor"   in data: up["asesor"]   = (data["asesor"]   or "").strip()
-
     except Exception as e:
-        app.logger.exception("PATCH agenda failed")
+        app.logger.exception("PATCH agenda (append-only) failed")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_delete(event_id):
+    try:
+        cur = _agenda_get_latest(event_id)
+        if not cur:
+            return jsonify({"error":"No existe el evento"}), 404
+        newv = {**cur}
+        newv.pop("rn", None)
+        newv["is_deleted"] = True
+        _agenda_insert_version(newv)
+        return jsonify({"ok": True})
+    except Exception as e:
+        app.logger.exception("DELETE agenda (append-only) failed")
+        return jsonify({"error": str(e)}), 500
 
 
 # -------------------- Comunidad: Lista y Panel --------------------

@@ -65,17 +65,19 @@
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // Filtro rápido
-  document.getElementById("q").addEventListener("input", (e)=>{
+  // Filtro rápido (coincidencia en varios campos)
+    const fieldsToSearch = ["nombre","correo","asesor","notas"];
+    document.getElementById("q").addEventListener("input", (e)=>{
     const q = e.target.value.trim().toLowerCase();
-    if(!q) return grid.clearFilter();
-    grid.setFilter([
-      [{field:"nombre", type:"like", value:q}],
-      [{field:"correo", type:"like", value:q}],
-      [{field:"asesor", type:"like", value:q}],
-      [{field:"notas",  type:"like", value:q}],
-    ], "or");
-  });
+    if(!q){
+        grid.clearFilter(true);
+        return;
+    }
+    grid.setFilter(function(data){
+        return fieldsToSearch.some(f => String(data[f]||"").toLowerCase().includes(q));
+    });
+    });
+
 
   // Recargar y nueva fila
   document.getElementById("btn-reload").onclick = ()=> grid.replaceData();
