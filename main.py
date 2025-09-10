@@ -1236,77 +1236,91 @@ def alumnos_page():
 
 @app.route("/api/alumnos")
 def api_alumnos():
-    start = time.time()
-    generacion = request.args.get("generacion", "").strip()
-    correo = request.args.get("correo", "").strip()
+    try:
+        generacion = (request.args.get("generacion") or "").strip()
+        correo = (request.args.get("correo") or "").strip().lower()
 
-    query = """
-        SELECT
-            ID_INSCRIPCION,
-            FECHA_INSCRIPCION,
-            ID_ALUMNO,
-            FECHA_COMPRA,
-            NOMBRE_ALUMNO,
-            TELEFONO,
-            CORREO,
-            ID_PROGRAMA,
-            PROGRAMA,
-            SKU_PRODUCTO,
-            ID_GENERACION_PROGRAMA,
-            GENERACION_PROGRAMA,
-            FUENTE,
-            PRECIO_GENERACION,
-            GASTO,
-            INGRESO
-        FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-        WHERE 1=1
-    """
-    params = []
-    if generacion:
-        query += " AND GENERACION_PROGRAMA = @generacion"
-        params.append(bigquery.ScalarQueryParameter(
-            "generacion", "STRING", generacion))
-    if correo:
-        query += " AND LOWER(CORREO) = @correo"
-        params.append(bigquery.ScalarQueryParameter(
-            "correo", "STRING", correo.lower()))
+        query = """
+            SELECT
+                ID_INSCRIPCION,
+                FECHA_INSCRIPCION,
+                ID_ALUMNO,
+                FECHA_COMPRA,
+                NOMBRE_ALUMNO,
+                TELEFONO,
+                CORREO,
+                ID_PROGRAMA,
+                PROGRAMA,
+                SKU_PRODUCTO,
+                ID_GENERACION_PROGRAMA,
+                GENERACION_PROGRAMA,
+                FUENTE,
+                PRECIO_GENERACION,
+                GASTO,
+                INGRESO
+            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+            WHERE 1=1
+        """
+        params = []
+        if generacion:
+            query += " AND GENERACION_PROGRAMA = @generacion"
+            params.append(bigquery.ScalarQueryParameter("generacion", "STRING", generacion))
+        if correo:
+            query += " AND LOWER(CORREO) = @correo"
+            params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
 
-    job_config = bigquery.QueryJobConfig(query_parameters=params)
-    df = client.query(query, job_config=job_config).to_dataframe()
-    df = df.convert_dtypes()
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        df = client.query(query, job_config=job_config).to_dataframe()
 
-    # Asegurar numérico para MXN
-    for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64")
+        if df.empty:
+            return jsonify([]), 200
 
-    # --- Fechas: convierte TODO lo datetime (con o sin TZ) y DATE a string ISO ---
-    for col in df.columns:
-        s = df[col]
-        if pd.api.types.is_datetime64_any_dtype(s) or pd.api.types.is_datetime64tz_dtype(s):
-            s = pd.to_datetime(s, errors="coerce")
-            s = s.dt.tz_localize(None)  # quita TZ si la trae
-            df[col] = s.dt.strftime("%Y-%m-%d")
-            continue
-        # BigQuery a veces devuelve DATE como object con datetime/date
-        if s.dtype == "object" and s.map(lambda v: isinstance(v, (datetime, date, pd.Timestamp))).any():
-            def _d(v):
-                if v is None or pd.isna(v): return ""
-                if isinstance(v, pd.Timestamp): return v.date().isoformat()
-                if isinstance(v, datetime):     return v.date().isoformat()
-                if isinstance(v, date):         return v.isoformat()
-                return str(v)
-            df[col] = s.map(_d)
+        # Asegurar numéricos
+        for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Rellenar textos
-    for col in df.select_dtypes(include=["object", "string"]).columns:
-        df[col] = df[col].fillna("")
+        # ---- Serialización segura a JSON (date/datetime/time/Timestamp/Decimal) ----
+        from decimal import Decimal
+        import pandas as pd
+        from datetime import datetime, date, time as dtime
 
-    # ⚠️ Evita NaN/NaT en JSON (ponlos en None)
-    df = df.where(pd.notnull(df), None)
+        def _json_safe(x):
+            if isinstance(x, pd.Timestamp):
+                # quitar tz si trae
+                try:
+                    x = x.tz_convert(None)
+                except Exception:
+                    try:
+                        x = x.tz_localize(None)
+                    except Exception:
+                        pass
+                return x.strftime("%Y-%m-%d")
+            if isinstance(x, datetime):
+                return x.strftime("%Y-%m-%d")
+            if isinstance(x, date):
+                return x.isoformat()                   # YYYY-MM-DD
+            if isinstance(x, dtime):
+                return x.strftime("%H:%M:%S")
+            if isinstance(x, Decimal):
+                return float(x)
+            # NaN → None para no romper campos numéricos
+            if pd.isna(x):
+                return None
+            return x
 
-    alumnos = df.to_dict(orient="records")
-    return jsonify(alumnos)
+        df = df.applymap(_json_safe)
+
+        # Texto sin None
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].apply(lambda v: "" if v is None else v)
+
+        return jsonify(df.to_dict(orient="records")), 200
+
+    except Exception as e:
+        app.logger.exception("Error en /api/alumnos")
+        return jsonify({"error": "Error al cargar datos."}), 500
+
 
 
 
