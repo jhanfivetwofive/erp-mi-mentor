@@ -26,6 +26,7 @@ import traceback
 from flask import Response
 from decimal import Decimal
 import hashlib
+import numpy as np
 
 # =========================================================
 # 1) Crear app y configurar sesión/secret_key (ANTES de usar app)
@@ -1275,19 +1276,21 @@ def api_alumnos():
         if df.empty:
             return jsonify([]), 200
 
-        # Asegurar numéricos
+        # Normaliza numéricos (pueden venir como texto en la vista)
         for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        # ---- Serialización segura a JSON (date/datetime/time/Timestamp/Decimal) ----
+        # --- Serialización 100% JSON-safe ---
         from decimal import Decimal
-        import pandas as pd
         from datetime import datetime, date, time as dtime
 
         def _json_safe(x):
+            # numpy → Python nativo
+            if isinstance(x, (np.integer, np.floating, np.bool_)):
+                return x.item()
+            # pandas Timestamp (con o sin tz)
             if isinstance(x, pd.Timestamp):
-                # quitar tz si trae
                 try:
                     x = x.tz_convert(None)
                 except Exception:
@@ -1295,23 +1298,27 @@ def api_alumnos():
                         x = x.tz_localize(None)
                     except Exception:
                         pass
+                # Si tus FECHAS son de tipo date en BQ, devuélvelas YYYY-MM-DD
                 return x.strftime("%Y-%m-%d")
+            # datetime/date/time puros de Python
             if isinstance(x, datetime):
                 return x.strftime("%Y-%m-%d")
             if isinstance(x, date):
-                return x.isoformat()                   # YYYY-MM-DD
+                return x.isoformat()
             if isinstance(x, dtime):
                 return x.strftime("%H:%M:%S")
+            # Decimal → float
             if isinstance(x, Decimal):
                 return float(x)
-            # NaN → None para no romper campos numéricos
+            # NaN / NA → null
             if pd.isna(x):
                 return None
             return x
 
+        # Aplica conversión celda por celda
         df = df.applymap(_json_safe)
 
-        # Texto sin None
+        # Asegura que textos no vayan como None
         for col in df.select_dtypes(include=["object"]).columns:
             df[col] = df[col].apply(lambda v: "" if v is None else v)
 
@@ -1320,7 +1327,6 @@ def api_alumnos():
     except Exception as e:
         app.logger.exception("Error en /api/alumnos")
         return jsonify({"error": "Error al cargar datos."}), 500
-
 
 
 
