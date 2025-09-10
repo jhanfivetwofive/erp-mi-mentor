@@ -1,126 +1,169 @@
 {% extends "base.html" %}
-{% block title %}Agendar diagnóstico{% endblock %}
+{% block title %}Agenda (edición tipo Excel){% endblock %}
 
 {% block content %}
-<div class="container py-3" style="max-width: 760px;">
-  <h5 class="mb-3">Agendar diagnóstico</h5>
+<link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator.min.css" rel="stylesheet">
+<style>
+  #grid{height:72vh}
+  .toolbar .form-control{height: calc(1.5em + .5rem + 2px); padding:.25rem .5rem; font-size:.9rem;}
+</style>
 
-  <div id="msg" class="alert d-none"></div>
-
-  <form id="frm">
-    <div class="row g-3">
-      <div class="col-md-6">
-        <label class="form-label">Nombre del cliente *</label>
-        <input class="form-control" name="nombre" required>
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">Teléfono</label>
-        <input class="form-control" name="numero" placeholder="10 dígitos">
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">Correo *</label>
-        <input class="form-control" type="email" name="correo" required>
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">Asesor *</label>
-        <input class="form-control" name="asesor" value="{{ default_asesor }}" required>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Fecha *</label>
-        <input class="form-control" type="date" name="fecha" value="{{ default_fecha }}" required>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Hora *</label>
-        <input class="form-control" type="time" name="hora" value="{{ default_hora }}" required>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Calificación</label>
-        <input class="form-control" type="number" name="calificacion" min="0" max="100" step="1">
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Semáforo</label>
-        <select class="form-select" name="semaforo">
-          <option value="">—</option>
-          <option>Verde</option>
-          <option>Amarillo</option>
-          <option>Rojo</option>
-          <option>Agendada</option>
-          <option>Reagendar</option>
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Estatus compra</label>
-        <input class="form-control" name="status_compra" placeholder="p. ej. Pago Realizado">
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">¿Asistió?</label>
-        <select class="form-select" name="asistio">
-          <option value="">—</option>
-          <option value="true">Sí</option>
-          <option value="false">No</option>
-        </select>
-      </div>
-
-      <div class="col-12">
-        <label class="form-label">Notas</label>
-        <textarea class="form-control" name="notas" rows="3" placeholder="Comentarios o acuerdos"></textarea>
-      </div>
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-2 toolbar">
+    <h5 class="m-0">Agenda — captura y edición tipo Excel</h5>
+    <div class="d-flex gap-2">
+      <input id="q" class="form-control" placeholder="Buscar (nombre, correo, asesor, notas)">
+      <button id="btn-add" class="btn btn-success btn-sm">+ Nueva fila</button>
+      <button id="btn-reload" class="btn btn-outline-secondary btn-sm">Recargar</button>
     </div>
-
-    <div class="mt-3 d-flex gap-2">
-      <button id="btn-save" class="btn btn-primary">Guardar</button>
-      <a href="{{ url_for('postventa_agenda_page') }}" class="btn btn-outline-secondary">Cancelar</a>
-    </div>
-  </form>
+  </div>
+  <div id="grid"></div>
+  <div class="small text-muted mt-2">
+    * Para crear una cita nueva llena <strong>Nombre, Correo, Asesor, Fecha y Hora</strong> y presiona “Crear”.<br>
+    * Al editar una celda de una fila existente se guarda automáticamente.<br>
+    * Quitamos el semáforo como pediste.
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
 <script>
-  const frm = document.getElementById('frm');
-  const msg = document.getElementById('msg');
-  const btn = document.getElementById('btn-save');
-
-  function showMsg(text, type='success') {
-    msg.className = 'alert alert-' + type;
-    msg.textContent = text;
-  }
-  function hideMsg() {
-    msg.className = 'alert d-none';
-    msg.textContent = '';
+  // Botón de acciones por fila
+  function accionesFmt(cell){
+    const d = cell.getData();
+    return d.event_id
+      ? `<button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`
+      : `<button class="btn btn-sm btn-primary" data-act="create">Crear</button>
+         <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
   }
 
-  frm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    hideMsg();
-    btn.disabled = true;
+  const grid = new Tabulator("#grid", {
+    ajaxURL: "/api/postventa/agenda/grid",
+    height: "72vh",
+    layout: "fitColumns",
+    index: "event_id",
+    reactiveData: true,
+    columns: [
+      {title:"Acciones", width:160, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
+      {title:"ID", field:"event_id", width:150, headerSort:false, cssClass:"text-muted"},
+      {title:"Fecha", field:"fecha", width:110, editor:"input", mutator: (v)=>String(v||"").slice(0,10)},
+      {title:"Hora",  field:"hora",  width:90,  editor:"input", mutator: (v)=>String(v||"").slice(0,5)},
+      {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
+      {title:"Teléfono", field:"telefono", width:120, editor:"input"},
+      {title:"Correo",   field:"correo",   width:240, editor:"input"},
+      {title:"Asesor",   field:"asesor",   width:200, editor:"input"},
+      {title:"Calificación", field:"calificacion", width:120, editor:"input"},
+      {title:"Estatus compra", field:"status_compra", width:160, editor:"input"},
+      {title:"¿Asistió?", field:"asistio", width:100, editor:"select",
+        editorParams:{values:{"":"—","true":"Sí","false":"No"}},
+        mutator:function(v){ if(v===true||v==="true") return "true"; if(v===false||v==="false") return "false"; return ""; }
+      },
+      {title:"Notas", field:"notas", width:320, editor:"input"},
+    ],
+    cellEdited: onCellEdited,
+    initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
+  });
 
-    const fd = new FormData(frm);
-    const payload = Object.fromEntries(fd.entries());
+  // Filtro rápido
+  document.getElementById("q").addEventListener("input", (e)=>{
+    const q = e.target.value.trim().toLowerCase();
+    if(!q) return grid.clearFilter();
+    grid.setFilter([
+      [{field:"nombre", type:"like", value:q}],
+      [{field:"correo", type:"like", value:q}],
+      [{field:"asesor", type:"like", value:q}],
+      [{field:"notas",  type:"like", value:q}],
+    ], "or");
+  });
 
-    // Normaliza asistio
-    if (payload.asistio === '') delete payload.asistio;
+  // Recargar y nueva fila
+  document.getElementById("btn-reload").onclick = ()=> grid.replaceData();
+  document.getElementById("btn-add").onclick = ()=>{
+    grid.addRow({
+      event_id:"",
+      fecha:"", hora:"",
+      nombre:"", telefono:"", correo:"", asesor:"",
+      calificacion:"", status_compra:"", asistio:"", notas:""
+    }, true);
+  };
 
-    try {
-      const r = await fetch('/api/postventa/agenda', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+  // --- Guardado automático para filas existentes ---
+  async function onCellEdited(cell){
+    const row = cell.getRow(), d = row.getData();
+    if(!d.event_id) return; // fila nueva → se crea con el botón 'Crear'
+    const field = cell.getField();
+    let value = cell.getValue();
+
+    // normaliza asistio (bool)
+    if(field==="asistio"){
+      value = (value==="true") ? true : (value==="false" ? false : null);
+    }
+
+    const payload = {};
+    payload[field] = value;
+
+    // backend acepta estos campos en PATCH (ya ampliado)
+    // fecha (YYYY-MM-DD), hora (HH:MM), nombre, telefono, correo, asesor,
+    // calificacion, status_compra, asistio, notas
+    try{
+      const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
+        method:"PATCH",
+        headers: {"Content-Type":"application/json"},
         body: JSON.stringify(payload)
       });
-      const data = await r.json().catch(() => ({}));
-
-      if (r.ok) {
-        showMsg('Diagnóstico agendado.');
-        setTimeout(() => window.location.href = "{{ url_for('postventa_agenda_page') }}", 600);
-      } else {
-        showMsg(data.error || 'No se pudo guardar.', 'danger');
-        btn.disabled = false;
-      }
-    } catch (err) {
-      showMsg(err?.message || 'Error de red.', 'danger');
-      btn.disabled = false;
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok) throw new Error(j.error || "No se pudo guardar");
+    }catch(err){
+      alert(err.message || "Error al guardar");
+      grid.replaceData(); // deshacer visual si falla
     }
-  });
+  }
+
+  // --- Acciones por fila (crear / eliminar / descartar) ---
+  async function onActionClick(e, cell){
+    const row = cell.getRow(), d = row.getData();
+    const act = e.target?.dataset?.act;
+    if(act==="discard"){ row.delete(); return; }
+
+    if(act==="del" && d.event_id){
+      if(!confirm("¿Eliminar esta cita?")) return;
+      try{
+        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {method:"DELETE"});
+        if(!r.ok) throw new Error("No se pudo eliminar");
+        row.delete();
+      }catch(err){ alert(err.message || "Error al eliminar"); }
+      return;
+    }
+
+    if(act==="create" && !d.event_id){
+      // Requisitos del POST /api/postventa/agenda
+      const req = {nombre:d.nombre, correo:d.correo, asesor:d.asesor, fecha:d.fecha, hora:d.hora};
+      for(const [k,v] of Object.entries(req)){
+        if(!String(v||"").trim()){ alert("Falta " + k); return; }
+      }
+      const payload = {
+        nombre: d.nombre,
+        numero: d.telefono || "",       // POST espera 'numero'
+        correo: d.correo,
+        asesor: d.asesor,
+        fecha: d.fecha,
+        hora:  d.hora,
+        calificacion: d.calificacion || null,
+        status_compra: d.status_compra || "",
+        asistio: d.asistio==="true" ? true : (d.asistio==="false" ? false : undefined),
+        notas: d.notas || ""
+      };
+      try{
+        const r = await fetch("/api/postventa/agenda", {
+          method:"POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.error || "No se pudo crear");
+        row.update({event_id: j.id}); // asigna el id devuelto
+      }catch(err){ alert(err.message || "Error al crear"); }
+    }
+  }
 </script>
 {% endblock %}

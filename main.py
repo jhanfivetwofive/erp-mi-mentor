@@ -1140,9 +1140,45 @@ def api_generaciones_opciones():
         })
     return jsonify(out)
 
+# -----------------------------------------------------------------------------
+# -------------------- Postventa para Agendar Diagnosticos --------------------
+
+@app.route("/api/postventa/agenda/grid")
+@role_required("postventa", "admin")
+def api_postventa_agenda_grid():
+    q = f"""
+      SELECT
+        CAST(event_id AS STRING) AS event_id,
+        nombre, telefono, correo, asesor,
+        SAFE_CAST(fecha AS DATE) AS fecha,
+        SAFE_CAST(hora  AS TIME) AS hora,
+        calificacion, status_compra, asistio, notas
+      FROM `{AGENDA_TABLA}`
+      ORDER BY fecha DESC, hora DESC
+      LIMIT 1000
+    """
+    rows = client.query(q).result()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["fecha"] = d["fecha"].isoformat() if d.get("fecha") else ""
+        d["hora"]  = d["hora"].strftime("%H:%M") if d.get("hora") else ""
+        out.append(d)
+    return jsonify(out)
+
+
+@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_delete(event_id):
+    q = f"DELETE FROM `{AGENDA_TABLA}` WHERE CAST(event_id AS STRING) = @id"
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("id","STRING", event_id)]
+    )
+    client.query(q, job_config=job).result()
+    return jsonify({"ok": True}), 200
+
 
 # -------------------- Alumnos y catálogos --------------------
-
 
 @app.route('/alumnos')
 def alumnos_page():
@@ -2359,6 +2395,13 @@ def api_postventa_agenda_update(event_id):
         job = bigquery.QueryJobConfig(query_parameters=params)
         client.query(q, job_config=job).result()
         return jsonify({"ok": True})
+
+        # ... dentro de api_postventa_agenda_update(event_id)
+        if "nombre"   in data: up["nombre"]   = (data["nombre"]   or "").strip()
+        if "telefono" in data: up["telefono"] = _normalize_phone(data["telefono"] or "")
+        if "correo"   in data: up["correo"]   = _normalize_email(data["correo"] or "")
+        if "asesor"   in data: up["asesor"]   = (data["asesor"]   or "").strip()
+
     except Exception as e:
         app.logger.exception("PATCH agenda failed")
         return jsonify({"error": str(e)}), 500
