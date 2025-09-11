@@ -2826,6 +2826,7 @@ def api_postventa_agenda_create():
 
 
 @app.route("/api/postventa/agenda/events")
+@role_required("postventa", "admin")
 def api_postventa_agenda_events():
     """
     FullCalendar llama con ?start=...&end=...
@@ -2854,62 +2855,82 @@ def api_postventa_agenda_events():
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        # WHERE dinámico (reutilizable para LIVE y para el fallback)
-        wh, params = [], []
+        # -----------------------------
+        # WHERE para la vista LIVE
+        # (usa nombres tal cual en las tablas)
+        # -----------------------------
+        wh_live, params = ["IFNULL(is_deleted, FALSE) = FALSE"], []
         if start:
-            wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            wh_live.append("SAFE_CAST(fecha AS DATE) >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
         if end:
-            wh.append("SAFE_CAST(fecha AS DATE) < @d2")
+            wh_live.append("SAFE_CAST(fecha AS DATE) < @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
         if mine and asesor_mio:
-            wh.append("LOWER(asesor) = LOWER(@a)")
+            wh_live.append("LOWER(asesor) = LOWER(@a)")
             params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
         elif asesor_filtro:
-            wh.append("LOWER(asesor) = LOWER(@a2)")
+            wh_live.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
+        where_live = "WHERE " + " AND ".join(wh_live)
 
-        where_sql = ("WHERE " + " AND ".join(wh)) if wh else ""
-
-        # ---------- 1) PRIMER INTENTO: LIVE VIEW ----------
         q_live = f"""
         WITH base AS (
           SELECT
-            CAST(event_id AS STRING) AS ID,
-            nombre        AS NOMBRE,
-            telefono      AS NUMERO,
-            correo        AS CORREO,
-            asesor        AS ASESOR,
-            SAFE_CAST(fecha AS DATE) AS FECHA,
-            SAFE_CAST(hora  AS TIME) AS HORA,
-            calificacion  AS CALIFICACION,
-            semaforo      AS SEMAFORO,
-            status_compra AS STATUS_COMPRA,
-            asistio       AS ASISTIO,
-            notas         AS NOTAS
+            CAST(event_id AS STRING) AS id,
+            nombre        AS nombre,
+            telefono      AS numero,
+            correo        AS correo,
+            asesor        AS asesor,
+            SAFE_CAST(fecha AS DATE) AS fecha,
+            SAFE_CAST(hora  AS TIME) AS hora,
+            calificacion  AS calificacion,
+            semaforo      AS semaforo,
+            status_compra AS status_compra,
+            asistio       AS asistio,
+            notas         AS notas
           FROM `{AGENDA_LIVE_VIEW}`
-          {where_sql}
-          AND IFNULL(is_deleted, FALSE) = FALSE
+          {where_live}
         ),
         ts AS (
           SELECT
             *,
-            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+            TIMESTAMP(DATETIME(fecha, hora), "{MEX_TZ}") AS start_ts,
+            TIMESTAMP(DATETIME(fecha, hora), "{MEX_TZ}") AS end_ts
           FROM base
         )
         SELECT * FROM ts
-        ORDER BY FECHA DESC, HORA DESC
+        ORDER BY fecha DESC, hora DESC
         """
+
+        rows = None
         try:
             job = bigquery.QueryJobConfig(query_parameters=params)
-            rows = client.query(q_live, job_config=job).result()
+            rows = list(client.query(q_live, job_config=job).result())
         except Exception as e_live:
-            app.logger.warning("LIVE view no disponible, usando fallback UNION: %s", e_live)
+            app.logger.warning("LIVE view no disponible, fallback UNION: %s", e_live)
             rows = None
 
-        # ---------- 2) FALLBACK: UNION base + patches ----------
+        # -----------------------------
+        # FALLBACK: UNION base + patches
+        # (proyectamos columnas en minúsculas para que coincidan con los filtros)
+        # -----------------------------
         if rows is None:
+            wh_fb, fb_params = [], []
+            if start:
+                wh_fb.append("fecha >= @fd1")
+                fb_params.append(bigquery.ScalarQueryParameter("fd1", "DATE", start))
+            if end:
+                wh_fb.append("fecha < @fd2")
+                fb_params.append(bigquery.ScalarQueryParameter("fd2", "DATE", end))
+            if mine and asesor_mio:
+                wh_fb.append("LOWER(asesor) = LOWER(@fa)")
+                fb_params.append(bigquery.ScalarQueryParameter("fa", "STRING", asesor_mio))
+            elif asesor_filtro:
+                wh_fb.append("LOWER(asesor) = LOWER(@fa2)")
+                fb_params.append(bigquery.ScalarQueryParameter("fa2", "STRING", asesor_filtro))
+            where_fb = ("WHERE " + " AND ".join(wh_fb)) if wh_fb else ""
+
             q_fb = f"""
             WITH u AS (
               SELECT
@@ -2939,76 +2960,77 @@ def api_postventa_agenda_events():
             ),
             cur AS (
               SELECT
-                CAST(event_id AS STRING) AS ID,
-                nombre       AS NOMBRE,
-                telefono     AS NUMERO,
-                correo       AS CORREO,
-                asesor       AS ASESOR,
-                SAFE_CAST(fecha AS DATE) AS FECHA,
-                SAFE_CAST(hora  AS TIME) AS HORA,
-                calificacion AS CALIFICACION,
-                semaforo     AS SEMAFORO,
-                status_compra AS STATUS_COMPRA,
-                asistio      AS ASISTIO,
-                notas        AS NOTAS
+                CAST(event_id AS STRING)               AS id,
+                nombre                                  AS nombre,
+                telefono                                AS numero,
+                correo                                  AS correo,
+                asesor                                  AS asesor,
+                SAFE_CAST(fecha AS DATE)                AS fecha,
+                SAFE_CAST(hora  AS TIME)                AS hora,
+                calificacion                            AS calificacion,
+                semaforo                                AS semaforo,
+                status_compra                           AS status_compra,
+                asistio                                 AS asistio,
+                notas                                   AS notas
               FROM r
               WHERE rn = 1 AND is_deleted = FALSE
             ),
             filt AS (
               SELECT * FROM cur
-              {where_sql}
+              {where_fb}
             ),
             ts AS (
               SELECT
                 *,
-                TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-                TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+                TIMESTAMP(DATETIME(fecha, hora), "{MEX_TZ}") AS start_ts,
+                TIMESTAMP(DATETIME(fecha, hora), "{MEX_TZ}") AS end_ts
               FROM filt
             )
             SELECT * FROM ts
-            ORDER BY FECHA DESC, HORA DESC
+            ORDER BY fecha DESC, hora DESC
             """
-            job = bigquery.QueryJobConfig(query_parameters=params)
-            rows = client.query(q_fb, job_config=job).result()
+            job = bigquery.QueryJobConfig(query_parameters=fb_params)
+            rows = list(client.query(q_fb, job_config=job).result())
 
-        # ---------- Formateo a FullCalendar ----------
+        # -----------------------------
+        # Formateo para FullCalendar
+        # -----------------------------
         out = []
         for r in rows:
-            color = _color_for_asesor(r["ASESOR"] or "")
+            color = _color_for_asesor(r["asesor"] or "")
             etiquetas = []
-            if r["SEMAFORO"]: etiquetas.append(str(r["SEMAFORO"]))
-            if r["STATUS_COMPRA"]: etiquetas.append(str(r["STATUS_COMPRA"]))
-            if r["ASISTIO"] is True: etiquetas.append("Asistió")
+            if r["semaforo"]: etiquetas.append(str(r["semaforo"]))
+            if r["status_compra"]: etiquetas.append(str(r["status_compra"]))
+            if r["asistio"] is True: etiquetas.append("Asistió")
 
-            # WhatsApp “por si se requiere”
             wa = ""
             try:
-                e164 = to_whatsapp_e164(r["NUMERO"] or "")
+                e164 = to_whatsapp_e164(r["numero"] or "")
                 if e164:
-                    msg = f"Hola {r['NOMBRE']}, tenemos tu diagnóstico agendado."
+                    msg = f"Hola {r['nombre']}, tenemos tu diagnóstico agendado."
                     wa = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
             except Exception:
                 pass
 
             out.append({
-                "id": r["ID"] or str(uuid.uuid4()),
-                "title": r["NOMBRE"],
+                "id": r["id"] or str(uuid.uuid4()),
+                "title": r["nombre"],
                 "start": r["start_ts"].isoformat() if r["start_ts"] else None,
                 "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
                 "backgroundColor": color,
                 "borderColor": color,
-                "classNames": ["evt-asistio"] if r["ASISTIO"] is True else [],
+                "classNames": ["evt-asistio"] if r["asistio"] is True else [],
                 "extendedProps": {
-                    "asesor": r["ASESOR"],
-                    "correo": r["CORREO"],
-                    "numero": r["NUMERO"],
-                    "calificacion": r["CALIFICACION"],
-                    "semaforo": r["SEMAFORO"],
-                    "status_compra": r["STATUS_COMPRA"],
-                    "asistio": r["ASISTIO"],
-                    "notas": r["NOTAS"],
+                    "asesor": r["asesor"],
+                    "correo": r["correo"],
+                    "numero": r["numero"],
+                    "calificacion": r["calificacion"],
+                    "semaforo": r["semaforo"],
+                    "status_compra": r["status_compra"],
+                    "asistio": r["asistio"],
+                    "notas": r["notas"],
                     "wa_url": wa,
-                    "etiquetas": etiquetas,  # para chips si los quieres renderizar
+                    "etiquetas": etiquetas,
                 },
             })
         return jsonify(out), 200
@@ -3016,6 +3038,7 @@ def api_postventa_agenda_events():
     except Exception:
         traceback.print_exc()
         return jsonify([]), 200
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
