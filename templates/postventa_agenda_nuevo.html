@@ -31,12 +31,15 @@
 {% block scripts %}
 <script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
 <script>
-  // ✅ utils rápidas
+  // -------- Utils
   const isISODate = (s)=>/^\d{4}-\d{2}-\d{2}$/.test(String(s||"").trim());
   const isHHMM    = (s)=>/^\d{2}:\d{2}$/.test(String(s||"").trim());
   const tmpId     = ()=>"__tmp__"+(crypto?.randomUUID?.() || (Date.now()+"_"+Math.random()));
+  const AJAX_URL  = "/api/postventa/agenda/grid";
 
-  // --- Botón de acciones por fila
+  let lastSave = Promise.resolve(); // promesa del último PATCH en vuelo
+
+  // -------- Formateo de columna Acciones
   function accionesFmt(cell){
     const d = cell.getData();
     return d.event_id && !String(d.event_id).startsWith("__tmp__")
@@ -45,7 +48,7 @@
          <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
   }
 
-  // --- Acciones por fila (crear / eliminar / descartar)
+  // -------- Click en Acciones (Crear / Eliminar / Descartar)
   async function onActionClick(e, cell){
     const row = cell.getRow(), d = row.getData();
     const act = e.target?.dataset?.act;
@@ -70,17 +73,16 @@
     }
 
     if(act==="create"){
-      // Requisitos del POST /api/postventa/agenda
       const req = {nombre:d.nombre, correo:d.correo, asesor:d.asesor, fecha:d.fecha, hora:d.hora};
       for(const [k,v] of Object.entries(req)){
         if(!String(v||"").trim()){ alert("Falta " + k); return; }
       }
-      if(!isISODate(d.fecha)){ alert("Fecha inválida (formato YYYY-MM-DD)"); return; }
-      if(!isHHMM(d.hora)){ alert("Hora inválida (HH:MM en 24h)"); return; }
+      if(!isISODate(d.fecha)){ alert("Fecha inválida (YYYY-MM-DD)"); return; }
+      if(!isHHMM(d.hora)){ alert("Hora inválida (HH:MM 24h)"); return; }
 
       const payload = {
         nombre: d.nombre,
-        numero: d.telefono || "",       // POST espera 'numero'
+        numero: d.telefono || "",       // el POST espera 'numero'
         correo: d.correo,
         asesor: d.asesor,
         fecha: d.fecha,
@@ -98,16 +100,13 @@
         if(r.status===403){ alert("No autorizado"); return; }
         const j = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(j.error || "No se pudo crear");
-
-        // ⚠️ Cambia el id temporal por el real devuelto
-        row.update({event_id: j.id});
+        row.update({event_id: j.id}); // asigna el ID real
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
     }
   }
 
-  const AJAX_URL = "/api/postventa/agenda/grid";
-
+  // -------- Tabla
   const grid = new Tabulator("#grid", {
     ajaxURL: AJAX_URL,
     height: "72vh",
@@ -115,7 +114,7 @@
     index: "event_id",
     reactiveData: true,
 
-    // ✅ Normaliza respuesta y garantiza tipos esperados por los editores
+    // Normaliza la respuesta y tipos para los editores
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(r => ({
         ...r,
@@ -154,104 +153,63 @@
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // --- Filtro rápido
+  // -------- Guardado automático (PATCH por celda) — ÚNICA versión
+  async function onCellEdited(cell){
+    const row = cell.getRow(), d = row.getData();
+    if(!d.event_id) return;
+    if(String(d.event_id).startsWith("__tmp__")) return; // aún no creada en server
+
+    const field = cell.getField();
+    let value = cell.getValue();
+    if(field==="asistio"){
+      value = (value==="true") ? true : (value==="false" ? false : null);
+    }
+
+    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida"); grid.setData(AJAX_URL); return; }
+    if(field==="hora"  && value && !isHHMM(value)){ alert("Hora inválida"); grid.setData(AJAX_URL); return; }
+
+    // Encadena el guardado para no pisarnos con el reload
+    lastSave = (async ()=>{
+      try{
+        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
+          method:"PATCH", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({[field]: value})
+        });
+        if(r.status===403){ alert("No autorizado"); return; }
+        const j = await r.json().catch(()=> ({}));
+        if(!r.ok) throw new Error(j.error || "No se pudo guardar");
+        if (j.row) row.update(j.row); // aplica la versión que devuelve el backend
+      }catch(err){
+        alert(err.message || "Error al guardar");
+        grid.setData(AJAX_URL); // revertir
+      }
+    })();
+  }
+
+  // -------- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
   document.getElementById("q").addEventListener("input", (e)=>{
     const q = e.target.value.trim().toLowerCase();
     if(!q){ grid.clearFilter(true); return; }
-    grid.setFilter(function(data){
-      return fieldsToSearch.some(f => String(data[f]||"").toLowerCase().includes(q));
-    });
+    grid.setFilter((data)=> fieldsToSearch.some(f => String(data[f]||"").toLowerCase().includes(q)));
   });
 
-  // --- Recargar y nueva fila
-  document.getElementById("btn-reload").onclick = ()=>{
-    grid.setData(AJAX_URL);
+  // -------- Recargar (espera último PATCH) — ÚNICA versión
+  document.getElementById("btn-reload").onclick = async ()=>{
+    document.activeElement?.blur();       // commit de editor activo
+    await lastSave.catch(()=>{});         // espera último guardado
+    grid.setData(AJAX_URL + "?ts=" + Date.now()); // anti-cache
     if (window.calendar) window.calendar.refetchEvents();
   };
 
+  // -------- Nueva fila
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
-      event_id: tmpId(),            // 🔑 único local para evitar choques de índice
+      event_id: tmpId(),   // id temporal local
       fecha:"", hora:"",
       nombre:"", telefono:"", correo:"", asesor:"",
       calificacion:"", status_compra:"", asistio:"", notas:""
     }, true);
   };
-
-  // --- Guardado automático (PATCH por celda)
-  async function onCellEdited(cell){
-    const row = cell.getRow(), d = row.getData();
-    if(!d.event_id) return;
-
-    // evita enviar PATCH si todavía es fila nueva sin crear en servidor
-    if(String(d.event_id).startsWith("__tmp__")) return;
-
-    const field = cell.getField();
-    let value = cell.getValue();
-    if(field==="asistio"){
-      value = (value==="true") ? true : (value==="false" ? false : null);
-    }
-
-    // validaciones ligeras si editan fecha/hora
-    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida"); grid.setData(AJAX_URL); return; }
-    if(field==="hora"  && value && !isHHMM(value)){ alert("Hora inválida"); grid.setData(AJAX_URL); return; }
-
-    try{
-      const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
-        method:"PATCH", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({[field]: value})
-      });
-      if(r.status===403){ alert("No autorizado"); return; }
-      const j = await r.json().catch(()=> ({}));
-      if(!r.ok) throw new Error(j.error || "No se pudo guardar");
-      if (j.row) row.update(j.row); // servidor regresa normalizado (hora/fecha)
-    }catch(err){
-      alert(err.message || "Error al guardar");
-      grid.setData(AJAX_URL); // revertir
-    }
-  }
 </script>
-<script>
-  let lastSave = Promise.resolve();  // ⬅️ Promesa del último PATCH
-
-  async function onCellEdited(cell){
-    const row = cell.getRow(), d = row.getData();
-    if(!d.event_id) return;
-
-    const field = cell.getField();
-    let value = cell.getValue();
-    if(field==="asistio"){
-      value = (value==="true") ? true : (value==="false" ? false : null);
-    }
-    const payload = {[field]: value};
-
-    // ⬇️ Encadena y guarda la promesa
-    lastSave = (async ()=>{
-      try{
-        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
-          method:"PATCH", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify(payload)
-        });
-        const j = await r.json().catch(()=> ({}));
-        if(!r.ok) throw new Error(j.error || "No se pudo guardar");
-        if (j.row) row.update(j.row); // estado “vivo” sin recargar
-      }catch(err){
-        alert(err.message || "Error al guardar");
-        grid.setData(AJAX_URL);      // revertir si falló
-      }
-    })();
-  }
-
-  document.getElementById("btn-reload").onclick = async ()=>{
-    // Fuerza commit del editor activo antes de recargar
-    document.activeElement?.blur();
-    // Espera a que el último PATCH termine para no pisar el cambio
-    await lastSave.catch(()=>{});
-    // Recarga
-    grid.setData(AJAX_URL + "?ts=" + Date.now()); // anti-cache defensivo
-    if (window.calendar) window.calendar.refetchEvents();
-  };
-</script>
-
 {% endblock %}

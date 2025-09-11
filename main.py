@@ -2767,12 +2767,7 @@ def api_postventa_agenda_events():
         start = _to_date(request.args.get("start"))
         end = _to_date(request.args.get("end"))
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {
-            "1",
-            "true",
-            "si",
-            "sí",
-        }
+        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
 
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
@@ -2795,7 +2790,7 @@ def api_postventa_agenda_events():
 
         q = f"""
         WITH base AS (
-        SELECT
+          SELECT
             CAST(event_id AS STRING) AS ID,
             nombre        AS NOMBRE,
             telefono      AS NUMERO,
@@ -2808,10 +2803,18 @@ def api_postventa_agenda_events():
             status_compra AS STATUS_COMPRA,
             asistio       AS ASISTIO,
             notas         AS NOTAS
-        FROM `{AGENDA_LIVE_VIEW}`
-        {where_sql}
+          FROM `{AGENDA_LIVE_VIEW}`
+          {where_sql}
         ),
-        ...
+        ts AS (
+          SELECT
+            *,
+            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts   -- sin duración: mismo minuto
+          FROM base
+        )
+        SELECT * FROM ts
+        ORDER BY FECHA DESC, HORA DESC
         """
 
         job = bigquery.QueryJobConfig(query_parameters=params)
@@ -2819,15 +2822,13 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
-            # Color por asesor (definido)
             color = _color_for_asesor(r["ASESOR"] or "")
-            border = color
+            etiquetas = []
+            if r["SEMAFORO"]: etiquetas.append(str(r["SEMAFORO"]))
+            if r["STATUS_COMPRA"]: etiquetas.append(str(r["STATUS_COMPRA"]))
+            if r["ASISTIO"] is True: etiquetas.append("Asistió")
 
-            classes = []
-            if r["ASISTIO"] is True:
-                classes.append("evt-asistio")  # 👈 mantenemos solo esta clase
-
-            # URL de WhatsApp
+            # WhatsApp
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["NUMERO"] or "")
@@ -2837,31 +2838,27 @@ def api_postventa_agenda_events():
             except Exception:
                 pass
 
-            out.append(
-                {
-                    "id": r["ID"] or str(uuid.uuid4()),
-                    # Deja que FullCalendar pinte la hora; el título será solo el nombre
-                    "title": r["NOMBRE"],
-                    "start": r["start_ts"].isoformat() if r["start_ts"] else None,
-                    "end": r["end_ts"].isoformat() if r["end_ts"] else None,
-                    "backgroundColor": color,
-                    "borderColor": border,
-                    "classNames": classes,
-                    "extendedProps": {
-                        "asesor": r["ASESOR"],
-                        "correo": r["CORREO"],
-                        "numero": r["NUMERO"],
-                        "calificacion": r["CALIFICACION"],
-                        "semaforo": r[
-                            "SEMAFORO"
-                        ],  # no se usa en el front, lo dejamos por si acaso
-                        "status_compra": r["STATUS_COMPRA"],
-                        "asistio": r["ASISTIO"],
-                        "notas": r["NOTAS"],
-                        "wa_url": wa,
-                    },
-                }
-            )
+            out.append({
+                "id": r["ID"] or str(uuid.uuid4()),
+                "title": r["NOMBRE"],  # el front puede renderizar chips con extendedProps.etiquetas
+                "start": r["start_ts"].isoformat() if r["start_ts"] else None,
+                "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
+                "backgroundColor": color,
+                "borderColor": color,
+                "classNames": ["evt-asistio"] if r["ASISTIO"] is True else [],
+                "extendedProps": {
+                    "asesor": r["ASESOR"],
+                    "correo": r["CORREO"],
+                    "numero": r["NUMERO"],
+                    "calificacion": r["CALIFICACION"],
+                    "semaforo": r["SEMAFORO"],
+                    "status_compra": r["STATUS_COMPRA"],
+                    "asistio": r["ASISTIO"],
+                    "notas": r["NOTAS"],
+                    "wa_url": wa,
+                    "etiquetas": etiquetas,  # 👈 vuelve a estar disponible
+                },
+            })
         return jsonify(out), 200
 
     except Exception:
@@ -2878,9 +2875,7 @@ def api_postventa_agenda_patch_insert(event_id):
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # Mergemos fila completa (evitamos “coalesce por columnas” en la vista)
         newv = {**cur}
-
         if "fecha" in delta and delta["fecha"]: newv["fecha"] = (delta["fecha"] or "").strip()
         if "hora"  in delta and delta["hora"]:  newv["hora"]  = _norm_hhmm_to_time(delta["hora"])
         if "asistio" in delta:
@@ -2905,32 +2900,32 @@ def api_postventa_agenda_patch_insert(event_id):
             except (ValueError, TypeError):
                 newv["calificacion"] = None
 
-        # Flags consistentes
         newv["event_id"] = str(event_id)
         newv["is_deleted"] = False
 
         _agenda_insert_patch(newv)
-        latest = _agenda_get_latest_live(event_id)
 
-        # Normaliza para el front (fecha/hora a string amigable)
-        def _norm_row_for_front(r):
-            if not r: return None
-            r = dict(r)
-            r["fecha"] = r["fecha"].isoformat() if r.get("fecha") else ""
-            r["hora"]  = r["hora"].strftime("%H:%M") if r.get("hora") else ""
-            return r
-
-        latest = _norm_row_for_front(latest)
-        if not latest:
-            # Fallback: devolvemos lo que acabamos de intentar guardar
-            latest = _norm_row_for_front(newv)
-
-        return jsonify({"ok": True, "row": latest}), 200
-
+        # ⬇️ Normaliza y responde **lo que acabas de guardar**
+        out = {
+            "event_id": newv["event_id"],
+            "nombre": newv.get("nombre",""),
+            "telefono": newv.get("telefono",""),
+            "correo": newv.get("correo",""),
+            "asesor": newv.get("asesor",""),
+            "fecha": (newv.get("fecha") or ""),
+            "hora":  (newv.get("hora") or "")[:5] if isinstance(newv.get("hora"), str) else "",
+            "calificacion": newv.get("calificacion"),
+            "status_compra": newv.get("status_compra",""),
+            "asistio": newv.get("asistio"),
+            "notas": newv.get("notas",""),
+            "semaforo": newv.get("semaforo",""),
+        }
+        return jsonify({"ok": True, "row": out}), 200
 
     except Exception as e:
         app.logger.exception("PATCH agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
