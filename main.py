@@ -693,7 +693,10 @@ def _agenda_get_latest(event_id: str):
     SELECT *
     FROM (
         SELECT *,
-            ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+            ROW_NUMBER() OVER (
+              PARTITION BY CAST(event_id AS STRING)
+              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+            ) AS rn
         FROM `{AGENDA_TABLA}`
         WHERE CAST(event_id AS STRING) = @id
     )
@@ -2542,7 +2545,7 @@ def api_postventa_agenda_grid():
         calificacion, status_compra, asistio, notas,
         IFNULL(is_deleted, FALSE) AS is_deleted,
         updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC, created_at DESC
+        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
         ) AS rn
         FROM `{AGENDA_TABLA}`
     )
@@ -2560,7 +2563,7 @@ def api_postventa_agenda_grid():
         SAFE_CAST(hora  AS TIME) AS hora,
         calificacion, status_compra, asistio, notas,
         updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC, created_at DESC
+        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
         ) AS rn
         FROM `{AGENDA_TABLA}`
         WHERE IFNULL(status_compra,'') != "__DELETED__"
