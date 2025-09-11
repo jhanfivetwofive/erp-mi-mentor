@@ -92,9 +92,10 @@ IS_PROD = os.getenv("ENV", "").lower() in {"prod", "production", "live"}
 
 app.debug = not IS_PROD
 # En Cloud Run con HTTPS real, debe ser True
-app.config["SESSION_COOKIE_SECURE"] = bool(
-    os.getenv("SESSION_COOKIE_SECURE", "1" if IS_PROD else "0")
+app.config["SESSION_COOKIE_SECURE"] = (
+    os.getenv("SESSION_COOKIE_SECURE", "1" if IS_PROD else "0").lower() in {"1","true","yes"}
 )
+
 # Opcional: fuerza HTTPS (redirecciones) detrás de proxy si lo necesitas
 # from werkzeug.middleware.proxy_fix import ProxyFix
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -826,6 +827,60 @@ def _norm_hhmm_to_time(s: str) -> str:
     if not m: return "09:00:00"
     h, mm, ss = int(m.group(1)), m.group(2), m.group(3) or "00"
     return f"{h:02d}:{mm}:{ss}"
+
+
+def _agenda_get_latest_any(event_id: str):
+    """
+    Devuelve la última versión de un evento:
+    1) Intenta la vista en vivo (si existe/permisos)
+    2) Si falla/no hay fila, hace UNION ALL de base + patches y toma la más reciente
+    """
+    # 1) Vista LIVE
+    try:
+        row = _agenda_get_latest_live(event_id)
+        if row:
+            return row
+    except Exception as e:
+        app.logger.warning("LIVE view no disponible en dev o sin permisos: %s", e)
+
+    # 2) Fallback UNION base + patches
+    q = f"""
+    WITH u AS (
+      SELECT
+        CAST(event_id AS STRING) AS event_id,
+        nombre, telefono, correo, asesor,
+        fecha, hora, calificacion, status_compra, asistio, notas,
+        IFNULL(is_deleted, FALSE) AS is_deleted,
+        updated_at, created_at
+      FROM `{AGENDA_TABLA}`
+      WHERE CAST(event_id AS STRING) = @id
+      UNION ALL
+      SELECT
+        CAST(event_id AS STRING) AS event_id,
+        nombre, telefono, correo, asesor,
+        fecha, hora, calificacion, status_compra, asistio, notas,
+        IFNULL(is_deleted, FALSE) AS is_deleted,
+        updated_at, created_at
+      FROM `{AGENDA_PATCHES}`
+      WHERE CAST(event_id AS STRING) = @id
+    ),
+    r AS (
+      SELECT
+        u.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY event_id
+          ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+        ) AS rn
+      FROM u
+    )
+    SELECT * FROM r WHERE rn=1 LIMIT 1
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", str(event_id))]
+    )
+    row = next(iter(client.query(q, job_config=job).result()), None)
+    return dict(row) if row else None
+
 
 
 # -------------------------------------------------------------
@@ -2587,19 +2642,65 @@ def postventa_insights():
 @app.route("/api/postventa/agenda/grid")
 @role_required("postventa", "admin")
 def api_postventa_agenda_grid():
-    q = f"""
-    SELECT
-      CAST(event_id AS STRING) AS event_id,
-      nombre, telefono, correo, asesor,
-      SAFE_CAST(fecha AS DATE) AS fecha,
-      SAFE_CAST(hora  AS TIME) AS hora,
-      calificacion, status_compra, asistio, notas,
-      updated_at
-    FROM `{AGENDA_LIVE_VIEW}`
-    ORDER BY fecha DESC, hora DESC
-    LIMIT 1000
-    """
-    rows = client.query(q).result()
+    # 1) Intenta la vista LIVE (rápida y limpia)
+    try:
+        q = f"""
+        SELECT
+          CAST(event_id AS STRING) AS event_id,
+          nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, status_compra, asistio, notas,
+          updated_at
+        FROM `{AGENDA_LIVE_VIEW}`
+        WHERE IFNULL(is_deleted, FALSE) = FALSE
+        ORDER BY fecha DESC, hora DESC
+        LIMIT 1000
+        """
+        rows = client.query(q).result()
+    except Exception as e:
+        app.logger.warning("FALLBACK agenda grid (sin LIVE view): %s", e)
+        # 2) Fallback: union base + patches y toma la última por event_id
+        q = f"""
+        WITH u AS (
+          SELECT
+            CAST(event_id AS STRING) AS event_id,
+            nombre, telefono, correo, asesor,
+            fecha, hora, calificacion, status_compra, asistio, notas,
+            IFNULL(is_deleted, FALSE) AS is_deleted,
+            updated_at, created_at
+          FROM `{AGENDA_TABLA}`
+          UNION ALL
+          SELECT
+            CAST(event_id AS STRING) AS event_id,
+            nombre, telefono, correo, asesor,
+            fecha, hora, calificacion, status_compra, asistio, notas,
+            IFNULL(is_deleted, FALSE) AS is_deleted,
+            updated_at, created_at
+          FROM `{AGENDA_PATCHES}`
+        ),
+        r AS (
+          SELECT
+            u.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY event_id
+              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+            ) AS rn
+          FROM u
+        )
+        SELECT
+          event_id, nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, status_compra, asistio, notas,
+          updated_at
+        FROM r
+        WHERE rn=1 AND is_deleted = FALSE
+        ORDER BY fecha DESC, hora DESC
+        LIMIT 1000
+        """
+        rows = client.query(q).result()
+
     out = []
     for r in rows:
         d = dict(r)
@@ -2607,6 +2708,7 @@ def api_postventa_agenda_grid():
         d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
         out.append(d)
     return jsonify(out)
+
 
 
 @app.route("/postventa/agenda")
@@ -2648,65 +2750,44 @@ def postventa_agenda_nuevo_page():
 @app.route("/api/postventa/agenda", methods=["POST"])
 def api_postventa_agenda_create():
     try:
-        # Autorización
         rol = current_user_role()
         if rol not in ("postventa", "admin"):
             return jsonify({"error": "No autorizado"}), 403
 
         data = request.get_json(force=True) or {}
-        # Campos requeridos
         nombre = (data.get("nombre") or "").strip()
         numero_raw = (data.get("numero") or "").strip()
         correo = _normalize_email(data.get("correo") or "")
         asesor = (data.get("asesor") or "").strip()
-        fecha = (data.get("fecha") or "").strip()  # YYYY-MM-DD
-        hora = (data.get("hora") or "").strip()  # HH:MM
-        calificacion = data.get("calificacion")
-        semaforo = (
-            data.get("semaforo") or ""
-        ).strip()  # Verde/Amarillo/Rojo/Reagendar/Agendada
+        fecha = (data.get("fecha") or "").strip()
+        hora  = (data.get("hora")  or "").strip()
+        calificacion  = data.get("calificacion")
+        semaforo      = (data.get("semaforo") or "").strip()
         status_compra = (data.get("status_compra") or "").strip()
-        asistio = data.get("asistio", None)  # True/False/None
-        notas = (data.get("notas") or "").strip()
+        asistio       = data.get("asistio", None)
+        notas         = (data.get("notas") or "").strip()
 
         errors = []
-        if not nombre:
-            errors.append("Falta el nombre.")
-        if not correo:
-            errors.append("Falta el correo.")
-        if not asesor:
-            errors.append("Falta el asesor.")
-        if not fecha:
-            errors.append("Falta la fecha (YYYY-MM-DD).")
-        if not hora:
-            errors.append("Falta la hora (HH:MM).")
+        if not nombre: errors.append("Falta el nombre.")
+        if not correo: errors.append("Falta el correo.")
+        if not asesor: errors.append("Falta el asesor.")
+        if not fecha:  errors.append("Falta la fecha (YYYY-MM-DD).")
+        if not hora:   errors.append("Falta la hora (HH:MM).")
         if errors:
             return jsonify({"error": " | ".join(errors)}), 400
 
-        # Normaliza teléfono y tipos
         numero = _normalize_phone(numero_raw)
         try:
             calificacion = int(calificacion) if calificacion not in (None, "") else None
         except Exception:
             calificacion = None
         if isinstance(asistio, str):
-            asistio = asistio.strip().lower() in {"1", "true", "si", "sí", "yes", "y"}
+            asistio = asistio.strip().lower() in {"1","true","si","sí","yes","y"}
 
-        # ...después de validar...
-        hora_norm = (
-            hora if len(hora) == 8 else (hora + ":00" if len(hora) == 5 else "09:00:00")
-        )
+        hora_norm = hora if len(hora) == 8 else (hora + ":00" if len(hora) == 5 else "09:00:00")
         try:
             dow_idx = datetime.strptime(fecha, "%Y-%m-%d").weekday()
-            dow_es = [
-                "Lunes",
-                "Martes",
-                "Miércoles",
-                "Jueves",
-                "Viernes",
-                "Sábado",
-                "Domingo",
-            ][dow_idx]
+            dow_es = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"][dow_idx]
         except Exception:
             dow_es = None
 
@@ -2715,7 +2796,7 @@ def api_postventa_agenda_create():
         now_iso = _now_iso_utc()
 
         row = {
-            "natural_key": natural_key,
+            "natural_key": natural_key,   # si no existe en la tabla, el helper lo ignora
             "event_id": event_id,
             "nombre": nombre,
             "telefono": numero,
@@ -2729,21 +2810,24 @@ def api_postventa_agenda_create():
             "status_compra": status_compra,
             "asistio": asistio,
             "notas": notas,
-            "source": "app",
+            "source": "app",              # idem, se ignora si no existe
             "created_at": now_iso,
             "updated_at": now_iso,
         }
-        errors_bq = client.insert_rows_json(AGENDA_TABLA, [row])
-        if errors_bq:
-            return jsonify({"error": f"BigQuery insert: {errors_bq}"}), 500
+
+        # ⬇️ inserta seguro según el schema real de la tabla
+        _agenda_insert_version(row)
 
         return jsonify({"message": "Diagnóstico agendado", "id": event_id}), 200
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
+
 @app.route("/api/postventa/agenda/events")
+@role_required("postventa", "admin")
 def api_postventa_agenda_events():
     """
     FullCalendar llama con ?start=...&end=...
@@ -2765,7 +2849,7 @@ def api_postventa_agenda_events():
                 return datetime.strptime(x[:10], "%Y-%m-%d").date()
 
         start = _to_date(request.args.get("start"))
-        end = _to_date(request.args.get("end"))
+        end   = _to_date(request.args.get("end"))
         asesor_filtro = (request.args.get("asesor") or "").strip()
         mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
 
@@ -2785,40 +2869,91 @@ def api_postventa_agenda_events():
         elif asesor_filtro:
             wh.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
-
         where_sql = ("WHERE " + " AND ".join(wh)) if wh else ""
 
-        q = f"""
-        WITH base AS (
-          SELECT
-            CAST(event_id AS STRING) AS ID,
-            nombre        AS NOMBRE,
-            telefono      AS NUMERO,
-            correo        AS CORREO,
-            asesor        AS ASESOR,
-            SAFE_CAST(fecha AS DATE) AS FECHA,
-            SAFE_CAST(hora  AS TIME) AS HORA,
-            calificacion  AS CALIFICACION,
-            semaforo      AS SEMAFORO,
-            status_compra AS STATUS_COMPRA,
-            asistio       AS ASISTIO,
-            notas         AS NOTAS
-          FROM `{AGENDA_LIVE_VIEW}`
-          {where_sql}
-        ),
-        ts AS (
-          SELECT
-            *,
-            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts   -- sin duración: mismo minuto
-          FROM base
-        )
-        SELECT * FROM ts
-        ORDER BY FECHA DESC, HORA DESC
-        """
-
         job = bigquery.QueryJobConfig(query_parameters=params)
-        rows = client.query(q, job_config=job).result()
+
+        # 1) Intento con la vista LIVE
+        try:
+            q_live = f"""
+            WITH base AS (
+              SELECT
+                CAST(event_id AS STRING) AS ID,
+                nombre        AS NOMBRE,
+                telefono      AS NUMERO,
+                correo        AS CORREO,
+                asesor        AS ASESOR,
+                SAFE_CAST(fecha AS DATE) AS FECHA,
+                SAFE_CAST(hora  AS TIME) AS HORA,
+                calificacion  AS CALIFICACION,
+                semaforo      AS SEMAFORO,
+                status_compra AS STATUS_COMPRA,
+                asistio       AS ASISTIO,
+                notas         AS NOTAS
+              FROM `{AGENDA_LIVE_VIEW}`
+              {where_sql}
+            )
+            SELECT *,
+                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+            FROM base
+            ORDER BY FECHA DESC, HORA DESC
+            """
+            rows = client.query(q_live, job_config=job).result()
+        except Exception as e:
+            app.logger.warning("FALLBACK agenda events (sin LIVE view): %s", e)
+            # 2) Fallback: última versión por event_id desde base + patches
+            q_fb = f"""
+            WITH u AS (
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+                IFNULL(is_deleted, FALSE) AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_TABLA}`
+              UNION ALL
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+                IFNULL(is_deleted, FALSE) AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_PATCHES}`
+            ),
+            r AS (
+              SELECT u.*,
+                     ROW_NUMBER() OVER (
+                        PARTITION BY event_id
+                        ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+                     ) rn
+              FROM u
+            ),
+            base AS (
+              SELECT
+                event_id AS ID,
+                nombre   AS NOMBRE,
+                telefono AS NUMERO,
+                correo   AS CORREO,
+                asesor   AS ASESOR,
+                SAFE_CAST(fecha AS DATE) AS FECHA,
+                SAFE_CAST(hora  AS TIME) AS HORA,
+                calificacion  AS CALIFICACION,
+                semaforo      AS SEMAFORO,
+                status_compra AS STATUS_COMPRA,
+                asistio       AS ASISTIO,
+                notas         AS NOTAS
+              FROM r
+              WHERE rn=1 AND is_deleted = FALSE
+            )
+            SELECT *,
+                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+            FROM base
+            {where_sql}
+            ORDER BY FECHA DESC, HORA DESC
+            """
+            rows = client.query(q_fb, job_config=job).result()
 
         out = []
         for r in rows:
@@ -2828,7 +2963,6 @@ def api_postventa_agenda_events():
             if r["STATUS_COMPRA"]: etiquetas.append(str(r["STATUS_COMPRA"]))
             if r["ASISTIO"] is True: etiquetas.append("Asistió")
 
-            # WhatsApp
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["NUMERO"] or "")
@@ -2840,7 +2974,7 @@ def api_postventa_agenda_events():
 
             out.append({
                 "id": r["ID"] or str(uuid.uuid4()),
-                "title": r["NOMBRE"],  # el front puede renderizar chips con extendedProps.etiquetas
+                "title": r["NOMBRE"],
                 "start": r["start_ts"].isoformat() if r["start_ts"] else None,
                 "end":   r["end_ts"].isoformat()   if r["end_ts"]   else None,
                 "backgroundColor": color,
@@ -2856,7 +2990,7 @@ def api_postventa_agenda_events():
                     "asistio": r["ASISTIO"],
                     "notas": r["NOTAS"],
                     "wa_url": wa,
-                    "etiquetas": etiquetas,  # 👈 vuelve a estar disponible
+                    "etiquetas": etiquetas,
                 },
             })
         return jsonify(out), 200
@@ -2866,18 +3000,21 @@ def api_postventa_agenda_events():
         return jsonify([]), 200
 
 
+
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_patch_insert(event_id):
     try:
         delta = request.get_json(force=True) or {}
-        cur = _agenda_get_latest_live(event_id)
+        cur = _agenda_get_latest_any(event_id)   # ⬅️ antes: _agenda_get_latest_live
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
         newv = {**cur}
-        if "fecha" in delta and delta["fecha"]: newv["fecha"] = (delta["fecha"] or "").strip()
-        if "hora"  in delta and delta["hora"]:  newv["hora"]  = _norm_hhmm_to_time(delta["hora"])
+        if "fecha" in delta and delta["fecha"]:
+            newv["fecha"] = (delta["fecha"] or "").strip()
+        if "hora" in delta and delta["hora"]:
+            newv["hora"] = _norm_hhmm_to_time(delta["hora"])
         if "asistio" in delta:
             v = delta["asistio"]
             if isinstance(v, str):
@@ -2900,27 +3037,16 @@ def api_postventa_agenda_patch_insert(event_id):
             except (ValueError, TypeError):
                 newv["calificacion"] = None
 
-        newv["event_id"] = str(event_id)
+        newv["event_id"]   = str(event_id)
         newv["is_deleted"] = False
 
         _agenda_insert_patch(newv)
 
-        # ⬇️ Normaliza y responde **lo que acabas de guardar**
-        out = {
-            "event_id": newv["event_id"],
-            "nombre": newv.get("nombre",""),
-            "telefono": newv.get("telefono",""),
-            "correo": newv.get("correo",""),
-            "asesor": newv.get("asesor",""),
-            "fecha": (newv.get("fecha") or ""),
-            "hora":  (newv.get("hora") or "")[:5] if isinstance(newv.get("hora"), str) else "",
-            "calificacion": newv.get("calificacion"),
-            "status_compra": newv.get("status_compra",""),
-            "asistio": newv.get("asistio"),
-            "notas": newv.get("notas",""),
-            "semaforo": newv.get("semaforo",""),
-        }
-        return jsonify({"ok": True, "row": out}), 200
+        latest = _agenda_get_latest_any(event_id)  # ⬅️ antes: _agenda_get_latest_live
+        if latest:
+            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
+            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
+        return jsonify({"ok": True, "row": latest}), 200
 
     except Exception as e:
         app.logger.exception("PATCH agenda → INSERT PATCH failed")
@@ -2932,7 +3058,7 @@ def api_postventa_agenda_patch_insert(event_id):
 @role_required("postventa", "admin")
 def api_postventa_agenda_delete(event_id):
     try:
-        cur = _agenda_get_latest_live(event_id)  # ⬅️ usa la VIEW
+        cur = _agenda_get_latest_any(event_id)  # ⬅️ antes: _agenda_get_latest_live
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
@@ -2946,6 +3072,7 @@ def api_postventa_agenda_delete(event_id):
     except Exception as e:
         app.logger.exception("DELETE agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 
