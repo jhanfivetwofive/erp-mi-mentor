@@ -221,6 +221,10 @@ COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 # ---- Postventa: constantes de tablas ----
 POSTVENTA_TABLA_BASE = "fivetwofive-20.POSTVENTA.DB_DIAGNOSTICO_POSTVENTA"
+AGENDA_TABLA       = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS"
+AGENDA_PATCHES     = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS_PATCH"
+AGENDA_LIVE_VIEW   = "fivetwofive-20.INSUMOS.VW_AGENDA_DIAGNOSTICOS_LIVE"
+
 
 # ---- Cuestionario Diagnóstico (opciones visibles) ----
 PREGUNTAS_DEF = {
@@ -709,6 +713,19 @@ def _agenda_get_latest(event_id: str):
     row = next(iter(client.query(q, job_config=job).result()), None)
     return dict(row) if row else None
 
+def _agenda_get_latest_live(event_id: str):
+    q = f"""
+    SELECT *
+    FROM `{AGENDA_LIVE_VIEW}`
+    WHERE CAST(event_id AS STRING) = @id
+    LIMIT 1
+    """
+    job = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("id","STRING", str(event_id))]
+    )
+    row = next(iter(client.query(q, job_config=job).result()), None)
+    return dict(row) if row else None
+
 
 def _agenda_norm_time(hhmm_or_hhmmss: str) -> str:
     s = (hhmm_or_hhmmss or "").strip()
@@ -773,6 +790,24 @@ def _agenda_insert_version(row: dict):
     errors = client.insert_rows_json(AGENDA_TABLA, [clean])
     if errors:
         raise RuntimeError(str(errors))
+    
+def _agenda_insert_patch(row: dict):
+    now_iso = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
+    row = {**row}
+    row.setdefault("created_at", now_iso)
+    row.setdefault("updated_at", now_iso)
+    allowed = _allowed_fields(AGENDA_PATCHES)
+    clean = {k: row[k] for k in row.keys() if k in allowed}
+    errs = client.insert_rows_json(AGENDA_PATCHES, [clean])
+    if errs:
+        raise RuntimeError(str(errs))
+
+def _norm_hhmm_to_time(s: str) -> str:
+    s = (s or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
+    if not m: return "09:00:00"
+    h, mm, ss = int(m.group(1)), m.group(2), m.group(3) or "00"
+    return f"{h:02d}:{mm}:{ss}"
 
 
 # -------------------------------------------------------------
@@ -2534,58 +2569,24 @@ def postventa_insights():
 @app.route("/api/postventa/agenda/grid")
 @role_required("postventa", "admin")
 def api_postventa_agenda_grid():
-    q_with_flag = f"""
-    SELECT *
-    FROM (
-        SELECT
-        CAST(event_id AS STRING) AS event_id,
-        nombre, telefono, correo, asesor,
-        SAFE_CAST(fecha AS DATE) AS fecha,
-        SAFE_CAST(hora  AS TIME) AS hora,
-        calificacion, status_compra, asistio, notas,
-        IFNULL(is_deleted, FALSE) AS is_deleted,
-        updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
-        ) AS rn
-        FROM `{AGENDA_TABLA}`
-    )
-    WHERE rn = 1 AND is_deleted = FALSE
+    q = f"""
+    SELECT
+      CAST(event_id AS STRING) AS event_id,
+      nombre, telefono, correo, asesor,
+      SAFE_CAST(fecha AS DATE) AS fecha,
+      SAFE_CAST(hora  AS TIME) AS hora,
+      calificacion, status_compra, asistio, notas,
+      updated_at
+    FROM `{AGENDA_LIVE_VIEW}`
     ORDER BY fecha DESC, hora DESC
     LIMIT 1000
     """
-    q_no_flag = f"""
-    SELECT *
-    FROM (
-        SELECT
-        CAST(event_id AS STRING) AS event_id,
-        nombre, telefono, correo, asesor,
-        SAFE_CAST(fecha AS DATE) AS fecha,
-        SAFE_CAST(hora  AS TIME) AS hora,
-        calificacion, status_compra, asistio, notas,
-        updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
-        ) AS rn
-        FROM `{AGENDA_TABLA}`
-        WHERE IFNULL(status_compra,'') != "__DELETED__"
-    )
-    WHERE rn = 1
-    ORDER BY fecha DESC, hora DESC
-    LIMIT 1000
-    """
-    try:
-        rows = client.query(q_with_flag).result()
-    except BadRequest as e:
-        # Si el error es “Unrecognized name: is_deleted”, caemos al plan B
-        if "is_deleted" in str(e):
-            rows = client.query(q_no_flag).result()
-        else:
-            raise
-
+    rows = client.query(q).result()
     out = []
     for r in rows:
         d = dict(r)
         d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
-        d["hora"] = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
+        d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
         out.append(d)
     return jsonify(out)
 
@@ -2789,23 +2790,10 @@ def api_postventa_agenda_events():
             status_compra AS STATUS_COMPRA,
             asistio       AS ASISTIO,
             notas         AS NOTAS
-        FROM `{AGENDA_TABLA}`
+        FROM `{AGENDA_LIVE_VIEW}`
         {where_sql}
         ),
-        filtrado AS (
-        SELECT *
-        FROM base
-        WHERE FECHA IS NOT NULL AND HORA IS NOT NULL
-        ),
-        t AS (
-        SELECT
-            *,
-            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-            TIMESTAMP_ADD(TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}"), INTERVAL 60 MINUTE) AS end_ts
-        FROM filtrado
-        )
-        SELECT * FROM t
-        ORDER BY FECHA, HORA, ASESOR, NOMBRE
+        ...
         """
 
         job = bigquery.QueryJobConfig(query_parameters=params)
@@ -2865,76 +2853,55 @@ def api_postventa_agenda_events():
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
 @role_required("postventa", "admin")
-def api_postventa_agenda_update(event_id):
+def api_postventa_agenda_patch_insert(event_id):
     try:
-        data = request.get_json(force=True) or {}
-        cur = _agenda_get_latest(event_id)
+        delta = request.get_json(force=True) or {}
+        cur = _agenda_get_latest_live(event_id)
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # clona el registro actual como base de la nueva versión
+        # Mergemos fila completa (evitamos “coalesce por columnas” en la vista)
         newv = {**cur}
-        newv.pop("rn", None)
 
-        # aplica cambios permitidos
-        if "fecha" in data and data["fecha"]:
-            newv["fecha"] = (data["fecha"] or "").strip()
-
-        if "hora" in data and data["hora"]:
-            newv["hora"] = _agenda_norm_time(data["hora"])  # HH:MM:SS
-
-        if "asistio" in data:
-            v = data["asistio"]
+        if "fecha" in delta and delta["fecha"]: newv["fecha"] = (delta["fecha"] or "").strip()
+        if "hora"  in delta and delta["hora"]:  newv["hora"]  = _norm_hhmm_to_time(delta["hora"])
+        if "asistio" in delta:
+            v = delta["asistio"]
             if isinstance(v, str):
                 vv = v.strip().lower()
-                if vv in {"1", "true", "sí", "si", "yes", "y"}:
-                    v = True
-                elif vv in {"0", "false", "no", "n"}:
-                    v = False
-                else:
-                    v = None
-            elif v in (1, 0):
-                v = bool(v)
-            elif v is not None and not isinstance(v, bool):
-                v = None
+                v = True if vv in {"1","true","sí","si","yes","y"} else False if vv in {"0","false","no","n"} else None
+            elif v in (1,0): v = bool(v)
+            elif v is not None and not isinstance(v, bool): v = None
             newv["asistio"] = v
-
-        if "semaforo" in data:
-            newv["semaforo"] = (data["semaforo"] or "").strip()
-
-        if "status_compra" in data:
-            newv["status_compra"] = (data["status_compra"] or "").strip()
-
-        if "notas" in data:
-            newv["notas"] = data["notas"]
-
-        # extra editables
-        if "nombre" in data:
-            newv["nombre"] = (data["nombre"] or "").strip()
-        if "telefono" in data:
-            newv["telefono"] = _normalize_phone(data["telefono"] or "")
-        if "correo" in data:
-            newv["correo"] = _normalize_email(data["correo"] or "")
-        if "asesor" in data:
-            newv["asesor"] = (data["asesor"] or "").strip()
-        if "calificacion" in data:
+        if "status_compra" in delta: newv["status_compra"] = (delta["status_compra"] or "").strip()
+        if "semaforo" in delta:      newv["semaforo"]      = (delta["semaforo"] or "").strip()
+        if "notas" in delta:         newv["notas"]         = delta["notas"]
+        if "nombre" in delta:        newv["nombre"]        = (delta["nombre"] or "").strip()
+        if "telefono" in delta:      newv["telefono"]      = _normalize_phone(delta["telefono"] or "")
+        if "correo" in delta:        newv["correo"]        = _normalize_email(delta["correo"] or "")
+        if "asesor" in delta:        newv["asesor"]        = (delta["asesor"] or "").strip()
+        if "calificacion" in delta:
             try:
-                newv["calificacion"] = (
-                    int(data["calificacion"])
-                    if data["calificacion"] not in ("", None)
-                    else None
-                )
+                cv = delta["calificacion"]
+                newv["calificacion"] = int(cv) if cv not in ("", None) else None
             except (ValueError, TypeError):
                 newv["calificacion"] = None
 
-        if _has_col(AGENDA_TABLA, "is_deleted"):
-            newv["is_deleted"] = False
+        # Flags consistentes
+        newv["event_id"] = str(event_id)
+        newv["is_deleted"] = False
 
-        _agenda_insert_version(newv)
-        latest = _agenda_get_latest(event_id)
+        _agenda_insert_patch(newv)
+        latest = _agenda_get_latest_live(event_id)
+
+        # Normaliza para el front (fecha/hora a string amigable)
+        if latest:
+            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
+            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
         return jsonify({"ok": True, "row": latest}), 200
+
     except Exception as e:
-        app.logger.exception("PATCH agenda (append-only) failed")
+        app.logger.exception("PATCH agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
 
 
@@ -2942,24 +2909,21 @@ def api_postventa_agenda_update(event_id):
 @role_required("postventa", "admin")
 def api_postventa_agenda_delete(event_id):
     try:
-        cur = _agenda_get_latest(event_id)
+        cur = _agenda_get_latest_live(event_id)  # ⬅️ usa la VIEW
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        newv = {**cur}
-        newv.pop("rn", None)
+        patch = {**cur}
+        patch["event_id"]   = str(event_id)
+        patch["is_deleted"] = True
 
-        if _has_col(AGENDA_TABLA, "is_deleted"):
-            newv["is_deleted"] = True
-            _agenda_insert_version(newv)
-        else:
-            newv["status_compra"] = "__DELETED__"
-            _agenda_insert_version(newv)
+        _agenda_insert_patch(patch)
+        return jsonify({"ok": True}), 200
 
-        return jsonify({"ok": True})
     except Exception as e:
-        app.logger.exception("DELETE agenda (append-only) failed")
+        app.logger.exception("DELETE agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 # -------------------- Comunidad: Lista y Panel --------------------

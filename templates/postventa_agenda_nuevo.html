@@ -31,10 +31,15 @@
 {% block scripts %}
 <script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
 <script>
+  // ✅ utils rápidas
+  const isISODate = (s)=>/^\d{4}-\d{2}-\d{2}$/.test(String(s||"").trim());
+  const isHHMM    = (s)=>/^\d{2}:\d{2}$/.test(String(s||"").trim());
+  const tmpId     = ()=>"__tmp__"+(crypto?.randomUUID?.() || (Date.now()+"_"+Math.random()));
+
   // --- Botón de acciones por fila
   function accionesFmt(cell){
     const d = cell.getData();
-    return d.event_id
+    return d.event_id && !String(d.event_id).startsWith("__tmp__")
       ? `<button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`
       : `<button class="btn btn-sm btn-primary" data-act="create">Crear</button>
          <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
@@ -50,23 +55,29 @@
       if(!confirm("¿Eliminar esta cita?")) return;
       try{
         const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {method:"DELETE"});
-        if(!r.ok){
-          const j = await r.json().catch(()=> ({}));
-          throw new Error(j.error || "No se pudo eliminar");
-        }
+        if(r.status===403){ alert("No autorizado"); return; }
+        const j = await r.json().catch(()=> ({}));
+        if(!r.ok) throw new Error(j.error || "No se pudo eliminar");
         row.delete();
-        // si tienes calendar en otra vista reusada:
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al eliminar"); }
       return;
     }
 
-    if(act==="create" && !d.event_id){
+    if(act==="create" && d.event_id && !String(d.event_id).startsWith("__tmp__")){
+      alert("Esta fila ya existe.");
+      return;
+    }
+
+    if(act==="create"){
       // Requisitos del POST /api/postventa/agenda
       const req = {nombre:d.nombre, correo:d.correo, asesor:d.asesor, fecha:d.fecha, hora:d.hora};
       for(const [k,v] of Object.entries(req)){
         if(!String(v||"").trim()){ alert("Falta " + k); return; }
       }
+      if(!isISODate(d.fecha)){ alert("Fecha inválida (formato YYYY-MM-DD)"); return; }
+      if(!isHHMM(d.hora)){ alert("Hora inválida (HH:MM en 24h)"); return; }
+
       const payload = {
         nombre: d.nombre,
         numero: d.telefono || "",       // POST espera 'numero'
@@ -84,35 +95,45 @@
           method:"POST", headers: {"Content-Type":"application/json"},
           body: JSON.stringify(payload)
         });
+        if(r.status===403){ alert("No autorizado"); return; }
         const j = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(j.error || "No se pudo crear");
-        row.update({event_id: j.id}); // asigna el id devuelto
+
+        // ⚠️ Cambia el id temporal por el real devuelto
+        row.update({event_id: j.id});
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
     }
   }
 
-  // --- Tabla
   const AJAX_URL = "/api/postventa/agenda/grid";
 
   const grid = new Tabulator("#grid", {
     ajaxURL: AJAX_URL,
     height: "72vh",
     layout: "fitColumns",
-    index: "event_id",         // usamos event_id como índice interno
+    index: "event_id",
     reactiveData: true,
+
+    // ✅ Normaliza respuesta y garantiza tipos esperados por los editores
+    ajaxResponse: function(url, params, resp){
+      return (resp || []).map(r => ({
+        ...r,
+        event_id: String(r.event_id || ""),
+        fecha: String(r.fecha || "").slice(0,10),
+        hora:  String(r.hora || "").slice(0,5),
+        asistio: r.asistio===true ? "true" : r.asistio===false ? "false" : "",
+      }));
+    },
+
+    ajaxError: function(xhr){
+      if(xhr?.status===403) alert("No autorizado");
+    },
+
     columns: [
       {title:"Acciones", width:160, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
-
-      // 🔒 No mostramos el ID al usuario (pero lo tenemos como index arriba)
-      // {title:"ID", field:"event_id", visible:false},
-
-      {title:"Fecha", field:"fecha", width:110, editor:"input",
-        mutator: (v)=>String(v||"").slice(0,10)
-      },
-      {title:"Hora",  field:"hora",  width:90,  editor:"input",
-        mutator: (v)=>String(v||"").slice(0,5)
-      },
+      {title:"Fecha", field:"fecha", width:110, editor:"input", mutator:(v)=>String(v||"").slice(0,10)},
+      {title:"Hora",  field:"hora",  width:90,  editor:"input", mutator:(v)=>String(v||"").slice(0,5)},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
       {title:"Teléfono", field:"telefono", width:120, editor:"input"},
       {title:"Correo",   field:"correo",   width:240, editor:"input"},
@@ -133,7 +154,7 @@
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // --- Filtro rápido (nombre/correo/asesor/notas)
+  // --- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
   document.getElementById("q").addEventListener("input", (e)=>{
     const q = e.target.value.trim().toLowerCase();
@@ -145,40 +166,46 @@
 
   // --- Recargar y nueva fila
   document.getElementById("btn-reload").onclick = ()=>{
-    // Tabulator no hace fetch sin argumentos; fuerza la URL:
     grid.setData(AJAX_URL);
     if (window.calendar) window.calendar.refetchEvents();
   };
 
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
-      event_id:"",                 // vacío → fila nueva
+      event_id: tmpId(),            // 🔑 único local para evitar choques de índice
       fecha:"", hora:"",
       nombre:"", telefono:"", correo:"", asesor:"",
       calificacion:"", status_compra:"", asistio:"", notas:""
-    }, true); // true = arriba de la tabla
+    }, true);
   };
 
-  // --- Guardado automático para filas existentes (PATCH)
+  // --- Guardado automático (PATCH por celda)
   async function onCellEdited(cell){
     const row = cell.getRow(), d = row.getData();
     if(!d.event_id) return;
+
+    // evita enviar PATCH si todavía es fila nueva sin crear en servidor
+    if(String(d.event_id).startsWith("__tmp__")) return;
 
     const field = cell.getField();
     let value = cell.getValue();
     if(field==="asistio"){
       value = (value==="true") ? true : (value==="false" ? false : null);
     }
-    const payload = {[field]: value};
+
+    // validaciones ligeras si editan fecha/hora
+    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida"); grid.setData(AJAX_URL); return; }
+    if(field==="hora"  && value && !isHHMM(value)){ alert("Hora inválida"); grid.setData(AJAX_URL); return; }
 
     try{
       const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
         method:"PATCH", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
+        body: JSON.stringify({[field]: value})
       });
+      if(r.status===403){ alert("No autorizado"); return; }
       const j = await r.json().catch(()=> ({}));
       if(!r.ok) throw new Error(j.error || "No se pudo guardar");
-      if (j.row) row.update(j.row); // 👈 evita parpadeos/reload
+      if (j.row) row.update(j.row); // servidor regresa normalizado (hora/fecha)
     }catch(err){
       alert(err.message || "Error al guardar");
       grid.setData(AJAX_URL); // revertir
