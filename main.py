@@ -2825,9 +2825,7 @@ def api_postventa_agenda_create():
         return jsonify({"error": str(e)}), 500
 
 
-
 @app.route("/api/postventa/agenda/events")
-@role_required("postventa", "admin")
 def api_postventa_agenda_events():
     """
     FullCalendar llama con ?start=...&end=...
@@ -2839,7 +2837,7 @@ def api_postventa_agenda_events():
         if "user" not in session:
             return jsonify([]), 200
 
-        def _to_date(x):
+        def _to_date(x: str):
             if not x:
                 return None
             x = x.replace("Z", "")
@@ -2856,6 +2854,7 @@ def api_postventa_agenda_events():
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
+        # WHERE dinámico (reutilizable para LIVE y para el fallback)
         wh, params = [], []
         if start:
             wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
@@ -2869,40 +2868,48 @@ def api_postventa_agenda_events():
         elif asesor_filtro:
             wh.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
+
         where_sql = ("WHERE " + " AND ".join(wh)) if wh else ""
 
-        job = bigquery.QueryJobConfig(query_parameters=params)
-
-        # 1) Intento con la vista LIVE
+        # ---------- 1) PRIMER INTENTO: LIVE VIEW ----------
+        q_live = f"""
+        WITH base AS (
+          SELECT
+            CAST(event_id AS STRING) AS ID,
+            nombre        AS NOMBRE,
+            telefono      AS NUMERO,
+            correo        AS CORREO,
+            asesor        AS ASESOR,
+            SAFE_CAST(fecha AS DATE) AS FECHA,
+            SAFE_CAST(hora  AS TIME) AS HORA,
+            calificacion  AS CALIFICACION,
+            semaforo      AS SEMAFORO,
+            status_compra AS STATUS_COMPRA,
+            asistio       AS ASISTIO,
+            notas         AS NOTAS
+          FROM `{AGENDA_LIVE_VIEW}`
+          {where_sql}
+          AND IFNULL(is_deleted, FALSE) = FALSE
+        ),
+        ts AS (
+          SELECT
+            *,
+            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+            TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+          FROM base
+        )
+        SELECT * FROM ts
+        ORDER BY FECHA DESC, HORA DESC
+        """
         try:
-            q_live = f"""
-            WITH base AS (
-              SELECT
-                CAST(event_id AS STRING) AS ID,
-                nombre        AS NOMBRE,
-                telefono      AS NUMERO,
-                correo        AS CORREO,
-                asesor        AS ASESOR,
-                SAFE_CAST(fecha AS DATE) AS FECHA,
-                SAFE_CAST(hora  AS TIME) AS HORA,
-                calificacion  AS CALIFICACION,
-                semaforo      AS SEMAFORO,
-                status_compra AS STATUS_COMPRA,
-                asistio       AS ASISTIO,
-                notas         AS NOTAS
-              FROM `{AGENDA_LIVE_VIEW}`
-              {where_sql}
-            )
-            SELECT *,
-                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
-            FROM base
-            ORDER BY FECHA DESC, HORA DESC
-            """
+            job = bigquery.QueryJobConfig(query_parameters=params)
             rows = client.query(q_live, job_config=job).result()
-        except Exception as e:
-            app.logger.warning("FALLBACK agenda events (sin LIVE view): %s", e)
-            # 2) Fallback: última versión por event_id desde base + patches
+        except Exception as e_live:
+            app.logger.warning("LIVE view no disponible, usando fallback UNION: %s", e_live)
+            rows = None
+
+        # ---------- 2) FALLBACK: UNION base + patches ----------
+        if rows is None:
             q_fb = f"""
             WITH u AS (
               SELECT
@@ -2922,39 +2929,49 @@ def api_postventa_agenda_events():
               FROM `{AGENDA_PATCHES}`
             ),
             r AS (
-              SELECT u.*,
-                     ROW_NUMBER() OVER (
-                        PARTITION BY event_id
-                        ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
-                     ) rn
+              SELECT
+                u.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY event_id
+                  ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+                ) AS rn
               FROM u
             ),
-            base AS (
+            cur AS (
               SELECT
-                event_id AS ID,
-                nombre   AS NOMBRE,
-                telefono AS NUMERO,
-                correo   AS CORREO,
-                asesor   AS ASESOR,
+                CAST(event_id AS STRING) AS ID,
+                nombre       AS NOMBRE,
+                telefono     AS NUMERO,
+                correo       AS CORREO,
+                asesor       AS ASESOR,
                 SAFE_CAST(fecha AS DATE) AS FECHA,
                 SAFE_CAST(hora  AS TIME) AS HORA,
-                calificacion  AS CALIFICACION,
-                semaforo      AS SEMAFORO,
+                calificacion AS CALIFICACION,
+                semaforo     AS SEMAFORO,
                 status_compra AS STATUS_COMPRA,
-                asistio       AS ASISTIO,
-                notas         AS NOTAS
+                asistio      AS ASISTIO,
+                notas        AS NOTAS
               FROM r
-              WHERE rn=1 AND is_deleted = FALSE
+              WHERE rn = 1 AND is_deleted = FALSE
+            ),
+            filt AS (
+              SELECT * FROM cur
+              {where_sql}
+            ),
+            ts AS (
+              SELECT
+                *,
+                TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
+                TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
+              FROM filt
             )
-            SELECT *,
-                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS start_ts,
-                   TIMESTAMP(DATETIME(FECHA, HORA), "{MEX_TZ}") AS end_ts
-            FROM base
-            {where_sql}
+            SELECT * FROM ts
             ORDER BY FECHA DESC, HORA DESC
             """
+            job = bigquery.QueryJobConfig(query_parameters=params)
             rows = client.query(q_fb, job_config=job).result()
 
+        # ---------- Formateo a FullCalendar ----------
         out = []
         for r in rows:
             color = _color_for_asesor(r["ASESOR"] or "")
@@ -2963,6 +2980,7 @@ def api_postventa_agenda_events():
             if r["STATUS_COMPRA"]: etiquetas.append(str(r["STATUS_COMPRA"]))
             if r["ASISTIO"] is True: etiquetas.append("Asistió")
 
+            # WhatsApp “por si se requiere”
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["NUMERO"] or "")
@@ -2990,7 +3008,7 @@ def api_postventa_agenda_events():
                     "asistio": r["ASISTIO"],
                     "notas": r["NOTAS"],
                     "wa_url": wa,
-                    "etiquetas": etiquetas,
+                    "etiquetas": etiquetas,  # para chips si los quieres renderizar
                 },
             })
         return jsonify(out), 200
@@ -2998,7 +3016,6 @@ def api_postventa_agenda_events():
     except Exception:
         traceback.print_exc()
         return jsonify([]), 200
-
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
