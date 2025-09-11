@@ -207,7 +207,7 @@
         try {
           // Si por alguna razón llega string (servidor o proxy), intenta parsear
           if (typeof data === "string") {
-            try { data = JSON.parse(data); } catch {_=>{}}
+            try { data = JSON.parse(data); } catch {}
           }
 
           const total = Array.isArray(data) ? data.length : 0;

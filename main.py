@@ -197,12 +197,9 @@ ESTADOS_PERMITIDOS = {"contactado", "en_proceso", "cerrado"}
 
 
 def _now_iso_utc():
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    # antes truncabas a segundos; mejor conserva microsegundos
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
 
 
 # --- Inicialización de Firebase (como ya la tenías) ---
@@ -1486,97 +1483,125 @@ def alumnos_page():
 @app.route("/api/alumnos")
 def api_alumnos():
     try:
-        generacion = (request.args.get("generacion") or "").strip()
-        correo = (request.args.get("correo") or "").strip().lower()
+        raw_gen = (request.args.get("generacion") or "").strip()
+        correo  = (request.args.get("correo") or "").strip().lower()
 
-        query = """
-            SELECT
-                ID_INSCRIPCION,
-                FECHA_INSCRIPCION,
-                ID_ALUMNO,
-                FECHA_COMPRA,
-                NOMBRE_ALUMNO,
-                TELEFONO,
-                CORREO,
-                ID_PROGRAMA,
-                PROGRAMA,
-                SKU_PRODUCTO,
-                ID_GENERACION_PROGRAMA,
-                GENERACION_PROGRAMA,
-                FUENTE,
-                PRECIO_GENERACION,
-                GASTO,
-                INGRESO
-            FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
-            WHERE 1=1
-        """
+        # Normaliza "G-03" si el usuario manda "g03" o "G - 03"
+        gen_norm = None
+        if raw_gen:
+            m = re.search(r"(\d+)", raw_gen)
+            if m:
+                gen_norm = f"G-{int(m.group(1)):02d}"
+
+        where = ["1=1"]
         params = []
-        if generacion:
-            query += " AND GENERACION_PROGRAMA = @generacion"
-            params.append(
-                bigquery.ScalarQueryParameter("generacion", "STRING", generacion)
+        if raw_gen:
+            where.append("""
+            (
+                UPPER(TRIM(GENERACION_PROGRAMA)) = UPPER(TRIM(@gen_full))
+                OR UPPER(TRIM(ID_GENERACION_PROGRAMA)) = UPPER(TRIM(@gen_full))
+                OR REGEXP_REPLACE(UPPER(TRIM(GENERACION_PROGRAMA)), r'\\s+', '')
+                   LIKE REGEXP_REPLACE(UPPER(TRIM(@gen_full)), r'\\s+', '')
+                {extra}
             )
+            """.format(
+                extra=(" OR UPPER(TRIM(REGEXP_EXTRACT(GENERACION_PROGRAMA, r'(G\\s*-\\s*\\d+)'))) = UPPER(TRIM(@gen_norm))"
+                       if gen_norm else "")
+            ))
+            params.append(bigquery.ScalarQueryParameter("gen_full", "STRING", raw_gen))
+            if gen_norm:
+                params.append(bigquery.ScalarQueryParameter("gen_norm", "STRING", gen_norm))
+
         if correo:
-            query += " AND LOWER(CORREO) = @correo"
+            where.append("LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))")
             params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
 
-        job_config = bigquery.QueryJobConfig(query_parameters=params)
-        df = client.query(query, job_config=job_config).to_dataframe()
+        where_sql = "WHERE " + " AND ".join(where)
 
-        if df.empty:
-            return jsonify([]), 200
+        # 👇 SIN CASTS A DATE: todo como STRING y orden seguro con SAFE.PARSE_DATE
+        q = f"""
+        WITH src AS (
+          SELECT
+            CAST(ID_INSCRIPCION AS STRING)         AS ID_INSCRIPCION,
+            CAST(ID_ALUMNO     AS STRING)         AS ID_ALUMNO,
+            LOWER(TRIM(CAST(CORREO AS STRING)))   AS CORREO,
+            CAST(PROGRAMA      AS STRING)         AS PROGRAMA,
+            CAST(ID_PROGRAMA   AS STRING)         AS ID_PROGRAMA,
+            CAST(SKU_PRODUCTO  AS STRING)         AS SKU_PRODUCTO,
+            CAST(EMBUDO        AS STRING)         AS EMBUDO,
+            CAST(GENERACION_PROGRAMA AS STRING)   AS GENERACION_PROGRAMA,
+            CAST(FUENTE        AS STRING)         AS FUENTE,
+            CAST(ID_GENERACION_PROGRAMA AS STRING)AS ID_GENERACION_PROGRAMA,
+            CAST(NOMBRE_ALUMNO AS STRING)         AS NOMBRE_ALUMNO,
+            CAST(TELEFONO      AS STRING)         AS TELEFONO,
 
-        # Normaliza numéricos (pueden venir como texto en la vista)
-        for c in ["PRECIO_GENERACION", "GASTO", "INGRESO"]:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
+            CAST(FECHA_INSCRIPCION AS STRING)     AS FECHA_INSCRIPCION_STR,
+            CAST(FECHA_COMPRA      AS STRING)     AS FECHA_COMPRA_STR,
+            CAST(FECHA_INICIO      AS STRING)     AS FECHA_INICIO_STR,
+            CAST(FECHA_FIN         AS STRING)     AS FECHA_FIN_STR,
 
-        # --- Serialización 100% JSON-safe ---
-        from decimal import Decimal
-        from datetime import datetime, date, time as dtime
+            SAFE_CAST(PRECIO_GENERACION AS FLOAT64) AS PRECIO_GENERACION,
+            SAFE_CAST(GASTO AS FLOAT64)             AS GASTO,
+            SAFE_CAST(INGRESO AS FLOAT64)           AS INGRESO
+          FROM `fivetwofive-20.INSUMOS.DV_VISTA_ALUMNOS_GENERAL`
+          {where_sql}
+        )
+        SELECT
+          ID_INSCRIPCION,
+          ID_ALUMNO,
+          CORREO,
+          PROGRAMA,
+          ID_PROGRAMA,
+          SKU_PRODUCTO,
+          EMBUDO,
+          GENERACION_PROGRAMA,
+          FUENTE,
+          ID_GENERACION_PROGRAMA,
+          NOMBRE_ALUMNO,
+          TELEFONO,
 
-        def _json_safe(x):
-            # numpy → Python nativo
-            if isinstance(x, (np.integer, np.floating, np.bool_)):
-                return x.item()
-            # pandas Timestamp (con o sin tz)
-            if isinstance(x, pd.Timestamp):
-                try:
-                    x = x.tz_convert(None)
-                except Exception:
-                    try:
-                        x = x.tz_localize(None)
-                    except Exception:
-                        pass
-                # Si tus FECHAS son de tipo date en BQ, devuélvelas YYYY-MM-DD
-                return x.strftime("%Y-%m-%d")
-            # datetime/date/time puros de Python
-            if isinstance(x, datetime):
-                return x.strftime("%Y-%m-%d")
-            if isinstance(x, date):
-                return x.isoformat()
-            if isinstance(x, dtime):
-                return x.strftime("%H:%M:%S")
-            # Decimal → float
-            if isinstance(x, Decimal):
-                return float(x)
-            # NaN / NA → null
-            if pd.isna(x):
-                return None
-            return x
+          -- devolvemos las fechas como string; el front ya pinta solo YYYY-MM-DD
+          FECHA_INSCRIPCION_STR AS FECHA_INSCRIPCION,
+          FECHA_COMPRA_STR      AS FECHA_COMPRA,
+          FECHA_INICIO_STR      AS FECHA_INICIO,
+          FECHA_FIN_STR         AS FECHA_FIN,
 
-        # Aplica conversión celda por celda
-        df = df.applymap(_json_safe)
+          PRECIO_GENERACION,
+          GASTO,
+          INGRESO
 
-        # Asegura que textos no vayan como None
-        for col in df.select_dtypes(include=["object"]).columns:
-            df[col] = df[col].apply(lambda v: "" if v is None else v)
+        FROM src
+        ORDER BY SAFE.PARSE_DATE('%Y-%m-%d', FECHA_INSCRIPCION_STR) DESC, ID_INSCRIPCION DESC
+        LIMIT 200
+        """
 
-        return jsonify(df.to_dict(orient="records")), 200
+        job = bigquery.QueryJobConfig(query_parameters=params)
+        rows = client.query(q, job_config=job).result()
 
-    except Exception:
+        out = []
+        for r in rows:
+            d = dict(r)
+
+            # Normaliza strings None → ""
+            for k in ("ID_INSCRIPCION","ID_ALUMNO","NOMBRE_ALUMNO","TELEFONO","CORREO",
+                      "ID_PROGRAMA","PROGRAMA","SKU_PRODUCTO","EMBUDO",
+                      "GENERACION_PROGRAMA","FUENTE","ID_GENERACION_PROGRAMA",
+                      "FECHA_INSCRIPCION","FECHA_COMPRA","FECHA_INICIO","FECHA_FIN"):
+                v = d.get(k)
+                d[k] = (v if isinstance(v, str) else (v or ""))
+
+            # Floats seguros (sin NaN en JSON)
+            for k in ("PRECIO_GENERACION","GASTO","INGRESO"):
+                v = d.get(k)
+                d[k] = (float(v) if v is not None and not (isinstance(v, float) and (v != v)) else None)
+
+            out.append(d)
+
+        return jsonify(out), 200
+
+    except Exception as e:
         app.logger.exception("Error en /api/alumnos")
-        return jsonify({"error": "Error al cargar datos."}), 500
+        return jsonify({"error": "Error al cargar datos.", "detalle": str(e)}), 500
 
 
 @app.route("/api/generaciones")
@@ -2517,7 +2542,8 @@ def api_postventa_agenda_grid():
         calificacion, status_compra, asistio, notas,
         IFNULL(is_deleted, FALSE) AS is_deleted,
         updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC, created_at DESC
+        ) AS rn
         FROM `{AGENDA_TABLA}`
     )
     WHERE rn = 1 AND is_deleted = FALSE
@@ -2534,7 +2560,8 @@ def api_postventa_agenda_grid():
         SAFE_CAST(hora  AS TIME) AS hora,
         calificacion, status_compra, asistio, notas,
         updated_at,
-        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY CAST(event_id AS STRING) ORDER BY updated_at DESC, created_at DESC
+        ) AS rn
         FROM `{AGENDA_TABLA}`
         WHERE IFNULL(status_compra,'') != "__DELETED__"
     )
@@ -2901,7 +2928,8 @@ def api_postventa_agenda_update(event_id):
             newv["is_deleted"] = False
 
         _agenda_insert_version(newv)
-        return jsonify({"ok": True})
+        latest = _agenda_get_latest(event_id)
+        return jsonify({"ok": True, "row": latest}), 200
     except Exception as e:
         app.logger.exception("PATCH agenda (append-only) failed")
         return jsonify({"error": str(e)}), 500

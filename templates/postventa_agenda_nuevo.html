@@ -183,6 +183,7 @@
       });
       const j = await r.json().catch(()=> ({}));
       if(!r.ok) throw new Error(j.error || "No se pudo guardar");
+      if (j.row) cell.getRow().update(j.row);
     }catch(err){
       alert(err.message || "Error al guardar");
       // recarga desde servidor para revertir cambios locales
