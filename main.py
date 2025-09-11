@@ -791,16 +791,34 @@ def _agenda_insert_version(row: dict):
     if errors:
         raise RuntimeError(str(errors))
     
+    
 def _agenda_insert_patch(row: dict):
-    now_iso = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
+    # Siempre pisa timestamps para que la vista elija esta versión
+    now_iso = _now_iso_utc()  # "YYYY-MM-DDTHH:MM:SS.ssssssZ"
     row = {**row}
+    row.pop("rn", None)  # por si acaso
+    row["updated_at"] = now_iso
     row.setdefault("created_at", now_iso)
-    row.setdefault("updated_at", now_iso)
+
+    # Normaliza tipos a lo que acepta insert_rows_json sin sorpresas
+    def _to_bq_json(v):
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if isinstance(v, date):
+            return v.isoformat()         # YYYY-MM-DD
+        if isinstance(v, dtime):
+            return v.strftime("%H:%M:%S")  # HH:MM:SS
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
     allowed = _allowed_fields(AGENDA_PATCHES)
-    clean = {k: row[k] for k in row.keys() if k in allowed}
+    clean = {k: _to_bq_json(row[k]) for k in row.keys() if k in allowed}
+
     errs = client.insert_rows_json(AGENDA_PATCHES, [clean])
     if errs:
         raise RuntimeError(str(errs))
+
 
 def _norm_hhmm_to_time(s: str) -> str:
     s = (s or "").strip()
@@ -2895,10 +2913,20 @@ def api_postventa_agenda_patch_insert(event_id):
         latest = _agenda_get_latest_live(event_id)
 
         # Normaliza para el front (fecha/hora a string amigable)
-        if latest:
-            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
-            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
+        def _norm_row_for_front(r):
+            if not r: return None
+            r = dict(r)
+            r["fecha"] = r["fecha"].isoformat() if r.get("fecha") else ""
+            r["hora"]  = r["hora"].strftime("%H:%M") if r.get("hora") else ""
+            return r
+
+        latest = _norm_row_for_front(latest)
+        if not latest:
+            # Fallback: devolvemos lo que acabamos de intentar guardar
+            latest = _norm_row_for_front(newv)
+
         return jsonify({"ok": True, "row": latest}), 200
+
 
     except Exception as e:
         app.logger.exception("PATCH agenda → INSERT PATCH failed")
