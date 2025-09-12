@@ -2815,20 +2815,12 @@ def api_postventa_agenda_create():
 
 @app.route("/api/postventa/agenda/events")
 def api_postventa_agenda_events():
-    """
-    FullCalendar llama con ?start=...&end=...
-    Filtros opcionales:
-      - asesor=Nombre
-      - mine=1  (solo mis eventos)
-    Lee DIRECTO de INSUMOS.DB_AGENDA_DIAGNOSTICOS y excluye is_deleted.
-    """
     try:
         if "user" not in session:
             return jsonify([]), 200
 
         def _to_date(x: str | None):
-            if not x:
-                return None
+            if not x: return None
             s = x.replace("Z", "")
             try:
                 return datetime.fromisoformat(s).date()
@@ -2839,10 +2831,26 @@ def api_postventa_agenda_events():
         d2 = _to_date(request.args.get("end"))
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
 
         user = get_user_from_session()
-        asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
+        raw_nombre = (user.get("nombre") or "").strip()
+        raw_correo = (user.get("correo") or "").strip().lower()
+
+        # Agujas (primer nombre y user del correo)
+        first_name = (raw_nombre.split()[0] if raw_nombre else "")
+        email_user = (raw_correo.split("@")[0] if "@" in raw_correo else raw_correo)
+
+        # Normaliza en Python: minúsculas, sin acentos, solo [a-z0-9]
+        import unicodedata, re
+        def _norm_py(s: str):
+            if not s: return ""
+            s = unicodedata.normalize("NFD", s)
+            s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+            s = s.lower()
+            return re.sub(r"[^a-z0-9]+", "", s)
+        needle_name = _norm_py(first_name)
+        needle_user = _norm_py(email_user)
 
         where = ["1=1"]
         params = []
@@ -2854,9 +2862,10 @@ def api_postventa_agenda_events():
             where.append("SAFE_CAST(fecha AS DATE) <  @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
 
-        if mine and asesor_mio:
-            where.append("LOWER(asesor) = LOWER(@a)")
-            params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
+        if mine and (needle_name or needle_user):
+            where.append("(asesor_norm = @n1 OR asesor_norm = @n2)")
+            params.append(bigquery.ScalarQueryParameter("n1", "STRING", needle_name))
+            params.append(bigquery.ScalarQueryParameter("n2", "STRING", needle_user))
         elif asesor_filtro:
             where.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
@@ -2871,17 +2880,21 @@ def api_postventa_agenda_events():
             SAFE_CAST(fecha AS DATE) AS fecha,
             SAFE_CAST(hora  AS TIME) AS hora,
             calificacion, semaforo, status_compra, asistio, notas,
+            -- is_deleted robusto
             CASE
               WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
               ELSE FALSE
-            END AS is_deleted
+            END AS is_deleted,
+            -- asesor normalizado (sin acentos/espacios) para comparación
+            REGEXP_REPLACE(
+              TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+              r'[^a-z0-9]+',''
+            ) AS asesor_norm
           FROM `{AGENDA_TABLA}`
         )
         SELECT
-          event_id,
-          nombre, telefono, correo, asesor,
-          fecha, hora,
-          calificacion, semaforo, status_compra, asistio, notas
+          event_id, nombre, telefono, correo, asesor,
+          fecha, hora, calificacion, semaforo, status_compra, asistio, notas
         FROM base
         {where_sql}
           AND is_deleted = FALSE
@@ -2901,21 +2914,18 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
-            f = r["fecha"]
-            h = r["hora"]
-            if not f or not h:
-                continue
+            f = r["fecha"]; h = r["hora"]
+            if not f or not h: continue
 
             start_dt = datetime.combine(f, h)
-            end_dt = start_dt + timedelta(minutes=60)  # duración visible
+            end_dt = start_dt + timedelta(minutes=60)
 
             color = _color_for_asesor(r["asesor"] or "")
 
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
-                if e164:
-                    wa = f"https://wa.me/{e164}"
+                if e164: wa = f"https://wa.me/{e164}"
             except Exception:
                 pass
 
@@ -2946,6 +2956,7 @@ def api_postventa_agenda_events():
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
+
 
 
 
