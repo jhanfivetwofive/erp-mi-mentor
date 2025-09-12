@@ -9,6 +9,11 @@
   .row-conflict { animation: blink 0.6s linear 3; }
   @keyframes blink { 50%{ background: #fff3cd !important; } }
 </style>
+<style>
+  .row-saving   { opacity:.6 }
+  .row-saved    { animation: flash 0.6s ease-in-out 1 }
+  @keyframes flash { 50% { background:#e8f5e9 } }
+</style>
 
 <div class="container py-3">
   <div class="d-flex justify-content-between align-items-center mb-2 toolbar">
@@ -73,7 +78,10 @@
     if(act==="del" && d.event_id){
       if(!confirm("¿Eliminar esta cita?")) return;
       try{
-        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {method:"DELETE"});
+        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
+          method:"DELETE",
+          credentials: "include" // FIX: enviar cookies
+        });
         if(r.status===403){ alert("No autorizado"); return; }
         const j = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(j.error || "No se pudo eliminar");
@@ -109,15 +117,18 @@
         notas: d.notas || ""
       };
       try{
+        // SOLO UN POST para crear (se eliminaron fetch de PATCH y DELETE aquí)
         const r = await fetch("/api/postventa/agenda", {
-          method:"POST", headers: {"Content-Type":"application/json"},
+          method:"POST",
+          headers: {"Content-Type":"application/json"},
+          credentials: "include", // FIX
           body: JSON.stringify(payload)
         });
         if(r.status===403){ alert("No autorizado"); return; }
         const j = await r.json().catch(()=> ({}));
-        if(!r.ok) throw new Error(j.error || "No se pudo crear");
+        if(!r.ok || !j.id) throw new Error(j.error || "No se pudo crear");
         row.update({event_id: j.id}); // asigna el ID real
-        // Forzamos recarga ligera para tomar updated_at/ver desde el backend
+        // recarga ligera para tomar updated_at/ver desde el backend
         grid.setData(AJAX_URL + "?ts=" + Date.now());
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
@@ -154,14 +165,12 @@
         editorParams:{values:{"":"—","true":"Sí","false":"No"}}
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
-      // Columna oculta para depurar si la quieres ver: versión/updated_at
-      // {title:"Versión", field:"__ver", visible:true, width:220}
     ],
     cellEdited: onCellEdited,
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // -------- Guardado automático (PATCH por celda) — con control de versión
+  // -------- Guardado automático (PATCH por celda) — con control de versión y señal visual
   async function onCellEdited(cell){
     const row = cell.getRow(), d = row.getData();
     if(!d.event_id) return;
@@ -184,13 +193,18 @@
     }
 
     const payload = {[field]: value};
-    if (d.__ver) payload._if_version = d.__ver; // control de concurrencia
+    if (d.__ver) payload._if_version = d.__ver; // (si el backend lo soporta)
+
+    const el = row.getElement();
+    el.classList.add('row-saving'); // FIX: feedback visual
 
     // Encadena el guardado para no pisarnos con el reload
     lastSave = (async ()=>{
       try{
         const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
-          method:"PATCH", headers: {"Content-Type":"application/json"},
+          method:"PATCH",
+          headers: {"Content-Type":"application/json"},
+          credentials: "include", // FIX: enviar cookies
           body: JSON.stringify(payload)
         });
 
@@ -198,32 +212,33 @@
         if (r.status === 409){
           const j = await r.json().catch(()=> ({}));
           const cur = j.current || {};
-          alert("Esta fila cambió hace un momento. Actualizamos a la versión vigente.");
-          // Normaliza y aplica versión vigente
           const normalized = normalizeRow({
             ...cur,
-            // fallback si vienen tipos crudos
             fecha: (cur.fecha||"").toString().slice(0,10),
             hora:  (cur.hora ||"").toString().slice(0,5),
           });
           row.update(normalized);
+          el.classList.remove('row-saving');
           row.getElement().classList.add('row-conflict');
           setTimeout(()=>row.getElement().classList.remove('row-conflict'), 2000);
+          alert("Esta fila cambió hace un momento. Actualizamos a la versión vigente.");
           return;
         }
 
         const j = await r.json().catch(()=> ({}));
         if(!r.ok || j.error) throw new Error(j.error || "No se pudo guardar");
 
-        // ✅ Edición optimista: backend devuelve la versión insertada
         if (j.row){
-          const updated = normalizeRow(j.row);
-          row.update(updated);
+          row.update(normalizeRow(j.row));
         }
-        // Refresco suave del calendar si está presente
+        el.classList.remove('row-saving');
+        el.classList.add('row-saved');    // FIX: feedback visual
+        setTimeout(()=>el.classList.remove('row-saved'), 800);
+
         if (window.calendar) setTimeout(()=> window.calendar.refetchEvents(), 1500);
 
       }catch(err){
+        el.classList.remove('row-saving');
         alert(err.message || "Error al guardar");
         grid.setData(AJAX_URL + "?ts=" + Date.now()); // revertir a servidor
       }
