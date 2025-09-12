@@ -2872,65 +2872,34 @@ def api_postventa_agenda_events():
 
         where_sql = "WHERE " + " AND ".join(where)
 
-        # ... dentro de api_postventa_agenda_events()
-
         q = f"""
         WITH base AS (
-        SELECT
+          SELECT
             CAST(event_id AS STRING) AS event_id,
             nombre, telefono, correo, asesor,
             SAFE_CAST(fecha AS DATE) AS fecha,
             SAFE_CAST(hora  AS TIME) AS hora,
             calificacion, semaforo, status_compra, asistio, notas,
-            -- bandera de borrado robusta
+            -- is_deleted robusto
             CASE
-            WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
-            ELSE FALSE
+              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
+              ELSE FALSE
             END AS is_deleted,
-            -- normalizado para "Mis eventos"
+            -- asesor normalizado (sin acentos/espacios) para comparación
             REGEXP_REPLACE(
-            TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
-            r'[^a-z0-9]+',''
-            ) AS asesor_norm,
-            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
-        FROM `{AGENDA_TABLA}`
+              TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+              r'[^a-z0-9]+',''
+            ) AS asesor_norm
+          FROM `{AGENDA_TABLA}`
         )
         SELECT
-        event_id, nombre, telefono, correo, asesor,
-        fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
-        updated_at
+          event_id, nombre, telefono, correo, asesor,
+          fecha, hora, calificacion, semaforo, status_compra, asistio, notas
         FROM base
         {where_sql}
-        AND is_deleted = FALSE
+          AND is_deleted = FALSE
         ORDER BY fecha, hora
         """
-        # ...
-        for r in rows:
-            # ...
-            out.append({
-                "id":    r["event_id"] or str(uuid.uuid4()),
-                "title": r["nombre"] or "",
-                "start": start_dt.isoformat(),
-                "end":   end_dt.isoformat(),
-                "allDay": False,
-                "backgroundColor": color,
-                "borderColor": color,
-                "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
-                "extendedProps": {
-                    "asesor": r["asesor"],
-                    "correo": r["correo"],
-                    "numero": r["telefono"],
-                    "calificacion": r["calificacion"],
-                    "semaforo": r["semaforo"],
-                    "status_compra": r["status_compra"],
-                    "asistio": truthy(r["asistio"]),
-                    "notas": r["notas"],
-                    "wa_url": wa,
-                    # ⬇️ versión para control de concurrencia (y ediciones optimistas)
-                    "ver": (r["updated_at"].isoformat() if r.get("updated_at") else None),
-                },
-            })
-
 
         rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
 
@@ -2996,54 +2965,30 @@ def api_postventa_agenda_events():
 def api_postventa_agenda_patch_insert(event_id):
     try:
         delta = request.get_json(force=True) or {}
-        # (opcional) control de concurrencia
-        client_ver = (delta.pop("_if_version", None) or "").strip() or None
-
-        cur = _agenda_get_latest_any(event_id)
+        cur = _agenda_get_latest_any(event_id)   # ⬅️ antes: _agenda_get_latest_live
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # Si nos mandan versión y no coincide, conflicto (alguien ya editó)
-        if client_ver:
-            cur_ver = ""
-            uv = cur.get("updated_at")
-            if uv:
-                cur_ver = (uv.isoformat() if hasattr(uv, "isoformat") else str(uv))
-            if cur_ver and cur_ver != client_ver:
-                # devolvemos la versión actual para que el front decida
-                safe = {**cur}
-                safe["fecha"] = safe["fecha"].isoformat() if safe.get("fecha") else ""
-                safe["hora"]  = safe["hora"].strftime("%H:%M") if safe.get("hora") else ""
-                return jsonify({"error":"conflict", "current": safe}), 409
-
-        # Construye la nueva versión a partir de la actual
         newv = {**cur}
-
-        # Normalizaciones/cambios (igual que ya tenías)
         if "fecha" in delta and delta["fecha"]:
             newv["fecha"] = (delta["fecha"] or "").strip()
         if "hora" in delta and delta["hora"]:
             newv["hora"] = _norm_hhmm_to_time(delta["hora"])
-
         if "asistio" in delta:
             v = delta["asistio"]
             if isinstance(v, str):
                 vv = v.strip().lower()
                 v = True if vv in {"1","true","sí","si","yes","y"} else False if vv in {"0","false","no","n"} else None
-            elif v in (1,0):
-                v = bool(v)
-            elif v is not None and not isinstance(v, bool):
-                v = None
+            elif v in (1,0): v = bool(v)
+            elif v is not None and not isinstance(v, bool): v = None
             newv["asistio"] = v
-
-        # Campos de texto / num
-        for key in ("status_compra","semaforo","notas","nombre","asesor"):
-            if key in delta:
-                newv[key] = (delta[key] or "").strip()
-        if "telefono" in delta:
-            newv["telefono"] = _normalize_phone(delta["telefono"] or "")
-        if "correo" in delta:
-            newv["correo"] = _normalize_email(delta["correo"] or "")
+        if "status_compra" in delta: newv["status_compra"] = (delta["status_compra"] or "").strip()
+        if "semaforo" in delta:      newv["semaforo"]      = (delta["semaforo"] or "").strip()
+        if "notas" in delta:         newv["notas"]         = delta["notas"]
+        if "nombre" in delta:        newv["nombre"]        = (delta["nombre"] or "").strip()
+        if "telefono" in delta:      newv["telefono"]      = _normalize_phone(delta["telefono"] or "")
+        if "correo" in delta:        newv["correo"]        = _normalize_email(delta["correo"] or "")
+        if "asesor" in delta:        newv["asesor"]        = (delta["asesor"] or "").strip()
         if "calificacion" in delta:
             try:
                 cv = delta["calificacion"]
@@ -3054,24 +2999,17 @@ def api_postventa_agenda_patch_insert(event_id):
         newv["event_id"]   = str(event_id)
         newv["is_deleted"] = False
 
-        # ⬇️ Insertamos patch (append-only). Este helper setea updated_at=now (microsegundos)
         _agenda_insert_patch(newv)
 
-        # ⬇️ EVITAR read-after-write: respondemos con la MISMA versión que insertamos
-        #    y el front actualiza la tarjeta en caliente.
-        resp = {**newv}
-        # Formatea para el front:
-        resp["fecha"] = str(resp.get("fecha") or "")
-        resp["hora"]  = (resp.get("hora") or "")[:5]  # HH:MM
-        # añade updated_at (lo asignó _agenda_insert_patch)
-        resp["updated_at"] = _now_iso_utc()  # misma precisión usada en el insert
-
-        return jsonify({"ok": True, "row": resp}), 200
+        latest = _agenda_get_latest_any(event_id)  # ⬅️ antes: _agenda_get_latest_live
+        if latest:
+            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
+            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
+        return jsonify({"ok": True, "row": latest}), 200
 
     except Exception as e:
         app.logger.exception("PATCH agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
-
 
 
 
