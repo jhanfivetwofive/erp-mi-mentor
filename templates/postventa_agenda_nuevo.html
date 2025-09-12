@@ -6,6 +6,8 @@
 <style>
   #grid{height:72vh}
   .toolbar .form-control{height: calc(1.5em + .5rem + 2px); padding:.25rem .5rem; font-size:.9rem;}
+  .row-conflict { animation: blink 0.6s linear 3; }
+  @keyframes blink { 50%{ background: #fff3cd !important; } }
 </style>
 
 <div class="container py-3">
@@ -38,6 +40,20 @@
   const AJAX_URL  = "/api/postventa/agenda/grid";
 
   let lastSave = Promise.resolve(); // promesa del último PATCH en vuelo
+
+  // Normaliza una fila como la espera el grid
+  function normalizeRow(r){
+    const asist = (r.asistio===true||r.asistio==="true") ? "true"
+                 : (r.asistio===false||r.asistio==="false") ? "false" : "";
+    return {
+      ...r,
+      event_id: String(r.event_id || ""),
+      fecha: String(r.fecha || "").slice(0,10),
+      hora:  String(r.hora  || "").slice(0,5),
+      asistio: asist,
+      __ver: String(r.updated_at || r.__ver || "") // versión para control de concurrencia
+    };
+  }
 
   // -------- Formateo de columna Acciones
   function accionesFmt(cell){
@@ -87,7 +103,7 @@
         asesor: d.asesor,
         fecha: d.fecha,
         hora:  d.hora,
-        calificacion: d.calificacion || null,
+        calificacion: (d.calificacion===""||d.calificacion==null) ? null : Number(d.calificacion),
         status_compra: d.status_compra || "",
         asistio: d.asistio==="true" ? true : (d.asistio==="false" ? false : undefined),
         notas: d.notas || ""
@@ -101,6 +117,8 @@
         const j = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(j.error || "No se pudo crear");
         row.update({event_id: j.id}); // asigna el ID real
+        // Forzamos recarga ligera para tomar updated_at/ver desde el backend
+        grid.setData(AJAX_URL + "?ts=" + Date.now());
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
     }
@@ -114,15 +132,8 @@
     index: "event_id",
     reactiveData: true,
 
-    // Normaliza la respuesta y tipos para los editores
     ajaxResponse: function(url, params, resp){
-      return (resp || []).map(r => ({
-        ...r,
-        event_id: String(r.event_id || ""),
-        fecha: String(r.fecha || "").slice(0,10),
-        hora:  String(r.hora || "").slice(0,5),
-        asistio: r.asistio===true ? "true" : r.asistio===false ? "false" : "",
-      }));
+      return (resp || []).map(normalizeRow);
     },
 
     ajaxError: function(xhr){
@@ -131,8 +142,8 @@
 
     columns: [
       {title:"Acciones", width:160, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
-      {title:"Fecha", field:"fecha", width:110, editor:"input", mutator:(v)=>String(v||"").slice(0,10)},
-      {title:"Hora",  field:"hora",  width:90,  editor:"input", mutator:(v)=>String(v||"").slice(0,5)},
+      {title:"Fecha", field:"fecha", width:110, editor:"input", validator:(v)=>!v||isISODate(v) || "YYYY-MM-DD"},
+      {title:"Hora",  field:"hora",  width:90,  editor:"input", validator:(v)=>!v||isHHMM(v)   || "HH:MM 24h"},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
       {title:"Teléfono", field:"telefono", width:120, editor:"input"},
       {title:"Correo",   field:"correo",   width:240, editor:"input"},
@@ -140,20 +151,17 @@
       {title:"Calificación", field:"calificacion", width:120, editor:"input"},
       {title:"Estatus compra", field:"status_compra", width:160, editor:"input"},
       {title:"¿Asistió?", field:"asistio", width:100, editor:"select",
-        editorParams:{values:{"":"—","true":"Sí","false":"No"}},
-        mutator:function(v){
-          if(v===true||v==="true") return "true";
-          if(v===false||v==="false") return "false";
-          return "";
-        }
+        editorParams:{values:{"":"—","true":"Sí","false":"No"}}
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
+      // Columna oculta para depurar si la quieres ver: versión/updated_at
+      // {title:"Versión", field:"__ver", visible:true, width:220}
     ],
     cellEdited: onCellEdited,
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // -------- Guardado automático (PATCH por celda) — ÚNICA versión
+  // -------- Guardado automático (PATCH por celda) — con control de versión
   async function onCellEdited(cell){
     const row = cell.getRow(), d = row.getData();
     if(!d.event_id) return;
@@ -161,27 +169,63 @@
 
     const field = cell.getField();
     let value = cell.getValue();
+
+    // Validaciones simples
+    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida (YYYY-MM-DD)"); grid.setData(AJAX_URL); return; }
+    if(field==="hora"  && value && !isHHMM(value)){    alert("Hora inválida (HH:MM 24h)");   grid.setData(AJAX_URL); return; }
+
     if(field==="asistio"){
       value = (value==="true") ? true : (value==="false" ? false : null);
     }
+    if(field==="calificacion"){
+      const n = (value===""||value==null) ? null : Number(value);
+      if(n!==null && Number.isNaN(n)){ alert("Calificación inválida"); grid.setData(AJAX_URL); return; }
+      value = n;
+    }
 
-    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida"); grid.setData(AJAX_URL); return; }
-    if(field==="hora"  && value && !isHHMM(value)){ alert("Hora inválida"); grid.setData(AJAX_URL); return; }
+    const payload = {[field]: value};
+    if (d.__ver) payload._if_version = d.__ver; // control de concurrencia
 
     // Encadena el guardado para no pisarnos con el reload
     lastSave = (async ()=>{
       try{
         const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
           method:"PATCH", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({[field]: value})
+          body: JSON.stringify(payload)
         });
-        if(r.status===403){ alert("No autorizado"); return; }
+
+        // Conflicto: alguien editó antes que yo
+        if (r.status === 409){
+          const j = await r.json().catch(()=> ({}));
+          const cur = j.current || {};
+          alert("Esta fila cambió hace un momento. Actualizamos a la versión vigente.");
+          // Normaliza y aplica versión vigente
+          const normalized = normalizeRow({
+            ...cur,
+            // fallback si vienen tipos crudos
+            fecha: (cur.fecha||"").toString().slice(0,10),
+            hora:  (cur.hora ||"").toString().slice(0,5),
+          });
+          row.update(normalized);
+          row.getElement().classList.add('row-conflict');
+          setTimeout(()=>row.getElement().classList.remove('row-conflict'), 2000);
+          return;
+        }
+
         const j = await r.json().catch(()=> ({}));
-        if(!r.ok) throw new Error(j.error || "No se pudo guardar");
-        if (j.row) row.update(j.row); // aplica la versión que devuelve el backend
+        if(!r.ok || j.error) throw new Error(j.error || "No se pudo guardar");
+
+        // ✅ Edición optimista: backend devuelve la versión insertada
+        if (j.row){
+          const updated = normalizeRow(j.row);
+          row.update(updated);
+        }
+        // Refresco suave del calendar si está presente
+        if (window.calendar) setTimeout(()=> window.calendar.refetchEvents(), 1500);
+
       }catch(err){
         alert(err.message || "Error al guardar");
-        grid.setData(AJAX_URL); // revertir
+        grid.setData(AJAX_URL + "?ts=" + Date.now()); // revertir a servidor
       }
     })();
   }
@@ -194,9 +238,9 @@
     grid.setFilter((data)=> fieldsToSearch.some(f => String(data[f]||"").toLowerCase().includes(q)));
   });
 
-  // -------- Recargar (espera último PATCH) — ÚNICA versión
+  // -------- Recargar (espera último PATCH)
   document.getElementById("btn-reload").onclick = async ()=>{
-    document.activeElement?.blur();       // commit de editor activo
+    document.activeElement?.blur();       // commit del editor activo
     await lastSave.catch(()=>{});         // espera último guardado
     grid.setData(AJAX_URL + "?ts=" + Date.now()); // anti-cache
     if (window.calendar) window.calendar.refetchEvents();
@@ -208,7 +252,8 @@
       event_id: tmpId(),   // id temporal local
       fecha:"", hora:"",
       nombre:"", telefono:"", correo:"", asesor:"",
-      calificacion:"", status_compra:"", asistio:"", notas:""
+      calificacion:"", status_compra:"", asistio:"", notas:"",
+      __ver:""
     }, true);
   };
 </script>
