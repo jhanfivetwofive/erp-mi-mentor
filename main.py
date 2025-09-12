@@ -2819,17 +2819,18 @@ def api_postventa_agenda_events():
     FullCalendar llama con ?start=...&end=...
     Filtros:
       - asesor=Nombre
-      - mine=1
+      - mine=1  (coincide por nombre **o** correo)
     Dedup: última versión por event_id (BASE ∪ PATCHES).
-    Excluye eliminados: normalizando is_deleted a BOOL.
+    Excluye eliminados con normalización robusta de is_deleted.
     """
     try:
         if "user" not in session:
             return jsonify([]), 200
 
         def _to_date(x):
-            if not x: return None
-            s = x.replace("Z","")
+            if not x:
+                return None
+            s = x.replace("Z", "")
             try:
                 return datetime.fromisoformat(s).date()
             except Exception:
@@ -2839,25 +2840,32 @@ def api_postventa_agenda_events():
         d2 = _to_date(request.args.get("end"))
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
 
         user = get_user_from_session()
-        asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
+        user_name = (user.get("nombre") or "").strip()
+        user_mail = (user.get("correo") or "").strip()
 
         # WHERE dinámico sobre ya-deduplicado
         wh = ["rn = 1", "is_deleted = FALSE"]
         params = []
 
         if d1:
-            wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            wh.append("fecha >= @d1")  # ya es DATE
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
         if d2:
-            wh.append("SAFE_CAST(fecha AS DATE) <  @d2")
+            wh.append("fecha <  @d2")  # end exclusivo
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
 
-        if mine and asesor_mio:
-            wh.append("LOWER(asesor) = LOWER(@a)")
-            params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
+        if mine and (user_name or user_mail):
+            ors = []
+            if user_name:
+                ors.append("LOWER(asesor) = LOWER(@a_name)")
+                params.append(bigquery.ScalarQueryParameter("a_name", "STRING", user_name))
+            if user_mail:
+                ors.append("LOWER(asesor) = LOWER(@a_mail)")
+                params.append(bigquery.ScalarQueryParameter("a_mail", "STRING", user_mail))
+            wh.append("(" + " OR ".join(ors) + ")")
         elif asesor_filtro:
             wh.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
@@ -2908,15 +2916,17 @@ def api_postventa_agenda_events():
         ORDER BY fecha DESC, hora DESC
         """
 
-        rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
+        rows = client.query(
+            q, job_config=bigquery.QueryJobConfig(query_parameters=params)
+        ).result()
 
         def truthy(v):
             if isinstance(v, bool): return v
             if v is None: return None
-            if isinstance(v, (int,float)): return bool(v)
+            if isinstance(v, (int, float)): return bool(v)
             s = str(v).strip().lower()
-            if s in {"1","true","si","sí","yes","y"}: return True
-            if s in {"0","false","no","n"}: return False
+            if s in {"1", "true", "si", "sí", "yes", "y"}: return True
+            if s in {"0", "false", "no", "n"}: return False
             return None
 
         out = []
@@ -2925,9 +2935,7 @@ def api_postventa_agenda_events():
                 continue
 
             start_dt = datetime.combine(r["fecha"], r["hora"])
-            # ⬅️ como te funcionaba: sin duración explícita
             start_iso = start_dt.isoformat()
-            end_iso   = start_iso
 
             color = _color_for_asesor(r["asesor"] or "")
 
@@ -2940,11 +2948,10 @@ def api_postventa_agenda_events():
             except Exception:
                 pass
 
-            out.append({
+            ev = {
                 "id":    r["event_id"] or str(uuid.uuid4()),
                 "title": r["nombre"] or "",
-                "start": start_iso,
-                "end":   end_iso,
+                "start": start_iso,         # ⬅️ SIN 'end' (evita descartar por end==start)
                 "backgroundColor": color,
                 "borderColor": color,
                 "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
@@ -2959,13 +2966,15 @@ def api_postventa_agenda_events():
                     "notas": r["notas"],
                     "wa_url": wa,
                 },
-            })
+            }
+            out.append(ev)
 
         return jsonify(out), 200
 
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
