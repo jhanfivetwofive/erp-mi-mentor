@@ -17,8 +17,12 @@
   /* Quitar cualquier leyenda antigua si quedara en caché */
   .legend { display:none !important; }
 
-  /* Contenedor para que no se superponga nada con el calendario */
+  /* Contenedor calendario */
   #calendar { background:#fff; border:1px solid #e9ecef; border-radius:12px; padding:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); }
+
+  /* Barra de filtros */
+  .filters-bar { gap:.5rem; flex-wrap:wrap; }
+  .filters-bar .form-select { min-width: 180px; }
 </style>
 
 <div class="container py-3">
@@ -31,29 +35,33 @@
     </div>
   </div>
 
-  <div class="row g-2 mb-2 align-items-center">
-    <div class="col-12 col-md-6">
-      <div class="input-group input-group-sm">
-        <label class="input-group-text">Asesor</label>
-        <select id="f-asesor" class="form-select">
-          <option value="">Todos</option>
-          {% if usuario and (usuario.nombre or usuario.correo) %}
-          <option value="__mine">Mis eventos</option>
-          {% endif %}
-          {% for a in asesores %}
-            <option value="{{ a }}">{{ a }}</option>
-          {% endfor %}
-        </select>
-        <button id="btn-aplicar" class="btn btn-outline-secondary">Aplicar</button>
-      </div>
+  <!-- Filtros compactos -->
+  <div class="d-flex align-items-center mb-2 filters-bar">
+    <div class="btn-group btn-group-sm" role="group" aria-label="Filtro de vista">
+      <input type="radio" class="btn-check" name="f-mode" id="mode-all" value="all" autocomplete="off">
+      <label class="btn btn-outline-secondary" for="mode-all">Todos</label>
+
+      {% if usuario and (usuario.nombre or usuario.correo) %}
+      <input type="radio" class="btn-check" name="f-mode" id="mode-mine" value="mine" autocomplete="off">
+      <label class="btn btn-outline-secondary" for="mode-mine">Mis eventos</label>
+      {% endif %}
+
+      <input type="radio" class="btn-check" name="f-mode" id="mode-asesor" value="asesor" autocomplete="off">
+      <label class="btn btn-outline-secondary" for="mode-asesor">Por asesor</label>
     </div>
-    <!-- La columna de “leyenda” se eliminó para que no se encime con el calendario -->
+
+    <select id="f-asesor" class="form-select form-select-sm ms-2" disabled>
+      <option value="">Selecciona asesor…</option>
+      {% for a in asesores %}
+        <option value="{{ a }}">{{ a }}</option>
+      {% endfor %}
+    </select>
   </div>
 
   <div id="calendar"></div>
 </div>
 
-<!-- Modal detalle tipo “card” -->
+<!-- Modal detalle -->
 <div class="modal fade" id="evtModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-0 shadow">
@@ -104,39 +112,69 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales-all.global.min.js"></script>
 <script>
-  // Preseleccionar filtro desde la URL
-  (function () {
-    const qs = new URLSearchParams(location.search);
-    const mine = qs.get('mine');
-    const asesor = qs.get('asesor');
-    const sel = document.getElementById('f-asesor');
-    if (mine === '1') sel.value = '__mine';
-    else if (asesor) sel.value = asesor;
-  })();
-
-  const calendarEl = document.getElementById('calendar');
-
-  function buildFeedUrl(info) {
-    const p = new URLSearchParams();
-    if (info?.start && info?.end) {
-      p.set('start', info.start.toISOString());
-      p.set('end', info.end.toISOString());
-    }
-    const sel = document.getElementById('f-asesor').value || '';
-    if (sel === '__mine') p.set('mine','1');
-    else if (sel) p.set('asesor', sel);
-    return '/api/postventa/agenda/events?' + p.toString();
-  }
-
+  // -------- utilidades --------
   function fmtFechaHora(d){
     return new Intl.DateTimeFormat('es-MX',{
       weekday:'long', year:'numeric', month:'long', day:'numeric',
       hour:'2-digit', minute:'2-digit', hour12:false
     }).format(d);
   }
-
   function pad2(n){ return String(n).padStart(2,'0'); }
 
+  // -------- estado de filtros --------
+  const selAsesor = document.getElementById('f-asesor');
+  const modeAll   = document.getElementById('mode-all');
+  const modeMine  = document.getElementById('mode-mine');
+  const modeAsesor= document.getElementById('mode-asesor');
+
+  // Inicializa desde la URL (?mine=1 o ?asesor=...)
+  (function initFiltersFromURL(){
+    const qs = new URLSearchParams(location.search);
+    const mine   = qs.get('mine');
+    const asesor = qs.get('asesor');
+
+    if (mine === '1' && modeMine) {
+      modeMine.checked = true;
+      selAsesor.disabled = true;
+    } else if (asesor) {
+      modeAsesor.checked = true;
+      selAsesor.disabled = false;
+      selAsesor.value = asesor;
+    } else {
+      modeAll.checked = true;
+      selAsesor.disabled = true;
+      selAsesor.value = '';
+    }
+  })();
+
+  function currentFilterParams(info){
+    const p = new URLSearchParams();
+    if (info?.start && info?.end) {
+      p.set('start', info.start.toISOString());
+      p.set('end', info.end.toISOString());
+    }
+    if (modeMine && modeMine.checked) {
+      p.set('mine', '1');
+    } else if (modeAsesor.checked && selAsesor.value) {
+      p.set('asesor', selAsesor.value);
+    }
+    return p;
+  }
+
+  function pushFilterToURL(){
+    const qs = new URLSearchParams();
+    if (modeMine && modeMine.checked) {
+      qs.set('mine','1');
+    } else if (modeAsesor.checked && selAsesor.value) {
+      qs.set('asesor', selAsesor.value);
+    }
+    const q = qs.toString();
+    const url = q ? (`?${q}`) : location.pathname;
+    history.replaceState(null, '', url);
+  }
+
+  // -------- calendario --------
+  const calendarEl = document.getElementById('calendar');
   const calendar = new FullCalendar.Calendar(calendarEl, {
     locale: 'es',
     firstDay: 1,
@@ -146,8 +184,8 @@
     slotMinTime: '08:00:00',
     slotMaxTime: '21:00:00',
     dayMaxEvents: true,
-    editable: true,                 // permite drag & drop
-    eventDurationEditable: false,   // solo mover inicio
+    editable: true,
+    eventDurationEditable: false,
     eventStartEditable: true,
 
     headerToolbar: {
@@ -168,34 +206,29 @@
 
     events: async (info, success, failure) => {
       try {
-        const url = buildFeedUrl(info);
+        const p = currentFilterParams(info);
+        const url = '/api/postventa/agenda/events?' + p.toString();
         const r = await fetch(url);
         success(await r.json());
       } catch (e) { failure(e); }
     },
 
-    // Sin “pills” ni semáforos; dejamos que FullCalendar pinte la hora y el backend pone el nombre
     eventClick: (arg) => {
       const e = arg.event, x = e.extendedProps || {};
-      const nombre = e.title || '';
-
-      document.getElementById('evtNombre').textContent = nombre;
-      document.getElementById('evtFecha').textContent = e.start ? fmtFechaHora(e.start) : '';
+      document.getElementById('evtNombre').textContent = e.title || '';
+      document.getElementById('evtFecha').textContent  = e.start ? fmtFechaHora(e.start) : '';
       document.getElementById('evtAsesor').textContent = x.asesor || '';
       document.getElementById('evtCorreo').textContent = x.correo || '';
-      document.getElementById('evtTel').textContent = x.numero || '';
-      document.getElementById('evtCalif').textContent = (x.calificacion ?? '') || '';
-      document.getElementById('evtSem').textContent = x.semaforo || '';
+      document.getElementById('evtTel').textContent    = x.numero || '';
+      document.getElementById('evtCalif').textContent  = (x.calificacion ?? '') || '';
+      document.getElementById('evtSem').textContent    = x.semaforo || '';
       document.getElementById('evtStatus').textContent = x.status_compra || '';
-      document.getElementById('evtNotas').textContent = x.notas || '';
-
+      document.getElementById('evtNotas').textContent  = x.notas || '';
       const badge = document.getElementById('evtBadgeAsistio');
       if (x.asistio === true) badge.classList.remove('d-none'); else badge.classList.add('d-none');
-
       const waBtn = document.getElementById('evtWA');
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
       else { waBtn.classList.add('d-none'); waBtn.removeAttribute('href'); }
-
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
 
@@ -204,7 +237,7 @@
       const d = info.event.start;
       const payload = {
         fecha: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
-        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}` // el backend añade :00 y zero-pad
+        hora:  `${pad2(d.getHours())}:${pad2(d.getMinutes())}` // backend añade :00
       };
       try {
         const res = await fetch(`/api/postventa/agenda/${encodeURIComponent(info.event.id)}`, {
@@ -223,8 +256,19 @@
 
   calendar.render();
 
-  document.getElementById('btn-aplicar').addEventListener('click', () => {
-    calendar.refetchEvents();
+  // -------- eventos de UI (auto-refetch) --------
+  document.querySelectorAll('input[name="f-mode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      selAsesor.disabled = !modeAsesor.checked;
+      pushFilterToURL();
+      calendar.refetchEvents();
+    });
+  });
+  selAsesor.addEventListener('change', () => {
+    if (modeAsesor.checked) {
+      pushFilterToURL();
+      calendar.refetchEvents();
+    }
   });
 </script>
 {% endblock %}
