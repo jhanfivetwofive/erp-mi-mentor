@@ -760,8 +760,6 @@ def _agenda_insert_version(row: dict):
     now_iso = _now_iso_utc()
     row = {**row, "updated_at": now_iso}
     row.setdefault("created_at", now_iso)
-
-    # ⬇️ si la columna existe, default explícito
     if _has_col(AGENDA_TABLA, "is_deleted"):
         row.setdefault("is_deleted", False)
 
