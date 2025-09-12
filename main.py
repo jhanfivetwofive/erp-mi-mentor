@@ -2832,139 +2832,103 @@ def api_postventa_agenda_events():
     Filtros opcionales:
       - asesor=Nombre
       - mine=1  (solo mis eventos)
-    Devuelve eventos deduplicados (última versión) de BASE ∪ PATCHES, excluyendo is_deleted.
+    Lee DIRECTO de INSUMOS.DB_AGENDA_DIAGNOSTICOS (sin vistas ni patches).
     """
     try:
-        # necesitas sesión para ver datos
+        # Requiere sesión (si abres la URL en otra pestaña sin login → [])
         if "user" not in session:
             return jsonify([]), 200
 
-        def _to_date(x):
+        def _to_date(x: str | None):
             if not x:
                 return None
-            x = x.replace("Z", "")
+            s = x.replace("Z", "")
             try:
-                return datetime.fromisoformat(x).date()
+                return datetime.fromisoformat(s).date()
             except Exception:
-                return datetime.strptime(x[:10], "%Y-%m-%d").date()
+                return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
-        start = _to_date(request.args.get("start"))
-        end   = _to_date(request.args.get("end"))
+        d1 = _to_date(request.args.get("start"))
+        d2 = _to_date(request.args.get("end"))
 
+        # Filtro de asesor
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
-
+        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        # WHERE dinámico (se aplicará sobre el resultado ya deduplicado)
-        wh = ["rn=1", "is_deleted = FALSE"]
+        where = ["1=1"]
         params = []
 
-        if start:
-            wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
-            params.append(bigquery.ScalarQueryParameter("d1", "DATE", start))
-        if end:
-            wh.append("SAFE_CAST(fecha AS DATE) <  @d2")
-            params.append(bigquery.ScalarQueryParameter("d2", "DATE", end))
+        if d1:
+            where.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
+        if d2:
+            where.append("SAFE_CAST(fecha AS DATE) <  @d2")
+            params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
 
         if mine and asesor_mio:
-            wh.append("LOWER(asesor) = LOWER(@a)")
+            where.append("LOWER(asesor) = LOWER(@a)")
             params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
         elif asesor_filtro:
-            wh.append("LOWER(asesor) = LOWER(@a2)")
+            where.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
 
-        where_sql = "WHERE " + " AND ".join(wh)
+        where_sql = "WHERE " + " AND ".join(where)
 
         q = f"""
-        WITH u AS (
-          SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
-            updated_at, created_at
-          FROM `{AGENDA_TABLA}`
-          UNION ALL
-          SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
-            updated_at, created_at
-          FROM `{AGENDA_PATCHES}`
-        ),
-        r AS (
-          SELECT
-            u.*,
-            ROW_NUMBER() OVER (
-              PARTITION BY event_id
-              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
-            ) AS rn
-          FROM u
-        )
-        SELECT *
-        FROM r
+        SELECT
+          CAST(event_id AS STRING) AS event_id,
+          nombre, telefono, correo, asesor,
+          SAFE_CAST(fecha AS DATE) AS fecha,
+          SAFE_CAST(hora  AS TIME) AS hora,
+          calificacion, semaforo, status_compra, asistio, notas
+        FROM `{AGENDA_TABLA}`
         {where_sql}
-        ORDER BY fecha DESC, hora DESC
+        ORDER BY fecha, hora
         """
 
-        job = bigquery.QueryJobConfig(query_parameters=params)
-        rows = client.query(q, job_config=job).result()
+        rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
 
-        def _to_boolish(x):
-            if isinstance(x, bool): return x
-            if x is None: return None
-            if isinstance(x, str):
-                v = x.strip().lower()
-                if v in {"1","true","sí","si","yes","y"}: return True
-                if v in {"0","false","no","n"}: return False
-            if isinstance(x, (int, float)): return bool(x)
+        def truthy(v):
+            if isinstance(v, bool): return v
+            if v is None: return None
+            if isinstance(v, (int, float)): return bool(v)
+            s = str(v).strip().lower()
+            if s in {"1","true","si","sí","yes","y"}: return True
+            if s in {"0","false","no","n"}: return False
             return None
 
         out = []
         for r in rows:
-            # colorea por asesor
-            color = _color_for_asesor(r["asesor"] or "")
-            # etiquetas para el modal
-            etiquetas = []
-            if r["semaforo"]:       etiquetas.append(str(r["semaforo"]))
-            if r["status_compra"]:  etiquetas.append(str(r["status_compra"]))
-            asis = _to_boolish(r["asistio"])
-            if asis is True:        etiquetas.append("Asistió")
+            f = r["fecha"]
+            h = r["hora"]
+            if not f or not h:
+                continue
 
-            # WhatsApp
+            # Duración estándar de 60 min para que se vea claramente en timeGrid
+            start_dt = datetime.combine(f, h)
+            end_dt = start_dt + timedelta(minutes=60)
+
+            color = _color_for_asesor(r["asesor"] or "")
+
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
                 if e164:
-                    msg = f"Hola {r['nombre']}, tenemos tu diagnóstico agendado."
-                    wa = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+                    wa = f"https://wa.me/{e164}"
             except Exception:
                 pass
-
-            # timestamps para FullCalendar (zona MX)
-            if r["fecha"] and r["hora"]:
-                start_ts = datetime.combine(r["fecha"], r["hora"])
-                # FullCalendar no usa la duración aquí; ponemos mismo instante
-                start_iso = start_ts.isoformat()
-                end_iso   = start_iso
-            else:
-                start_iso = end_iso = None
 
             out.append({
                 "id":    r["event_id"] or str(uuid.uuid4()),
                 "title": r["nombre"] or "",
-                "start": start_iso,
-                "end":   end_iso,
+                "start": start_dt.isoformat(),
+                "end":   end_dt.isoformat(),
+                "allDay": False,
                 "backgroundColor": color,
                 "borderColor": color,
-                "classNames": ["evt-asistio"] if asis is True else [],
+                "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
                 "extendedProps": {
                     "asesor": r["asesor"],
                     "correo": r["correo"],
@@ -2972,18 +2936,18 @@ def api_postventa_agenda_events():
                     "calificacion": r["calificacion"],
                     "semaforo": r["semaforo"],
                     "status_compra": r["status_compra"],
-                    "asistio": asis,
+                    "asistio": truthy(r["asistio"]),
                     "notas": r["notas"],
                     "wa_url": wa,
-                    "etiquetas": etiquetas,
                 },
             })
 
         return jsonify(out), 200
 
-    except Exception:
-        traceback.print_exc()
-        return jsonify([]), 200
+    except Exception as e:
+        app.logger.exception("Error en /api/postventa/agenda/events")
+        # Devuelve el detalle para poder ver rápidamente si falla algo
+        return jsonify({"error": "query_failed", "detail": str(e)}), 500
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
