@@ -2819,11 +2819,11 @@ def api_postventa_agenda_create():
 def api_postventa_agenda_events():
     """
     FullCalendar llama con ?start=...&end=...
-    Filtros opcionales:
+    Filtros:
       - asesor=Nombre
-      - mine=1  (solo mis eventos)
-    Dedup: última versión por event_id en (BASE ∪ PATCHES).
-    Excluye is_deleted = TRUE (en base o en patches).
+      - mine=1
+    Dedup: última versión por event_id (BASE ∪ PATCHES).
+    Excluye eliminados: normalizando is_deleted a BOOL.
     """
     try:
         if "user" not in session:
@@ -2842,10 +2842,12 @@ def api_postventa_agenda_events():
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
         mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
+
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        wh = ["rn = 1", "IFNULL(is_deleted, FALSE) = FALSE"]
+        # WHERE dinámico sobre ya-deduplicado
+        wh = ["rn = 1", "is_deleted = FALSE"]
         params = []
 
         if d1:
@@ -2872,7 +2874,11 @@ def api_postventa_agenda_events():
             SAFE_CAST(fecha AS DATE) AS fecha,
             SAFE_CAST(hora  AS TIME) AS hora,
             calificacion, semaforo, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
+            -- 🔽 NORMALIZAR is_deleted (string/bool/num) → BOOL
+            CASE
+              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
+              ELSE FALSE
+            END AS is_deleted,
             updated_at, created_at
           FROM `{AGENDA_TABLA}`
           UNION ALL
@@ -2882,7 +2888,10 @@ def api_postventa_agenda_events():
             SAFE_CAST(fecha AS DATE) AS fecha,
             SAFE_CAST(hora  AS TIME) AS hora,
             calificacion, semaforo, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
+            CASE
+              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
+              ELSE FALSE
+            END AS is_deleted,
             updated_at, created_at
           FROM `{AGENDA_PATCHES}`
         ),
@@ -2898,7 +2907,7 @@ def api_postventa_agenda_events():
         SELECT *
         FROM r
         {where_sql}
-        ORDER BY fecha, hora
+        ORDER BY fecha DESC, hora DESC
         """
 
         rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
@@ -2918,22 +2927,26 @@ def api_postventa_agenda_events():
                 continue
 
             start_dt = datetime.combine(r["fecha"], r["hora"])
-            end_dt   = start_dt + timedelta(minutes=60)  # bloque de 1h para que se vea claro
+            # ⬅️ como te funcionaba: sin duración explícita
+            start_iso = start_dt.isoformat()
+            end_iso   = start_iso
 
             color = _color_for_asesor(r["asesor"] or "")
+
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
-                if e164: wa = f"https://wa.me/{e164}"
+                if e164:
+                    msg = f"Hola {r['nombre']}, tenemos tu diagnóstico agendado."
+                    wa = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
             except Exception:
                 pass
 
             out.append({
                 "id":    r["event_id"] or str(uuid.uuid4()),
                 "title": r["nombre"] or "",
-                "start": start_dt.isoformat(),
-                "end":   end_dt.isoformat(),
-                "allDay": False,
+                "start": start_iso,
+                "end":   end_iso,
                 "backgroundColor": color,
                 "borderColor": color,
                 "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
@@ -2955,7 +2968,6 @@ def api_postventa_agenda_events():
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
-
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
