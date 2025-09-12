@@ -757,40 +757,30 @@ def _has_col(table_id: str, col: str) -> bool:
 
 
 def _agenda_insert_version(row: dict):
-    """
-    Inserta una nueva versión del evento en AGENDA_TABLA.
-    - Asegura updated_at y (si falta) created_at
-    - Filtra a campos existentes en el schema
-    - Normaliza tipos no JSON (date/time/datetime/Decimal) a string/float
-    """
     now_iso = _now_iso_utc()
     row = {**row, "updated_at": now_iso}
     row.setdefault("created_at", now_iso)
 
+    # ⬇️ si la columna existe, default explícito
+    if _has_col(AGENDA_TABLA, "is_deleted"):
+        row.setdefault("is_deleted", False)
+
     allowed = _allowed_fields(AGENDA_TABLA)
 
     def _to_bq_json(v):
-        if isinstance(v, datetime):
-            # ISO 8601; para TIMESTAMP/DATETIME BQ acepta string
-            return v.isoformat()
-        if isinstance(v, date):
-            # YYYY-MM-DD
-            return v.isoformat()
-        if isinstance(v, dtime):
-            # HH:MM:SS
-            return v.strftime("%H:%M:%S")
-        if isinstance(v, Decimal):
-            return float(v)
+        if isinstance(v, datetime): return v.isoformat()
+        if isinstance(v, date):     return v.isoformat()
+        if isinstance(v, dtime):    return v.strftime("%H:%M:%S")
+        if isinstance(v, Decimal):  return float(v)
         return v
 
-    # Quita cualquier artefacto del SELECT con window functions (por si se coló)
     row.pop("rn", None)
-
     clean = {k: _to_bq_json(v) for k, v in row.items() if k in allowed}
 
     errors = client.insert_rows_json(AGENDA_TABLA, [clean])
     if errors:
         raise RuntimeError(str(errors))
+
     
     
 def _agenda_insert_patch(row: dict):
@@ -2832,17 +2822,16 @@ def api_postventa_agenda_events():
     Filtros opcionales:
       - asesor=Nombre
       - mine=1  (solo mis eventos)
-    Lee DIRECTO de INSUMOS.DB_AGENDA_DIAGNOSTICOS (sin vistas ni patches).
+    Dedup: última versión por event_id en (BASE ∪ PATCHES).
+    Excluye is_deleted = TRUE (en base o en patches).
     """
     try:
-        # Requiere sesión (si abres la URL en otra pestaña sin login → [])
         if "user" not in session:
             return jsonify([]), 200
 
-        def _to_date(x: str | None):
-            if not x:
-                return None
-            s = x.replace("Z", "")
+        def _to_date(x):
+            if not x: return None
+            s = x.replace("Z","")
             try:
                 return datetime.fromisoformat(s).date()
             except Exception:
@@ -2851,39 +2840,63 @@ def api_postventa_agenda_events():
         d1 = _to_date(request.args.get("start"))
         d2 = _to_date(request.args.get("end"))
 
-        # Filtro de asesor
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
         user = get_user_from_session()
         asesor_mio = (user.get("nombre") or user.get("correo") or "").strip()
 
-        where = ["1=1"]
+        wh = ["rn = 1", "IFNULL(is_deleted, FALSE) = FALSE"]
         params = []
 
         if d1:
-            where.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            wh.append("SAFE_CAST(fecha AS DATE) >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
         if d2:
-            where.append("SAFE_CAST(fecha AS DATE) <  @d2")
+            wh.append("SAFE_CAST(fecha AS DATE) <  @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
 
         if mine and asesor_mio:
-            where.append("LOWER(asesor) = LOWER(@a)")
+            wh.append("LOWER(asesor) = LOWER(@a)")
             params.append(bigquery.ScalarQueryParameter("a", "STRING", asesor_mio))
         elif asesor_filtro:
-            where.append("LOWER(asesor) = LOWER(@a2)")
+            wh.append("LOWER(asesor) = LOWER(@a2)")
             params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
 
-        where_sql = "WHERE " + " AND ".join(where)
+        where_sql = "WHERE " + " AND ".join(wh)
 
         q = f"""
-        SELECT
-          CAST(event_id AS STRING) AS event_id,
-          nombre, telefono, correo, asesor,
-          SAFE_CAST(fecha AS DATE) AS fecha,
-          SAFE_CAST(hora  AS TIME) AS hora,
-          calificacion, semaforo, status_compra, asistio, notas
-        FROM `{AGENDA_TABLA}`
+        WITH u AS (
+          SELECT
+            CAST(event_id AS STRING) AS event_id,
+            nombre, telefono, correo, asesor,
+            SAFE_CAST(fecha AS DATE) AS fecha,
+            SAFE_CAST(hora  AS TIME) AS hora,
+            calificacion, semaforo, status_compra, asistio, notas,
+            IFNULL(is_deleted, FALSE) AS is_deleted,
+            updated_at, created_at
+          FROM `{AGENDA_TABLA}`
+          UNION ALL
+          SELECT
+            CAST(event_id AS STRING) AS event_id,
+            nombre, telefono, correo, asesor,
+            SAFE_CAST(fecha AS DATE) AS fecha,
+            SAFE_CAST(hora  AS TIME) AS hora,
+            calificacion, semaforo, status_compra, asistio, notas,
+            IFNULL(is_deleted, FALSE) AS is_deleted,
+            updated_at, created_at
+          FROM `{AGENDA_PATCHES}`
+        ),
+        r AS (
+          SELECT
+            u.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY event_id
+              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+            ) AS rn
+          FROM u
+        )
+        SELECT *
+        FROM r
         {where_sql}
         ORDER BY fecha, hora
         """
@@ -2893,7 +2906,7 @@ def api_postventa_agenda_events():
         def truthy(v):
             if isinstance(v, bool): return v
             if v is None: return None
-            if isinstance(v, (int, float)): return bool(v)
+            if isinstance(v, (int,float)): return bool(v)
             s = str(v).strip().lower()
             if s in {"1","true","si","sí","yes","y"}: return True
             if s in {"0","false","no","n"}: return False
@@ -2901,22 +2914,17 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
-            f = r["fecha"]
-            h = r["hora"]
-            if not f or not h:
+            if not r["fecha"] or not r["hora"]:
                 continue
 
-            # Duración estándar de 60 min para que se vea claramente en timeGrid
-            start_dt = datetime.combine(f, h)
-            end_dt = start_dt + timedelta(minutes=60)
+            start_dt = datetime.combine(r["fecha"], r["hora"])
+            end_dt   = start_dt + timedelta(minutes=60)  # bloque de 1h para que se vea claro
 
             color = _color_for_asesor(r["asesor"] or "")
-
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
-                if e164:
-                    wa = f"https://wa.me/{e164}"
+                if e164: wa = f"https://wa.me/{e164}"
             except Exception:
                 pass
 
@@ -2946,8 +2954,8 @@ def api_postventa_agenda_events():
 
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
-        # Devuelve el detalle para poder ver rápidamente si falla algo
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
