@@ -2815,21 +2815,12 @@ def api_postventa_agenda_create():
 
 @app.route("/api/postventa/agenda/events")
 def api_postventa_agenda_events():
-    """
-    FullCalendar llama con ?start=...&end=...
-    Filtros:
-      - asesor=Nombre
-      - mine=1  (coincide por nombre **o** correo)
-    Dedup: última versión por event_id (BASE ∪ PATCHES).
-    Excluye eliminados con normalización robusta de is_deleted.
-    """
     try:
         if "user" not in session:
             return jsonify([]), 200
 
         def _to_date(x):
-            if not x:
-                return None
+            if not x: return None
             s = x.replace("Z", "")
             try:
                 return datetime.fromisoformat(s).date()
@@ -2840,105 +2831,215 @@ def api_postventa_agenda_events():
         d2 = _to_date(request.args.get("end"))
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
 
+        # Datos de sesión normalizados
         user = get_user_from_session()
-        user_name = (user.get("nombre") or "").strip()
-        user_mail = (user.get("correo") or "").strip()
+        u_name = (user.get("nombre") or "").strip()
+        u_mail = (user.get("correo") or "").strip()
 
-        # WHERE dinámico sobre ya-deduplicado
-        wh = ["rn = 1", "is_deleted = FALSE"]
-        params = []
+        u_first = u_name.split()[0] if u_name else ""          # "Fernando"
+        u_mail_local = u_mail.split("@")[0] if "@" in u_mail else u_mail  # "fernando"
 
+        where_bits = ["rn = 1", "is_deleted = FALSE"]  # (en LIVE no necesitas rn/is_deleted)
+
+        # Rango de fechas (deja igual lo que ya tienes)
         if d1:
-            wh.append("fecha >= @d1")  # ya es DATE
-            params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
+            where_bits.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            params.append(bigquery.ScalarQueryParameter("d1","DATE", d1))
         if d2:
-            wh.append("fecha <  @d2")  # end exclusivo
-            params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
+            where_bits.append("SAFE_CAST(fecha AS DATE) <  @d2")
+            params.append(bigquery.ScalarQueryParameter("d2","DATE", d2))
 
-        if mine and (user_name or user_mail):
-            ors = []
-            if user_name:
-                ors.append("LOWER(asesor) = LOWER(@a_name)")
-                params.append(bigquery.ScalarQueryParameter("a_name", "STRING", user_name))
-            if user_mail:
-                ors.append("LOWER(asesor) = LOWER(@a_mail)")
-                params.append(bigquery.ScalarQueryParameter("a_mail", "STRING", user_mail))
-            wh.append("(" + " OR ".join(ors) + ")")
+        # --- Filtro por asesor ---
+        if mine:
+            # Match flexible con nombre completo, primer nombre y local-part del correo.
+            where_bits.append("""
+            (
+            LOWER(asesor) IN (LOWER(@un), LOWER(@uf), LOWER(@uml))
+            OR CONTAINS_SUBSTR(LOWER(asesor), LOWER(@un))
+            OR CONTAINS_SUBSTR(LOWER(@un), LOWER(asesor))
+            )
+            """)
+            params += [
+                bigquery.ScalarQueryParameter("un","STRING", u_name or ""),
+                bigquery.ScalarQueryParameter("uf","STRING", u_first or ""),
+                bigquery.ScalarQueryParameter("uml","STRING", u_mail_local or ""),
+            ]
         elif asesor_filtro:
-            wh.append("LOWER(asesor) = LOWER(@a2)")
-            params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
+            af_first = asesor_filtro.split()[0]
+            where_bits.append("""
+            (
+            LOWER(asesor) IN (LOWER(@af), LOWER(@aff))
+            OR CONTAINS_SUBSTR(LOWER(asesor), LOWER(@af))
+            OR CONTAINS_SUBSTR(LOWER(@af), LOWER(asesor))
+            )
+            """)
+            params += [
+                bigquery.ScalarQueryParameter("af","STRING", asesor_filtro),
+                bigquery.ScalarQueryParameter("aff","STRING", af_first),
+            ]
 
-        where_sql = "WHERE " + " AND ".join(wh)
 
-        q = f"""
-        WITH u AS (
-          SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            -- 🔽 NORMALIZAR is_deleted (string/bool/num) → BOOL
-            CASE
-              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
-              ELSE FALSE
-            END AS is_deleted,
-            updated_at, created_at
-          FROM `{AGENDA_TABLA}`
-          UNION ALL
-          SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            CASE
-              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
-              ELSE FALSE
-            END AS is_deleted,
-            updated_at, created_at
-          FROM `{AGENDA_PATCHES}`
-        ),
-        r AS (
-          SELECT
-            u.*,
-            ROW_NUMBER() OVER (
-              PARTITION BY event_id
-              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
-            ) AS rn
-          FROM u
-        )
-        SELECT *
-        FROM r
-        {where_sql}
-        ORDER BY fecha DESC, hora DESC
-        """
+        # ---------- 1) Intento con la vista LIVE ----------
+        try:
+            q_live = f"""
+            SELECT
+              CAST(event_id AS STRING) AS event_id,
+              nombre, telefono, correo, asesor,
+              SAFE_CAST(fecha AS DATE) AS fecha,
+              SAFE_CAST(hora  AS TIME) AS hora,
+              calificacion,
+              -- campos opcionales si existen en la vista:
+              SAFE_CAST(NULL AS STRING) AS semaforo,
+              status_compra,
+              asistio,
+              notas
+            FROM `{AGENDA_LIVE_VIEW}`
+            WHERE IFNULL(is_deleted, FALSE) = FALSE
+              {"AND SAFE_CAST(fecha AS DATE) >= @d1" if d1 else ""}
+              {"AND SAFE_CAST(fecha AS DATE) <  @d2" if d2 else ""}
+              {("AND LOWER(asesor) = LOWER(@af)") if (asesor_filtro and not mine) else ""}
+              {("AND ( LOWER(asesor) = LOWER(@um) OR LOWER(asesor) = LOWER(@un) OR CONTAINS_SUBSTR(LOWER(asesor), LOWER(@un)) )") if mine and (u_mail or u_name) else ""}
+            ORDER BY fecha DESC, hora DESC
+            """
+            params_live = []
+            if d1: params_live.append(bigquery.ScalarQueryParameter("d1","DATE", d1))
+            if d2: params_live.append(bigquery.ScalarQueryParameter("d2","DATE", d2))
+            if asesor_filtro and not mine:
+                params_live.append(bigquery.ScalarQueryParameter("af","STRING", asesor_filtro))
+            if mine and (u_mail or u_name):
+                params_live.append(bigquery.ScalarQueryParameter("um","STRING", u_mail or ""))
+                params_live.append(bigquery.ScalarQueryParameter("un","STRING", u_name or ""))
+            rows = list(client.query(q_live, job_config=bigquery.QueryJobConfig(query_parameters=params_live)).result())
+        except Exception:
+            rows = []
 
-        rows = client.query(
-            q, job_config=bigquery.QueryJobConfig(query_parameters=params)
-        ).result()
+        # ---------- 2) Fallback: UNION base + patches, tolerante a columnas ----------
+        if not rows:
+            b_has_sem  = _has_col(AGENDA_TABLA,   "semaforo")
+            b_has_sc   = _has_col(AGENDA_TABLA,   "status_compra")
+            b_has_as   = _has_col(AGENDA_TABLA,   "asistio")
+            b_has_nt   = _has_col(AGENDA_TABLA,   "notas")
 
+            p_has_sem  = _has_col(AGENDA_PATCHES, "semaforo")
+            p_has_sc   = _has_col(AGENDA_PATCHES, "status_compra")
+            p_has_as   = _has_col(AGENDA_PATCHES, "asistio")
+            p_has_nt   = _has_col(AGENDA_PATCHES, "notas")
+
+            sel_base = f"""
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                TRIM(CAST(fecha AS STRING)) AS f_raw,
+                TRIM(CAST(hora  AS STRING)) AS h_raw,
+                calificacion,
+                { 'semaforo'       if b_has_sem else 'NULL AS semaforo' },
+                { 'status_compra'  if b_has_sc  else 'NULL AS status_compra' },
+                { 'asistio'        if b_has_as  else 'NULL AS asistio' },
+                { 'notas'          if b_has_nt  else 'NULL AS notas' },
+                CASE WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE ELSE FALSE END AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_TABLA}`
+            """
+
+            sel_patch = f"""
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                TRIM(CAST(fecha AS STRING)) AS f_raw,
+                TRIM(CAST(hora  AS STRING)) AS h_raw,
+                calificacion,
+                { 'semaforo'       if p_has_sem else 'NULL AS semaforo' },
+                { 'status_compra'  if p_has_sc  else 'NULL AS status_compra' },
+                { 'asistio'        if p_has_as  else 'NULL AS asistio' },
+                { 'notas'          if p_has_nt  else 'NULL AS notas' },
+                CASE WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE ELSE FALSE END AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_PATCHES}`
+            """
+
+            where_bits = ["rn = 1", "is_deleted = FALSE", "fecha IS NOT NULL", "hora IS NOT NULL"]
+            params = []
+
+            if d1:
+                where_bits.append("fecha >= @d1")
+                params.append(bigquery.ScalarQueryParameter("d1","DATE", d1))
+            if d2:
+                where_bits.append("fecha <  @d2")
+                params.append(bigquery.ScalarQueryParameter("d2","DATE", d2))
+
+            if asesor_filtro and not mine:
+                where_bits.append("LOWER(asesor) = LOWER(@af)")
+                params.append(bigquery.ScalarQueryParameter("af","STRING", asesor_filtro))
+            elif mine and (u_mail or u_name):
+                # match flexible: por correo, por nombre exacto o como substring
+                where_bits.append("( LOWER(asesor) = LOWER(@um) OR LOWER(asesor) = LOWER(@un) OR CONTAINS_SUBSTR(LOWER(asesor), LOWER(@un)) )")
+                params.append(bigquery.ScalarQueryParameter("um","STRING", u_mail or ""))
+                params.append(bigquery.ScalarQueryParameter("un","STRING", u_name or ""))
+
+            where_sql = "WHERE " + " AND ".join(where_bits)
+
+            q = f"""
+            WITH u AS (
+              {sel_base}
+              UNION ALL
+              {sel_patch}
+            ),
+            norm AS (
+              SELECT
+                event_id, nombre, telefono, correo, asesor,
+                COALESCE(
+                  SAFE_CAST(f_raw AS DATE),
+                  SAFE.PARSE_DATE('%Y-%m-%d', f_raw),
+                  SAFE.PARSE_DATE('%d/%m/%Y', f_raw),
+                  SAFE.PARSE_DATE('%Y/%m/%d', f_raw),
+                  SAFE.PARSE_DATE('%e/%m/%Y', f_raw),
+                  SAFE.PARSE_DATE('%m/%d/%Y', f_raw)
+                ) AS fecha,
+                COALESCE(
+                  SAFE.PARSE_TIME('%H:%M:%E*S', REPLACE(h_raw,'.',':')),
+                  SAFE.PARSE_TIME('%H:%M', h_raw),
+                  SAFE.PARSE_TIME('%I:%M %p', h_raw)
+                ) AS hora,
+                calificacion, semaforo, status_compra, asistio, notas,
+                is_deleted, updated_at, created_at
+              FROM u
+            ),
+            r AS (
+              SELECT
+                *,
+                ROW_NUMBER() OVER (
+                  PARTITION BY event_id
+                  ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+                ) AS rn
+              FROM norm
+            )
+            SELECT *
+            FROM r
+            {where_sql}
+            ORDER BY fecha DESC, hora DESC
+            """
+            rows = list(client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result())
+
+        # ---------- 3) Construcción de eventos ----------
         def truthy(v):
             if isinstance(v, bool): return v
             if v is None: return None
             if isinstance(v, (int, float)): return bool(v)
             s = str(v).strip().lower()
-            if s in {"1", "true", "si", "sí", "yes", "y"}: return True
-            if s in {"0", "false", "no", "n"}: return False
+            if s in {"1","true","si","sí","yes","y"}: return True
+            if s in {"0","false","no","n"}: return False
             return None
 
         out = []
         for r in rows:
             if not r["fecha"] or not r["hora"]:
                 continue
-
             start_dt = datetime.combine(r["fecha"], r["hora"])
             start_iso = start_dt.isoformat()
 
             color = _color_for_asesor(r["asesor"] or "")
-
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
@@ -2948,33 +3049,31 @@ def api_postventa_agenda_events():
             except Exception:
                 pass
 
-            ev = {
+            out.append({
                 "id":    r["event_id"] or str(uuid.uuid4()),
                 "title": r["nombre"] or "",
-                "start": start_iso,         # ⬅️ SIN 'end' (evita descartar por end==start)
+                "start": start_iso,  # sin 'end'
                 "backgroundColor": color,
                 "borderColor": color,
-                "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
+                "classNames": ["evt-asistio"] if truthy(r.get("asistio")) else [],
                 "extendedProps": {
                     "asesor": r["asesor"],
                     "correo": r["correo"],
                     "numero": r["telefono"],
                     "calificacion": r["calificacion"],
-                    "semaforo": r["semaforo"],
-                    "status_compra": r["status_compra"],
-                    "asistio": truthy(r["asistio"]),
-                    "notas": r["notas"],
+                    "semaforo": r.get("semaforo"),
+                    "status_compra": r.get("status_compra"),
+                    "asistio": truthy(r.get("asistio")),
+                    "notas": r.get("notas"),
                     "wa_url": wa,
                 },
-            }
-            out.append(ev)
+            })
 
         return jsonify(out), 200
 
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
-
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
