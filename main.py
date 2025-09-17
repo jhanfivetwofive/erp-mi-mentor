@@ -2692,11 +2692,20 @@ def api_postventa_agenda_grid():
     out = []
     for r in rows:
         d = dict(r)
+        # Normaliza fecha y hora para el grid
         d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
         d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
+        # ⬅️ MUY IMPORTANTE: serializa updated_at a string
+        u = d.get("updated_at")
+        if isinstance(u, datetime):
+            d["updated_at"] = u.isoformat()
+        elif u is None:
+            d["updated_at"] = ""
+        else:
+            d["updated_at"] = str(u)
         out.append(d)
-    return jsonify(out)
 
+    return jsonify(out)
 
 
 @app.route("/postventa/agenda")
@@ -2841,7 +2850,6 @@ def api_postventa_agenda_events():
         first_name = (raw_nombre.split()[0] if raw_nombre else "")
         email_user = (raw_correo.split("@")[0] if "@" in raw_correo else raw_correo)
 
-        # Normaliza en Python: minúsculas, sin acentos, solo [a-z0-9]
         import unicodedata, re
         def _norm_py(s: str):
             if not s: return ""
@@ -2849,6 +2857,7 @@ def api_postventa_agenda_events():
             s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
             s = s.lower()
             return re.sub(r"[^a-z0-9]+", "", s)
+
         needle_name = _norm_py(first_name)
         needle_user = _norm_py(email_user)
 
@@ -2889,12 +2898,15 @@ def api_postventa_agenda_events():
             REGEXP_REPLACE(
               TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
               r'[^a-z0-9]+',''
-            ) AS asesor_norm
+            ) AS asesor_norm,
+            -- ⬅️ Nuevo: versión para concurrencia
+            TIMESTAMP(updated_at) AS updated_at
           FROM `{AGENDA_TABLA}`
         )
         SELECT
           event_id, nombre, telefono, correo, asesor,
-          fecha, hora, calificacion, semaforo, status_compra, asistio, notas
+          fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+          updated_at
         FROM base
         {where_sql}
           AND is_deleted = FALSE
@@ -2929,6 +2941,14 @@ def api_postventa_agenda_events():
             except Exception:
                 pass
 
+            # ⬅️ Versión del registro (para _if_version al mover en calendario)
+            ver = None
+            try:
+                u = r.get("updated_at")
+                ver = u.isoformat() if u is not None and hasattr(u, "isoformat") else (str(u) if u is not None else None)
+            except Exception:
+                ver = None
+
             out.append({
                 "id":    r["event_id"] or str(uuid.uuid4()),
                 "title": r["nombre"] or "",
@@ -2948,6 +2968,7 @@ def api_postventa_agenda_events():
                     "asistio": truthy(r["asistio"]),
                     "notas": r["notas"],
                     "wa_url": wa,
+                    "version": ver,  # ⬅️ importante
                 },
             })
 
@@ -2956,6 +2977,49 @@ def api_postventa_agenda_events():
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
+
+
+@app.route("/api/postventa/agenda/<event_id>", methods=["GET"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_get(event_id):
+    try:
+        row = _agenda_get_latest_any(event_id)
+        if not row:
+            return jsonify({"error": "no_found"}), 404
+
+        def _fmt_date(x):
+            try:
+                return x.isoformat()
+            except Exception:
+                return str(x) if x is not None else ""
+
+        def _fmt_time(x):
+            try:
+                return x.strftime("%H:%M")
+            except Exception:
+                return str(x)[:5] if x else ""
+
+        out = {
+            "event_id": str(row.get("event_id") or ""),
+            "nombre": row.get("nombre") or "",
+            "telefono": row.get("telefono") or "",
+            "correo": row.get("correo") or "",
+            "asesor": row.get("asesor") or "",
+            "fecha": _fmt_date(row.get("fecha")),
+            "hora": _fmt_time(row.get("hora")),
+            "calificacion": row.get("calificacion"),
+            "semaforo": row.get("semaforo") or "",
+            "status_compra": row.get("status_compra") or "",
+            "asistio": bool(row.get("asistio")) if row.get("asistio") is not None else False,
+            "notas": row.get("notas") or "",
+            "updated_at": (row.get("updated_at").isoformat() if row.get("updated_at") else None),
+        }
+        return jsonify(out), 200
+
+    except Exception as e:
+        app.logger.exception("GET agenda detalle failed")
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH","POST"])
