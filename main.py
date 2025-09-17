@@ -2872,36 +2872,95 @@ def api_postventa_agenda_events():
 
         where_sql = "WHERE " + " AND ".join(where)
 
-        q = f"""
-        WITH base AS (
-          SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            -- is_deleted robusto
-            CASE
-              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
-              ELSE FALSE
-            END AS is_deleted,
-            -- asesor normalizado (sin acentos/espacios) para comparación
-            REGEXP_REPLACE(
-              TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
-              r'[^a-z0-9]+',''
-            ) AS asesor_norm
-          FROM `{AGENDA_TABLA}`
-        )
-        SELECT
-          event_id, nombre, telefono, correo, asesor,
-          fecha, hora, calificacion, semaforo, status_compra, asistio, notas
-        FROM base
-        {where_sql}
-          AND is_deleted = FALSE
-        ORDER BY fecha, hora
-        """
-
-        rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
+                # 1) Si tienes LIVE view, úsala:
+        try:
+            q = f"""
+            WITH base AS (
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                SAFE_CAST(fecha AS DATE) AS fecha,
+                SAFE_CAST(hora  AS TIME) AS hora,
+                calificacion, semaforo, status_compra, asistio, notas,
+                -- is_deleted robusto
+                CASE
+                  WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
+                  ELSE FALSE
+                END AS is_deleted,
+                REGEXP_REPLACE(
+                  TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+                  r'[^a-z0-9]+',''
+                ) AS asesor_norm
+              FROM `{AGENDA_LIVE_VIEW}`
+            )
+            SELECT
+              event_id, nombre, telefono, correo, asesor,
+              fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+              asesor_norm, is_deleted
+            FROM base
+            {where_sql}
+              AND is_deleted = FALSE
+            ORDER BY fecha, hora
+            """
+            rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
+        except Exception:
+            # 2) Fallback: union base + patches y toma la última por event_id
+            q = f"""
+            WITH u AS (
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                SAFE_CAST(fecha AS DATE) AS fecha,
+                SAFE_CAST(hora  AS TIME) AS hora,
+                calificacion, semaforo, status_compra, asistio, notas,
+                IFNULL(is_deleted, FALSE) AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_TABLA}`
+              UNION ALL
+              SELECT
+                CAST(event_id AS STRING) AS event_id,
+                nombre, telefono, correo, asesor,
+                SAFE_CAST(fecha AS DATE) AS fecha,
+                SAFE_CAST(hora  AS TIME) AS hora,
+                calificacion, semaforo, status_compra, asistio, notas,
+                IFNULL(is_deleted, FALSE) AS is_deleted,
+                updated_at, created_at
+              FROM `{AGENDA_PATCHES}`
+            ),
+            r AS (
+              SELECT
+                u.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY event_id
+                  ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+                ) AS rn
+              FROM u
+            ),
+            base AS (
+              SELECT
+                event_id, nombre, telefono, correo, asesor,
+                fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+                CASE
+                  WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
+                  ELSE FALSE
+                END AS is_deleted,
+                REGEXP_REPLACE(
+                  TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+                  r'[^a-z0-9]+',''
+                ) AS asesor_norm
+              FROM r
+              WHERE rn = 1
+            )
+            SELECT
+              event_id, nombre, telefono, correo, asesor,
+              fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
+              asesor_norm, is_deleted
+            FROM base
+            {where_sql}
+              AND is_deleted = FALSE
+            ORDER BY fecha, hora
+            """
+            rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
 
         def truthy(v):
             if isinstance(v, bool): return v
@@ -3051,6 +3110,21 @@ def api_postventa_agenda_delete(event_id):
     except Exception as e:
         app.logger.exception("DELETE/POST agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
+
+
+# --- ALIAS POST PARA EDITAR (usa la MISMA lógica del PATCH) ---
+@app.route("/api/postventa/agenda/<event_id>/edit", methods=["POST"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_edit_alias(event_id):
+    # Reutiliza la función de PATCH tal cual (lee JSON del body y hace _agenda_insert_patch)
+    return api_postventa_agenda_patch_insert(event_id)
+
+
+# --- ALIAS POST PARA ELIMINAR (por si DELETE no pasa en tu entorno) ---
+@app.route("/api/postventa/agenda/<event_id>/delete", methods=["POST"])
+@role_required("postventa", "admin")
+def api_postventa_agenda_delete_alias(event_id):
+    return api_postventa_agenda_delete(event_id)
 
 
 # -------------------- Comunidad: Lista y Panel --------------------

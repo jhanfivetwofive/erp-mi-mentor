@@ -8,11 +8,10 @@
   .toolbar .form-control{height: calc(1.5em + .5rem + 2px); padding:.25rem .5rem; font-size:.9rem;}
   .row-conflict { animation: blink 0.6s linear 3; }
   @keyframes blink { 50%{ background: #fff3cd !important; } }
-</style>
-<style>
   .row-saving   { opacity:.6 }
   .row-saved    { animation: flash 0.6s ease-in-out 1 }
   @keyframes flash { 50% { background:#e8f5e9 } }
+  .cell-dirty { box-shadow: inset 0 0 0 9999px rgba(255,193,7,.18); } /* amarillo suave */
 </style>
 
 <div class="container py-3">
@@ -29,7 +28,7 @@
 
   <div class="small text-muted mt-2">
     * Para crear una cita nueva llena <strong>Nombre, Correo, Asesor, Fecha y Hora</strong> y presiona “Crear”.<br>
-    * Al editar una celda de una fila existente se guarda automáticamente.<br>
+    * Para modificar una fila existente edita las celdas y luego presiona “Guardar”.<br>
     * Quitamos el semáforo como pediste. El ID no se muestra.
   </div>
 </div>
@@ -44,85 +43,120 @@
   const tmpId     = ()=>"__tmp__"+(crypto?.randomUUID?.() || (Date.now()+"_"+Math.random()));
   const AJAX_URL  = "/api/postventa/agenda/grid";
 
-  let lastSave = Promise.resolve(); // promesa del último PATCH en vuelo
+  // Campos editables que salvamos
+  const EDITABLE_FIELDS = ["fecha","hora","nombre","telefono","correo","asesor","calificacion","status_compra","asistio","notas"];
 
-  // Normaliza una fila como la espera el grid
+  // Normaliza una fila como la espera el grid y guarda snapshot original para detectar cambios
+  function snapshotOf(r){
+    const o = {};
+    for (const k of EDITABLE_FIELDS) o[k] = r[k] ?? "";
+    return o;
+  }
   function normalizeRow(r){
     const asist = (r.asistio===true||r.asistio==="true") ? "true"
                  : (r.asistio===false||r.asistio==="false") ? "false" : "";
-    return {
+    const row = {
       ...r,
       event_id: String(r.event_id || ""),
       fecha: String(r.fecha || "").slice(0,10),
       hora:  String(r.hora  || "").slice(0,5),
       asistio: asist,
-      __ver: String(r.updated_at || r.__ver || "") // versión para control de concurrencia
+      __ver: String(r.updated_at || r.__ver || "")
     };
+    row.__orig  = snapshotOf(row);
+    row.__dirty = {};                  // mapa de campos sucios
+    row.__dirtyCount = 0;
+    return row;
   }
 
-  // --- Helpers de red con fallback ---
-  async function patchWithFallback(eventId, payload){
-    const base = `/api/postventa/agenda/${encodeURIComponent(eventId)}`;
-    let r = await fetch(base, {
-      method: "PATCH",
+  // --- Helpers de red ---
+  async function postJSON(url, payload){
+    const r = await fetch(url, {
+      method: "POST",
       headers: {"Content-Type":"application/json"},
       credentials: "include",
       body: JSON.stringify(payload)
     });
-    if (r.status === 405){
-      r = await fetch(base + "?_method=PATCH", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        credentials: "include",
-        body: JSON.stringify(payload)
-      });
+    const j = await r.json().catch(()=> ({}));
+    if(!r.ok || j.error){ throw new Error(j.error || (`HTTP ${r.status}`)); }
+    return j;
+  }
+  async function deletePOSTorDELETE(eventId){
+    // usa alias POST para entornos que bloquean DELETE
+    try{
+      const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(eventId)}/delete`, {});
+      return j;
+    }catch(e){
+      // fallback real DELETE
+      const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(eventId)}`, {method:"DELETE", credentials:"include"});
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
+      return j;
     }
-    return r;
   }
 
-  async function deleteWithFallback(eventId){
-    const base = `/api/postventa/agenda/${encodeURIComponent(eventId)}`;
-    let r = await fetch(base, { method: "DELETE", credentials: "include" });
-    if (r.status === 405){
-      r = await fetch(base + "?_method=DELETE", { method: "POST", credentials: "include" });
-    }
-    return r;
-  }
-
-  // -------- Formateo de columna Acciones
+  // -------- Acciones UI
   function accionesFmt(cell){
     const d = cell.getData();
-    return d.event_id && !String(d.event_id).startsWith("__tmp__")
-      ? `<button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`
-      : `<button class="btn btn-sm btn-primary" data-act="create">Crear</button>
-         <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
+    const isNew = !d.event_id || String(d.event_id).startsWith("__tmp__");
+    const dirty = d.__dirtyCount > 0;
+
+    if (isNew){
+      return `
+        <button class="btn btn-sm btn-primary" data-act="create">Crear</button>
+        <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
+    }
+    // existente
+    return `
+      ${dirty ? '<button class="btn btn-sm btn-success" data-act="save">Guardar</button>': ''}
+      ${dirty ? '<button class="btn btn-sm btn-outline-secondary" data-act="revert">Revertir</button>': ''}
+      <button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`;
   }
 
-  // -------- Click en Acciones (Crear / Eliminar / Descartar)
+  function markCellDirty(cell, yes){
+    const el = cell.getElement();
+    if (yes) el.classList.add("cell-dirty");
+    else el.classList.remove("cell-dirty");
+  }
+
+  function markRowClean(row){
+    const d = row.getData();
+    d.__orig = snapshotOf(d);
+    d.__dirty = {};
+    d.__dirtyCount = 0;
+    row.getCells().forEach(c => c.getElement().classList.remove("cell-dirty"));
+    row.update({}); // fuerza re-render de Acciones
+  }
+
   async function onActionClick(e, cell){
     const row = cell.getRow(), d = row.getData();
     const act = e.target?.dataset?.act;
-    if(act==="discard"){ row.delete(); return; }
 
-    if(act==="del" && d.event_id){
+    if (act==="discard"){ row.delete(); return; }
+
+    if (act==="del"){
+      if(!d.event_id) return;
       if(!confirm("¿Eliminar esta cita?")) return;
       try{
-        const r = await deleteWithFallback(d.event_id);
-        if(r.status===403){ alert("No autorizado"); return; }
-        const j = await r.json().catch(()=> ({}));
-        if(!r.ok) throw new Error(j.error || "No se pudo eliminar");
+        await deletePOSTorDELETE(d.event_id);
         row.delete();
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al eliminar"); }
       return;
     }
 
-    if(act==="create" && d.event_id && !String(d.event_id).startsWith("__tmp__")){
-      alert("Esta fila ya existe.");
+    if (act==="revert"){
+      // regresa valores originales
+      const patch = {};
+      for (const k of Object.keys(d.__dirty)){
+        patch[k] = d.__orig[k];
+      }
+      row.update(patch);
+      markRowClean(row);
       return;
     }
 
-    if(act==="create"){
+    if (act==="create"){
       const req = {nombre:d.nombre, correo:d.correo, asesor:d.asesor, fecha:d.fecha, hora:d.hora};
       for(const [k,v] of Object.entries(req)){
         if(!String(v||"").trim()){ alert("Falta " + k); return; }
@@ -132,7 +166,7 @@
 
       const payload = {
         nombre: d.nombre,
-        numero: d.telefono || "",       // el POST espera 'numero'
+        numero: d.telefono || "",
         correo: d.correo,
         asesor: d.asesor,
         fecha: d.fecha,
@@ -143,21 +177,66 @@
         notas: d.notas || ""
       };
       try{
-        // SOLO UN POST para crear
-        const r = await fetch("/api/postventa/agenda", {
-          method:"POST",
-          headers: {"Content-Type":"application/json"},
-          credentials: "include",
-          body: JSON.stringify(payload)
-        });
-        if(r.status===403){ alert("No autorizado"); return; }
-        const j = await r.json().catch(()=> ({}));
-        if(!r.ok || !j.id) throw new Error(j.error || "No se pudo crear");
-        row.update({event_id: j.id}); // asigna el ID real
-        // recarga ligera para tomar updated_at/ver desde el backend
+        const j = await postJSON("/api/postventa/agenda", payload);
+        row.update({event_id: j.id});
+        // recarga suave para traer updated_at/version correctos
         grid.setData(AJAX_URL + "?ts=" + Date.now());
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
+      return;
+    }
+
+    if (act==="save"){
+      if(!d.event_id) return;
+      // arma delta SOLO con campos sucios
+      const delta = {};
+      for (const k of Object.keys(d.__dirty)){
+        let v = d[k];
+        if (k==="asistio"){
+          v = (v==="true") ? true : (v==="false" ? false : null);
+        } else if (k==="calificacion"){
+          v = (v===""||v==null) ? null : Number(v);
+          if(v!==null && Number.isNaN(v)){ alert("Calificación inválida"); return; }
+        } else if (k==="fecha" && v && !isISODate(v)){
+          alert("Fecha inválida (YYYY-MM-DD)"); return;
+        } else if (k==="hora" && v && !isHHMM(v)){
+          alert("Hora inválida (HH:MM 24h)"); return;
+        }
+        delta[k] = v;
+      }
+      if (Object.keys(delta).length===0){ markRowClean(row); return; }
+      if (d.__ver) delta._if_version = d.__ver;
+
+      const el = row.getElement();
+      el.classList.add('row-saving');
+
+      try{
+        // Usamos alias POST /edit (evita 405 y proxys que bloquean PATCH)
+        const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}/edit`, delta);
+
+        if (j.row){
+          const updated = normalizeRow(j.row);
+          row.update(updated);
+          markRowClean(row);
+        }else{
+          // si el backend no regresa row, refrescamos
+          grid.setData(AJAX_URL + "?ts=" + Date.now());
+        }
+        el.classList.remove('row-saving');
+        el.classList.add('row-saved');
+        setTimeout(()=>el.classList.remove('row-saved'), 800);
+        if (window.calendar) setTimeout(()=> window.calendar.refetchEvents(), 800);
+
+      }catch(err){
+        el.classList.remove('row-saving');
+        if (/409/.test(String(err.message))){
+          alert("Conflicto: la fila cambió. Recargamos la versión vigente.");
+        }else{
+          alert(err.message || "Error al guardar");
+        }
+        grid.setData(AJAX_URL + "?ts=" + Date.now());
+      }
+      return;
     }
   }
 
@@ -169,9 +248,6 @@
     index: "event_id",
     reactiveData: true,
 
-    // Si alguna vez necesitas forzar credenciales en el GET del grid:
-    // ajaxRequestFunc: (url, config, params) => fetch(url, {credentials:"include"}).then(r=>r.json()),
-
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(normalizeRow);
     },
@@ -181,9 +257,9 @@
     },
 
     columns: [
-      {title:"Acciones", width:160, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
-      {title:"Fecha", field:"fecha", width:110, editor:"input", validator:(v)=>!v||isISODate(v) || "YYYY-MM-DD"},
-      {title:"Hora",  field:"hora",  width:90,  editor:"input", validator:(v)=>!v||isHHMM(v)   || "HH:MM 24h"},
+      {title:"Acciones", width:220, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
+      {title:"Fecha", field:"fecha", width:110, editor:"input"},
+      {title:"Hora",  field:"hora",  width:90,  editor:"input"},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
       {title:"Teléfono", field:"telefono", width:120, editor:"input"},
       {title:"Correo",   field:"correo",   width:240, editor:"input"},
@@ -195,79 +271,22 @@
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],
-    cellEdited: onCellEdited,
+    cellEdited: function(cell){
+      // marca sucio sólo si el valor realmente cambió contra el snapshot original
+      const row = cell.getRow(), d = row.getData();
+      const f = cell.getField();
+      if (!EDITABLE_FIELDS.includes(f)) return;
+
+      const v = cell.getValue();
+      const was = d.__orig[f] ?? "";
+      const changed = String(v ?? "") !== String(was ?? "");
+      d.__dirty[f] = changed;
+      d.__dirtyCount = Object.values(d.__dirty).filter(Boolean).length;
+      markCellDirty(cell, changed);
+      row.update({}); // para refrescar acciones (mostrar/ocultar Guardar/Revertir)
+    },
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
-
-  // -------- Guardado automático (PATCH por celda) — con control de versión y señal visual
-  async function onCellEdited(cell){
-    const row = cell.getRow(), d = row.getData();
-    if(!d.event_id) return;
-    if(String(d.event_id).startsWith("__tmp__")) return; // aún no creada en server
-
-    const field = cell.getField();
-    let value = cell.getValue();
-
-    // Validaciones simples
-    if(field==="fecha" && value && !isISODate(value)){ alert("Fecha inválida (YYYY-MM-DD)"); grid.setData(AJAX_URL); return; }
-    if(field==="hora"  && value && !isHHMM(value)){    alert("Hora inválida (HH:MM 24h)");   grid.setData(AJAX_URL); return; }
-
-    if(field==="asistio"){
-      value = (value==="true") ? true : (value==="false" ? false : null);
-    }
-    if(field==="calificacion"){
-      const n = (value===""||value==null) ? null : Number(value);
-      if(n!==null && Number.isNaN(n)){ alert("Calificación inválida"); grid.setData(AJAX_URL); return; }
-      value = n;
-    }
-
-    const payload = {[field]: value};
-    if (d.__ver) payload._if_version = d.__ver; // (si el backend lo soporta)
-
-    const el = row.getElement();
-    el.classList.add('row-saving'); // feedback visual
-
-    // Encadena el guardado para no pisarnos con el reload
-    lastSave = (async ()=>{
-      try{
-        const r = await patchWithFallback(d.event_id, payload);
-
-        // Conflicto: alguien editó antes que yo
-        if (r.status === 409){
-          const j = await r.json().catch(()=> ({}));
-          const cur = j.current || {};
-          const normalized = normalizeRow({
-            ...cur,
-            fecha: (cur.fecha||"").toString().slice(0,10),
-            hora:  (cur.hora ||"").toString().slice(0,5),
-          });
-          row.update(normalized);
-          el.classList.remove('row-saving');
-          row.getElement().classList.add('row-conflict');
-          setTimeout(()=>row.getElement().classList.remove('row-conflict'), 2000);
-          alert("Esta fila cambió hace un momento. Actualizamos a la versión vigente.");
-          return;
-        }
-
-        const j = await r.json().catch(()=> ({}));
-        if(!r.ok || j.error) throw new Error(j.error || "No se pudo guardar");
-
-        if (j.row){
-          row.update(normalizeRow(j.row));
-        }
-        el.classList.remove('row-saving');
-        el.classList.add('row-saved');
-        setTimeout(()=>el.classList.remove('row-saved'), 800);
-
-        if (window.calendar) setTimeout(()=> window.calendar.refetchEvents(), 1500);
-
-      }catch(err){
-        el.classList.remove('row-saving');
-        alert(err.message || "Error al guardar");
-        grid.setData(AJAX_URL + "?ts=" + Date.now()); // revertir a servidor
-      }
-    })();
-  }
 
   // -------- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
@@ -277,22 +296,21 @@
     grid.setFilter((data)=> fieldsToSearch.some(f => String(data[f]||"").toLowerCase().includes(q)));
   });
 
-  // -------- Recargar (espera último PATCH)
+  // -------- Recargar
   document.getElementById("btn-reload").onclick = async ()=>{
-    document.activeElement?.blur();       // commit del editor activo
-    await lastSave.catch(()=>{});         // espera último guardado
-    grid.setData(AJAX_URL + "?ts=" + Date.now()); // anti-cache
+    document.activeElement?.blur();
+    grid.setData(AJAX_URL + "?ts=" + Date.now());
     if (window.calendar) window.calendar.refetchEvents();
   };
 
-  // -------- Nueva fila
+  // -------- Nueva fila (borrador local)
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
       event_id: tmpId(),   // id temporal local
       fecha:"", hora:"",
       nombre:"", telefono:"", correo:"", asesor:"",
       calificacion:"", status_compra:"", asistio:"", notas:"",
-      __ver:""
+      __ver:"", __orig:{}, __dirty:{}, __dirtyCount:0
     }, true);
   };
 </script>
