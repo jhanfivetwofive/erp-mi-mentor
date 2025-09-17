@@ -60,6 +60,35 @@
     };
   }
 
+  // --- Helpers de red con fallback ---
+  async function patchWithFallback(eventId, payload){
+    const base = `/api/postventa/agenda/${encodeURIComponent(eventId)}`;
+    let r = await fetch(base, {
+      method: "PATCH",
+      headers: {"Content-Type":"application/json"},
+      credentials: "include",
+      body: JSON.stringify(payload)
+    });
+    if (r.status === 405){
+      r = await fetch(base + "?_method=PATCH", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+    }
+    return r;
+  }
+
+  async function deleteWithFallback(eventId){
+    const base = `/api/postventa/agenda/${encodeURIComponent(eventId)}`;
+    let r = await fetch(base, { method: "DELETE", credentials: "include" });
+    if (r.status === 405){
+      r = await fetch(base + "?_method=DELETE", { method: "POST", credentials: "include" });
+    }
+    return r;
+  }
+
   // -------- Formateo de columna Acciones
   function accionesFmt(cell){
     const d = cell.getData();
@@ -78,10 +107,7 @@
     if(act==="del" && d.event_id){
       if(!confirm("¿Eliminar esta cita?")) return;
       try{
-        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
-          method:"DELETE",
-          credentials: "include" // FIX: enviar cookies
-        });
+        const r = await deleteWithFallback(d.event_id);
         if(r.status===403){ alert("No autorizado"); return; }
         const j = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(j.error || "No se pudo eliminar");
@@ -117,11 +143,11 @@
         notas: d.notas || ""
       };
       try{
-        // SOLO UN POST para crear (se eliminaron fetch de PATCH y DELETE aquí)
+        // SOLO UN POST para crear
         const r = await fetch("/api/postventa/agenda", {
           method:"POST",
           headers: {"Content-Type":"application/json"},
-          credentials: "include", // FIX
+          credentials: "include",
           body: JSON.stringify(payload)
         });
         if(r.status===403){ alert("No autorizado"); return; }
@@ -142,6 +168,9 @@
     layout: "fitColumns",
     index: "event_id",
     reactiveData: true,
+
+    // Si alguna vez necesitas forzar credenciales en el GET del grid:
+    // ajaxRequestFunc: (url, config, params) => fetch(url, {credentials:"include"}).then(r=>r.json()),
 
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(normalizeRow);
@@ -196,17 +225,12 @@
     if (d.__ver) payload._if_version = d.__ver; // (si el backend lo soporta)
 
     const el = row.getElement();
-    el.classList.add('row-saving'); // FIX: feedback visual
+    el.classList.add('row-saving'); // feedback visual
 
     // Encadena el guardado para no pisarnos con el reload
     lastSave = (async ()=>{
       try{
-        const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}`, {
-          method:"PATCH",
-          headers: {"Content-Type":"application/json"},
-          credentials: "include", // FIX: enviar cookies
-          body: JSON.stringify(payload)
-        });
+        const r = await patchWithFallback(d.event_id, payload);
 
         // Conflicto: alguien editó antes que yo
         if (r.status === 409){
@@ -232,7 +256,7 @@
           row.update(normalizeRow(j.row));
         }
         el.classList.remove('row-saving');
-        el.classList.add('row-saved');    // FIX: feedback visual
+        el.classList.add('row-saved');
         setTimeout(()=>el.classList.remove('row-saved'), 800);
 
         if (window.calendar) setTimeout(()=> window.calendar.refetchEvents(), 1500);

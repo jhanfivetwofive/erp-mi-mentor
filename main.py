@@ -2958,48 +2958,45 @@ def api_postventa_agenda_events():
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
 
 
-
-
-@app.route("/api/postventa/agenda/<event_id>", methods=["PATCH"])
+@app.route("/api/postventa/agenda/<event_id>", methods=["PATCH","POST"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_patch_insert(event_id):
     try:
+        # Permitir override por POST: ?_method=PATCH
+        if request.method == "POST":
+            meth = (request.args.get("_method") or "").strip().upper()
+            if meth not in ("", "PATCH", "UPDATE"):
+                return jsonify({"error": "Método no permitido"}), 405
+
         delta = request.get_json(force=True) or {}
 
-        # 1) Traer la última versión (vista live o fallback union)
         cur = _agenda_get_latest_any(event_id)
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # 2) Control de concurrencia opcional (no rompe si no lo mandas)
-        exp_ver = (delta.pop("_if_version", "") or "").strip()
-        cur_ver = str(cur.get("updated_at") or "").strip()
-        if exp_ver and cur_ver and exp_ver != cur_ver:
-            # Conflicto: alguien editó antes. Devuelve la versión vigente.
-            latest = {**cur}
-            if latest.get("fecha"): latest["fecha"] = latest["fecha"].isoformat()
-            if latest.get("hora"):  latest["hora"]  = latest["hora"].strftime("%H:%M")
-            return jsonify({"error": "version_conflict", "current": latest}), 409
+        # --- Control de concurrencia (opcional pero útil) ---
+        if_version = str(delta.pop("_if_version", "") or "")
+        cur_ver    = str(cur.get("updated_at") or "")
+        if if_version and cur_ver and if_version != cur_ver:
+            # Alguien guardó antes que yo
+            cur["fecha"] = cur["fecha"].isoformat() if cur.get("fecha") else ""
+            cur["hora"]  = cur["hora"].strftime("%H:%M") if cur.get("hora") else ""
+            return jsonify({"error": "conflict", "current": cur}), 409
+        # ----------------------------------------------------
 
-        # 3) Construir el "patch" sobre la versión actual
         newv = {**cur}
-
         if "fecha" in delta and delta["fecha"]:
             newv["fecha"] = (delta["fecha"] or "").strip()
         if "hora" in delta and delta["hora"]:
             newv["hora"] = _norm_hhmm_to_time(delta["hora"])
-
         if "asistio" in delta:
             v = delta["asistio"]
             if isinstance(v, str):
                 vv = v.strip().lower()
                 v = True if vv in {"1","true","sí","si","yes","y"} else False if vv in {"0","false","no","n"} else None
-            elif v in (1,0):
-                v = bool(v)
-            elif v is not None and not isinstance(v, bool):
-                v = None
+            elif v in (1,0): v = bool(v)
+            elif v is not None and not isinstance(v, bool): v = None
             newv["asistio"] = v
-
         if "status_compra" in delta: newv["status_compra"] = (delta["status_compra"] or "").strip()
         if "semaforo" in delta:      newv["semaforo"]      = (delta["semaforo"] or "").strip()
         if "notas" in delta:         newv["notas"]         = delta["notas"]
@@ -3007,7 +3004,6 @@ def api_postventa_agenda_patch_insert(event_id):
         if "telefono" in delta:      newv["telefono"]      = _normalize_phone(delta["telefono"] or "")
         if "correo" in delta:        newv["correo"]        = _normalize_email(delta["correo"] or "")
         if "asesor" in delta:        newv["asesor"]        = (delta["asesor"] or "").strip()
-
         if "calificacion" in delta:
             try:
                 cv = delta["calificacion"]
@@ -3018,29 +3014,30 @@ def api_postventa_agenda_patch_insert(event_id):
         newv["event_id"]   = str(event_id)
         newv["is_deleted"] = False
 
-        # 4) Insertar el patch (esto escribe updated_at=now y evita el buffering con el union)
         _agenda_insert_patch(newv)
 
-        # 5) Devolver la última versión (con tipos amigables para el grid)
         latest = _agenda_get_latest_any(event_id)
         if latest:
-            if latest.get("fecha"): latest["fecha"] = latest["fecha"].isoformat()
-            if latest.get("hora"):  latest["hora"]  = latest["hora"].strftime("%H:%M")
-
+            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
+            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
         return jsonify({"ok": True, "row": latest}), 200
 
     except Exception as e:
-        app.logger.exception("PATCH agenda → INSERT PATCH failed")
+        app.logger.exception("PATCH/POST agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
 
 
-
-
-@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE"])
+@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE","POST"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_delete(event_id):
     try:
-        cur = _agenda_get_latest_any(event_id)  # ⬅️ antes: _agenda_get_latest_live
+        # Override por POST
+        if request.method == "POST":
+            meth = (request.args.get("_method") or "").strip().upper()
+            if meth != "DELETE":
+                return jsonify({"error": "Método no permitido"}), 405
+
+        cur = _agenda_get_latest_any(event_id)
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
@@ -3052,10 +3049,8 @@ def api_postventa_agenda_delete(event_id):
         return jsonify({"ok": True}), 200
 
     except Exception as e:
-        app.logger.exception("DELETE agenda → INSERT PATCH failed")
+        app.logger.exception("DELETE/POST agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
-
-
 
 
 # -------------------- Comunidad: Lista y Panel --------------------
