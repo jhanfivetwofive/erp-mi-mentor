@@ -64,7 +64,8 @@
       __ver: String(r.updated_at || r.__ver || "")
     };
     row.__orig  = snapshotOf(row);
-    row.__dirty = {};                  // mapa de campos sucios
+    // Los siguientes campos quedan por compatibilidad, pero ya no dependemos de ellos
+    row.__dirty = {};
     row.__dirtyCount = 0;
     return row;
   }
@@ -95,11 +96,70 @@
     }
   }
 
-  // -------- Acciones UI
+  // =========================
+  //  DIFERENCIAS SIN cellEdited
+  // =========================
+  function normalizeValForCompare(k, v){
+    if (v == null) return "";
+    if (k === "fecha") return String(v).slice(0,10);
+    if (k === "hora")  return String(v).slice(0,5);
+    if (k === "asistio") return v === true || v === "true" ? "true" : v === false || v === "false" ? "false" : "";
+    return String(v);
+  }
+  function hasDiff(d){
+    if (!d.__orig) return false;
+    return EDITABLE_FIELDS.some(k => normalizeValForCompare(k, d[k]) !== normalizeValForCompare(k, d.__orig[k]));
+  }
+  function buildDeltaFromDiff(d){
+    const delta = {};
+    for (const k of EDITABLE_FIELDS){
+      const cur = normalizeValForCompare(k, d[k]);
+      const was = normalizeValForCompare(k, d.__orig[k]);
+      if (cur !== was){
+        let v = d[k];
+        if (k === "asistio"){
+          v = (cur === "true") ? true : (cur === "false" ? false : null);
+        } else if (k === "calificacion"){
+          v = (v===""||v==null) ? null : Number(v);
+          if (v!==null && Number.isNaN(v)) throw new Error("Calificación inválida");
+        } else if (k === "fecha"){
+          if (!isISODate(cur)) throw new Error("Fecha inválida (YYYY-MM-DD)");
+          v = cur;
+        } else if (k === "hora"){
+          if (!isHHMM(cur)) throw new Error("Hora inválida (HH:MM 24h)");
+          v = cur;
+        }
+        delta[k] = v;
+      }
+    }
+    if (d.__ver) delta._if_version = d.__ver;
+    return delta;
+  }
+  function revertToOrig(row){
+    const d = row.getData();
+    if (!d.__orig) return;
+    const patch = {};
+    for (const k of EDITABLE_FIELDS){ patch[k] = d.__orig[k]; }
+    row.update(patch);
+  }
+  function rowDirtyFormatter(row){
+    const d = row.getData();
+    for (const k of EDITABLE_FIELDS){
+      const cell = row.getCell(k);
+      if (!cell) continue;
+      const cur = normalizeValForCompare(k, d[k]);
+      const was = normalizeValForCompare(k, (d.__orig||{})[k]);
+      const el = cell.getElement();
+      if (cur !== was) el.classList.add("cell-dirty");
+      else el.classList.remove("cell-dirty");
+    }
+  }
+
+  // -------- Acciones UI (calcula "dirty" al vuelo)
   function accionesFmt(cell){
     const d = cell.getData();
     const isNew = !d.event_id || String(d.event_id).startsWith("__tmp__");
-    const dirty = d.__dirtyCount > 0;
+    const dirty = hasDiff(d);
 
     if (isNew){
       return `
@@ -111,21 +171,6 @@
       ${dirty ? '<button class="btn btn-sm btn-success" data-act="save">Guardar</button>': ''}
       ${dirty ? '<button class="btn btn-sm btn-outline-secondary" data-act="revert">Revertir</button>': ''}
       <button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`;
-  }
-
-  function markCellDirty(cell, yes){
-    const el = cell.getElement();
-    if (yes) el.classList.add("cell-dirty");
-    else el.classList.remove("cell-dirty");
-  }
-
-  function markRowClean(row){
-    const d = row.getData();
-    d.__orig = snapshotOf(d);
-    d.__dirty = {};
-    d.__dirtyCount = 0;
-    row.getCells().forEach(c => c.getElement().classList.remove("cell-dirty"));
-    row.update({}); // fuerza re-render de Acciones
   }
 
   async function onActionClick(e, cell){
@@ -146,13 +191,8 @@
     }
 
     if (act==="revert"){
-      // regresa valores originales
-      const patch = {};
-      for (const k of Object.keys(d.__dirty)){
-        patch[k] = d.__orig[k];
-      }
-      row.update(patch);
-      markRowClean(row);
+      revertToOrig(row);
+      row.getTable().redraw(true);
       return;
     }
 
@@ -188,36 +228,21 @@
 
     if (act==="save"){
       if(!d.event_id) return;
-      // arma delta SOLO con campos sucios
-      const delta = {};
-      for (const k of Object.keys(d.__dirty)){
-        let v = d[k];
-        if (k==="asistio"){
-          v = (v==="true") ? true : (v==="false" ? false : null);
-        } else if (k==="calificacion"){
-          v = (v===""||v==null) ? null : Number(v);
-          if(v!==null && Number.isNaN(v)){ alert("Calificación inválida"); return; }
-        } else if (k==="fecha" && v && !isISODate(v)){
-          alert("Fecha inválida (YYYY-MM-DD)"); return;
-        } else if (k==="hora" && v && !isHHMM(v)){
-          alert("Hora inválida (HH:MM 24h)"); return;
-        }
-        delta[k] = v;
-      }
-      if (Object.keys(delta).length===0){ markRowClean(row); return; }
-      if (d.__ver) delta._if_version = d.__ver;
-
       const el = row.getElement();
-      el.classList.add('row-saving');
-
       try{
+        const delta = buildDeltaFromDiff(d);
+        if (Object.keys(delta).length===0){ row.getTable().redraw(true); return; }
+
+        el.classList.add('row-saving');
+
         // Usamos alias POST /edit (evita 405 y proxys que bloquean PATCH)
         const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}/edit`, delta);
 
         if (j.row){
           const updated = normalizeRow(j.row);
           row.update(updated);
-          markRowClean(row);
+          // refresca snapshot
+          row.getData().__orig = snapshotOf(updated);
         }else{
           // si el backend no regresa row, refrescamos
           grid.setData(AJAX_URL + "?ts=" + Date.now());
@@ -247,6 +272,7 @@
     layout: "fitColumns",
     index: "event_id",
     reactiveData: true,
+    rowFormatter: rowDirtyFormatter,   // ⬅️ pinta celdas sucias en cada render
 
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(normalizeRow);
@@ -271,22 +297,21 @@
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],
-    cellEdited: function(cell){
-      // marca sucio sólo si el valor realmente cambió contra el snapshot original
-      const row = cell.getRow(), d = row.getData();
-      const f = cell.getField();
-      if (!EDITABLE_FIELDS.includes(f)) return;
 
-      const v = cell.getValue();
-      const was = d.__orig[f] ?? "";
-      const changed = String(v ?? "") !== String(was ?? "");
-      d.__dirty[f] = changed;
-      d.__dirtyCount = Object.values(d.__dirty).filter(Boolean).length;
-      markCellDirty(cell, changed);
-      row.update({}); // para refrescar acciones (mostrar/ocultar Guardar/Revertir)
+    // Si Tabulator emite cellEdited, re-pintamos (pero ya no dependemos de esto)
+    cellEdited: function(cell){
+      const row = cell.getRow();
+      row.getTable().redraw(true);
     },
+
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
+
+  // Forzamos repintado de suciedad/acciones aunque el editor no dispare cellEdited
+  const gridEl = document.getElementById("grid");
+  ["keyup","change","focusout"].forEach(ev =>
+    gridEl.addEventListener(ev, () => grid.redraw(true))
+  );
 
   // -------- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
