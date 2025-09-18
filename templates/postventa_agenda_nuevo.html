@@ -11,7 +11,7 @@
   .row-saving   { opacity:.6 }
   .row-saved    { animation: flash 0.6s ease-in-out 1 }
   @keyframes flash { 50% { background:#e8f5e9 } }
-  .cell-dirty { box-shadow: inset 0 0 0 9999px rgba(255,193,7,.18); } /* amarillo suave */
+  .cell-dirty { box-shadow: inset 0 0 0 9999px rgba(255,193,7,.18); }
 </style>
 
 <div class="container py-3">
@@ -43,10 +43,8 @@
   const tmpId     = ()=>"__tmp__"+(crypto?.randomUUID?.() || (Date.now()+"_"+Math.random()));
   const AJAX_URL  = "/api/postventa/agenda/grid";
 
-  // Campos editables que salvamos
   const EDITABLE_FIELDS = ["fecha","hora","nombre","telefono","correo","asesor","calificacion","status_compra","asistio","notas"];
 
-  // Normaliza una fila como la espera el grid y guarda snapshot original para detectar cambios
   function snapshotOf(r){
     const o = {};
     for (const k of EDITABLE_FIELDS) o[k] = r[k] ?? "";
@@ -64,13 +62,9 @@
       __ver: String(r.updated_at || r.__ver || "")
     };
     row.__orig  = snapshotOf(row);
-    // Los siguientes campos quedan por compatibilidad, pero ya no dependemos de ellos
-    row.__dirty = {};
-    row.__dirtyCount = 0;
     return row;
   }
 
-  // --- Helpers de red ---
   async function postJSON(url, payload){
     const r = await fetch(url, {
       method: "POST",
@@ -83,12 +77,10 @@
     return j;
   }
   async function deletePOSTorDELETE(eventId){
-    // usa alias POST para entornos que bloquean DELETE
     try{
       const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(eventId)}/delete`, {});
       return j;
     }catch(e){
-      // fallback real DELETE
       const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(eventId)}`, {method:"DELETE", credentials:"include"});
       const j = await r.json().catch(()=> ({}));
       if(!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
@@ -96,9 +88,7 @@
     }
   }
 
-  // =========================
-  //  DIFERENCIAS SIN cellEdited
-  // =========================
+  // ---- Detección de cambios sin depender de cellEdited continuo
   function normalizeValForCompare(k, v){
     if (v == null) return "";
     if (k === "fecha") return String(v).slice(0,10);
@@ -155,7 +145,7 @@
     }
   }
 
-  // -------- Acciones UI (calcula "dirty" al vuelo)
+  // -------- Acciones
   function accionesFmt(cell){
     const d = cell.getData();
     const isNew = !d.event_id || String(d.event_id).startsWith("__tmp__");
@@ -166,7 +156,6 @@
         <button class="btn btn-sm btn-primary" data-act="create">Crear</button>
         <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
     }
-    // existente
     return `
       ${dirty ? '<button class="btn btn-sm btn-success" data-act="save">Guardar</button>': ''}
       ${dirty ? '<button class="btn btn-sm btn-outline-secondary" data-act="revert">Revertir</button>': ''}
@@ -219,7 +208,6 @@
       try{
         const j = await postJSON("/api/postventa/agenda", payload);
         row.update({event_id: j.id});
-        // recarga suave para traer updated_at/version correctos
         grid.setData(AJAX_URL + "?ts=" + Date.now());
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
@@ -234,17 +222,13 @@
         if (Object.keys(delta).length===0){ row.getTable().redraw(true); return; }
 
         el.classList.add('row-saving');
-
-        // Usamos alias POST /edit (evita 405 y proxys que bloquean PATCH)
         const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}/edit`, delta);
 
         if (j.row){
           const updated = normalizeRow(j.row);
           row.update(updated);
-          // refresca snapshot
           row.getData().__orig = snapshotOf(updated);
         }else{
-          // si el backend no regresa row, refrescamos
           grid.setData(AJAX_URL + "?ts=" + Date.now());
         }
         el.classList.remove('row-saving');
@@ -272,7 +256,7 @@
     layout: "fitColumns",
     index: "event_id",
     reactiveData: true,
-    rowFormatter: rowDirtyFormatter,   // ⬅️ pinta celdas sucias en cada render
+    rowFormatter: rowDirtyFormatter,   // pinta celdas sucias en cada render
 
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(normalizeRow);
@@ -298,7 +282,7 @@
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],
 
-    // Si Tabulator emite cellEdited, re-pintamos (pero ya no dependemos de esto)
+    // tras confirmar un cambio, repintamos para que salgan Guardar/Revertir
     cellEdited: function(cell){
       const row = cell.getRow();
       row.getTable().redraw(true);
@@ -307,11 +291,9 @@
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
-  // Forzamos repintado de suciedad/acciones aunque el editor no dispare cellEdited
-  const gridEl = document.getElementById("grid");
-  ["keyup","change","focusout"].forEach(ev =>
-    gridEl.addEventListener(ev, () => grid.redraw(true))
-  );
+  // *** IMPORTANTE ***
+  // Quitamos los listeners globales que repintaban en keyup/change/focusout
+  // porque destruían el editor inmediatamente y no permitían escribir.
 
   // -------- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
@@ -326,22 +308,20 @@
     try{
       document.activeElement?.blur();
       await grid.setData(AJAX_URL + "?ts=" + Date.now());
-      console.log("[Agenda] recargado OK");
       if (window.calendar) window.calendar.refetchEvents();
     }catch(err){
       console.error("[Agenda] error al recargar:", err);
-      alert("No se pudo recargar la agenda. Revisa que el endpoint /api/postventa/agenda/grid responda 200.");
+      alert("No se pudo recargar la agenda. Revisa que /api/postventa/agenda/grid responda 200.");
     }
   };
 
   // -------- Nueva fila (borrador local)
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
-      event_id: tmpId(),   // id temporal local
+      event_id: tmpId(),
       fecha:"", hora:"",
       nombre:"", telefono:"", correo:"", asesor:"",
-      calificacion:"", status_compra:"", asistio:"", notas:"",
-      __ver:"", __orig:{}, __dirty:{}, __dirtyCount:0
+      calificacion:"", status_compra:"", asistio:"", notas:""
     }, true);
   };
 </script>
