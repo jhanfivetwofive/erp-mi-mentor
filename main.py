@@ -2871,7 +2871,6 @@ def api_postventa_agenda_events():
         raw_nombre = (user.get("nombre") or "").strip()
         raw_correo = (user.get("correo") or "").strip().lower()
 
-        # Agujas (primer nombre y user del correo)
         first_name = (raw_nombre.split()[0] if raw_nombre else "")
         email_user = (raw_correo.split("@")[0] if "@" in raw_correo else raw_correo)
 
@@ -2890,10 +2889,10 @@ def api_postventa_agenda_events():
         params = []
 
         if d1:
-            where.append("SAFE_CAST(fecha AS DATE) >= @d1")
+            where.append("fecha >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
         if d2:
-            where.append("SAFE_CAST(fecha AS DATE) <  @d2")
+            where.append("fecha <  @d2")
             params.append(bigquery.ScalarQueryParameter("d2", "DATE", d2))
 
         if mine and (needle_name or needle_user):
@@ -2906,32 +2905,24 @@ def api_postventa_agenda_events():
 
         where_sql = "WHERE " + " AND ".join(where)
 
+        # ⬇️ AHORA LEEMOS DE LA VISTA LIVE
         q = f"""
         WITH base AS (
           SELECT
             CAST(event_id AS STRING) AS event_id,
             nombre, telefono, correo, asesor,
-            SAFE_CAST(fecha AS DATE) AS fecha,
-            SAFE_CAST(hora  AS TIME) AS hora,
-            calificacion, semaforo, status_compra, asistio, notas,
-            -- is_deleted robusto
-            CASE
-              WHEN LOWER(CAST(is_deleted AS STRING)) IN ('1','true','t','yes','y','si','sí') THEN TRUE
-              ELSE FALSE
-            END AS is_deleted,
-            -- asesor normalizado (sin acentos/espacios) para comparación
+            fecha, hora, calificacion, status_compra, asistio, notas,
+            IFNULL(is_deleted, FALSE) AS is_deleted,
             REGEXP_REPLACE(
               TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
               r'[^a-z0-9]+',''
             ) AS asesor_norm,
-            -- ⬅️ Nuevo: versión para concurrencia
-            TIMESTAMP(updated_at) AS updated_at
-          FROM `{AGENDA_TABLA}`
+            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
+          FROM `{AGENDA_LIVE_VIEW}`
         )
         SELECT
           event_id, nombre, telefono, correo, asesor,
-          fecha, hora, calificacion, semaforo, status_compra, asistio, notas,
-          updated_at
+          fecha, hora, calificacion, status_compra, asistio, notas, updated_at
         FROM base
         {where_sql}
           AND is_deleted = FALSE
@@ -2966,7 +2957,6 @@ def api_postventa_agenda_events():
             except Exception:
                 pass
 
-            # ⬅️ Versión del registro (para _if_version al mover en calendario)
             ver = None
             try:
                 u = r.get("updated_at")
@@ -2988,12 +2978,12 @@ def api_postventa_agenda_events():
                     "correo": r["correo"],
                     "numero": r["telefono"],
                     "calificacion": r["calificacion"],
-                    "semaforo": r["semaforo"],
                     "status_compra": r["status_compra"],
                     "asistio": truthy(r["asistio"]),
                     "notas": r["notas"],
                     "wa_url": wa,
-                    "version": ver,  # ⬅️ importante
+                    "version": ver,   # para control de concurrencia al mover
+                    "semaforo": None  # mantenemos null por compatibilidad si el front lo consulta
                 },
             })
 
@@ -3002,6 +2992,7 @@ def api_postventa_agenda_events():
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["GET"])
