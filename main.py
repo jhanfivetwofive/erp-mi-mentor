@@ -2692,10 +2692,10 @@ def api_postventa_agenda_grid():
     out = []
     for r in rows:
         d = dict(r)
-        # Normaliza fecha y hora para el grid
+        # Normaliza fecha/hora
         d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
         d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
-        # ⬅️ MUY IMPORTANTE: serializa updated_at a string
+        # ⬅️ Serializa updated_at
         u = d.get("updated_at")
         if isinstance(u, datetime):
             d["updated_at"] = u.isoformat()
@@ -2703,6 +2703,7 @@ def api_postventa_agenda_grid():
             d["updated_at"] = ""
         else:
             d["updated_at"] = str(u)
+
         out.append(d)
 
     return jsonify(out)

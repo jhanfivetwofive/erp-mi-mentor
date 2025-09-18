@@ -298,9 +298,15 @@
 
   // -------- Recargar
   document.getElementById("btn-reload").onclick = async ()=>{
-    document.activeElement?.blur();
-    grid.setData(AJAX_URL + "?ts=" + Date.now());
-    if (window.calendar) window.calendar.refetchEvents();
+    try{
+      document.activeElement?.blur();
+      await grid.setData(AJAX_URL + "?ts=" + Date.now());
+      console.log("[Agenda] recargado OK");
+      if (window.calendar) window.calendar.refetchEvents();
+    }catch(err){
+      console.error("[Agenda] error al recargar:", err);
+      alert("No se pudo recargar la agenda. Revisa que el endpoint /api/postventa/agenda/grid responda 200.");
+    }
   };
 
   // -------- Nueva fila (borrador local)
