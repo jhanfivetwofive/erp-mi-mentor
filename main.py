@@ -755,6 +755,44 @@ def _has_col(table_id: str, col: str) -> bool:
         s = _allowed_fields(table_id, refresh=True)
     return col in s
 
+def _select_cols_for_union(table_id: str) -> str:
+    """
+    Devuelve una lista de columnas para usar en el UNION ALL entre base y patches,
+    poniendo NULL/FALSE cuando una columna no existe en la tabla.
+    """
+    target = [
+        "event_id", "nombre", "telefono", "correo", "asesor",
+        "fecha", "hora",
+        "calificacion", "semaforo", "status_compra", "asistio", "notas",
+        "is_deleted", "updated_at", "created_at",
+    ]
+    avail = _allowed_fields(table_id)
+    parts = []
+    for col in target:
+        if col in avail:
+            if col == "event_id":
+                parts.append("CAST(event_id AS STRING) AS event_id")
+            elif col == "fecha":
+                parts.append("SAFE_CAST(fecha AS DATE) AS fecha")
+            elif col == "hora":
+                parts.append("SAFE_CAST(hora AS TIME) AS hora")
+            elif col == "is_deleted":
+                parts.append("IFNULL(is_deleted, FALSE) AS is_deleted")
+            else:
+                parts.append(col)
+        else:
+            # Tipado de NULLs para que el UNION no truene
+            typed = {
+                "fecha":        "CAST(NULL AS DATE) AS fecha",
+                "hora":         "CAST(NULL AS TIME) AS hora",
+                "calificacion": "CAST(NULL AS INT64) AS calificacion",
+                "asistio":      "CAST(NULL AS BOOL) AS asistio",
+                "is_deleted":   "FALSE AS is_deleted",
+            }.get(col, f"NULL AS {col}")
+            parts.append(typed)
+    return ",\n            ".join(parts)
+
+
 
 def _agenda_insert_version(row: dict):
     now_iso = _now_iso_utc()
@@ -818,37 +856,27 @@ def _norm_hhmm_to_time(s: str) -> str:
 
 
 def _agenda_get_latest_any(event_id: str):
-    """
-    Devuelve la última versión de un evento:
-    1) Intenta la vista en vivo (si existe/permisos)
-    2) Si falla/no hay fila, hace UNION ALL de base + patches y toma la más reciente
-    """
-    # 1) Vista LIVE
+    # 1) Vista LIVE primero (si existe)
     try:
         row = _agenda_get_latest_live(event_id)
         if row:
             return row
     except Exception as e:
-        app.logger.warning("LIVE view no disponible en dev o sin permisos: %s", e)
+        app.logger.warning("LIVE view no disponible: %s", e)
 
-    # 2) Fallback UNION base + patches
+    # 2) Fallback UNION dinámico base + patches (column-safe)
+    sel_base  = _select_cols_for_union(AGENDA_TABLA)
+    sel_patch = _select_cols_for_union(AGENDA_PATCHES)
+
     q = f"""
     WITH u AS (
       SELECT
-        CAST(event_id AS STRING) AS event_id,
-        nombre, telefono, correo, asesor,
-        fecha, hora, calificacion, status_compra, asistio, notas,
-        IFNULL(is_deleted, FALSE) AS is_deleted,
-        updated_at, created_at
+        {sel_base}
       FROM `{AGENDA_TABLA}`
       WHERE CAST(event_id AS STRING) = @id
       UNION ALL
       SELECT
-        CAST(event_id AS STRING) AS event_id,
-        nombre, telefono, correo, asesor,
-        fecha, hora, calificacion, status_compra, asistio, notas,
-        IFNULL(is_deleted, FALSE) AS is_deleted,
-        updated_at, created_at
+        {sel_patch}
       FROM `{AGENDA_PATCHES}`
       WHERE CAST(event_id AS STRING) = @id
     ),
@@ -857,18 +885,19 @@ def _agenda_get_latest_any(event_id: str):
         u.*,
         ROW_NUMBER() OVER (
           PARTITION BY event_id
-          ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+          ORDER BY SAFE_CAST(updated_at AS TIMESTAMP) DESC,
+                   SAFE_CAST(created_at AS TIMESTAMP) DESC
         ) AS rn
       FROM u
     )
     SELECT * FROM r WHERE rn=1 LIMIT 1
     """
+
     job = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", str(event_id))]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
     return dict(row) if row else None
-
 
 
 # -------------------------------------------------------------
@@ -2648,23 +2677,18 @@ def api_postventa_agenda_grid():
         rows = client.query(q).result()
     except Exception as e:
         app.logger.warning("FALLBACK agenda grid (sin LIVE view): %s", e)
-        # 2) Fallback: union base + patches y toma la última por event_id
+
+        sel_base  = _select_cols_for_union(AGENDA_TABLA)
+        sel_patch = _select_cols_for_union(AGENDA_PATCHES)
+
         q = f"""
         WITH u AS (
           SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            fecha, hora, calificacion, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
-            updated_at, created_at
+            {sel_base}
           FROM `{AGENDA_TABLA}`
           UNION ALL
           SELECT
-            CAST(event_id AS STRING) AS event_id,
-            nombre, telefono, correo, asesor,
-            fecha, hora, calificacion, status_compra, asistio, notas,
-            IFNULL(is_deleted, FALSE) AS is_deleted,
-            updated_at, created_at
+            {sel_patch}
           FROM `{AGENDA_PATCHES}`
         ),
         r AS (
@@ -2672,22 +2696,22 @@ def api_postventa_agenda_grid():
             u.*,
             ROW_NUMBER() OVER (
               PARTITION BY event_id
-              ORDER BY TIMESTAMP(updated_at) DESC, TIMESTAMP(created_at) DESC
+              ORDER BY SAFE_CAST(updated_at AS TIMESTAMP) DESC,
+                       SAFE_CAST(created_at AS TIMESTAMP) DESC
             ) AS rn
           FROM u
         )
         SELECT
           event_id, nombre, telefono, correo, asesor,
-          SAFE_CAST(fecha AS DATE) AS fecha,
-          SAFE_CAST(hora  AS TIME) AS hora,
-          calificacion, status_compra, asistio, notas,
+          fecha, hora, calificacion, status_compra, asistio, notas,
           updated_at
         FROM r
-        WHERE rn=1 AND is_deleted = FALSE
+        WHERE rn=1 AND IFNULL(is_deleted, FALSE)=FALSE
         ORDER BY fecha DESC, hora DESC
         LIMIT 1000
         """
         rows = client.query(q).result()
+
 
     out = []
     for r in rows:
@@ -3022,33 +3046,55 @@ def api_postventa_agenda_get(event_id):
         return jsonify({"error": str(e)}), 500
 
 
-
 @app.route("/api/postventa/agenda/<event_id>", methods=["PATCH","POST"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_patch_insert(event_id):
     try:
-        # Permitir override por POST: ?_method=PATCH
         if request.method == "POST":
             meth = (request.args.get("_method") or "").strip().upper()
             if meth not in ("", "PATCH", "UPDATE"):
                 return jsonify({"error": "Método no permitido"}), 405
 
         delta = request.get_json(force=True) or {}
-
         cur = _agenda_get_latest_any(event_id)
         if not cur:
             return jsonify({"error": "No existe el evento"}), 404
 
-        # --- Control de concurrencia (opcional pero útil) ---
-        if_version = str(delta.pop("_if_version", "") or "")
-        cur_ver    = str(cur.get("updated_at") or "")
-        if if_version and cur_ver and if_version != cur_ver:
-            # Alguien guardó antes que yo
-            cur["fecha"] = cur["fecha"].isoformat() if cur.get("fecha") else ""
-            cur["hora"]  = cur["hora"].strftime("%H:%M") if cur.get("hora") else ""
-            return jsonify({"error": "conflict", "current": cur}), 409
-        # ----------------------------------------------------
+        # --- Control de concurrencia tolerante ---
+        def _to_micros(x):
+            if x is None:
+                return None
+            s = str(x).strip().replace("Z", "").replace(" UTC", "")
+            s = s.replace("T", " ")
+            try:
+                dt = datetime.fromisoformat(s)
+            except Exception:
+                return None
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1_000_000)
 
+        if_version = delta.pop("_if_version", None)
+        if if_version:
+            iv = _to_micros(if_version)
+            cv = _to_micros(cur.get("updated_at"))
+            # Solo conflicto si el cliente está ATRÁS (iv < cv). Si no lo puedo parsear, no bloqueo.
+            if iv is not None and cv is not None and iv < cv:
+                # Normalizo para regresar la versión actual en el mismo formato de la grilla
+                cur_fmt = {**cur}
+                try:
+                    if isinstance(cur_fmt.get("fecha"), (datetime, date)):
+                        cur_fmt["fecha"] = cur_fmt["fecha"].isoformat()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(cur_fmt.get("hora"), "strftime"):
+                        cur_fmt["hora"] = cur_fmt["hora"].strftime("%H:%M")
+                except Exception:
+                    pass
+                return jsonify({"error": "conflict", "current": cur_fmt}), 409
+
+        # --- Merge de cambios ---
         newv = {**cur}
         if "fecha" in delta and delta["fecha"]:
             newv["fecha"] = (delta["fecha"] or "").strip()
@@ -3059,8 +3105,10 @@ def api_postventa_agenda_patch_insert(event_id):
             if isinstance(v, str):
                 vv = v.strip().lower()
                 v = True if vv in {"1","true","sí","si","yes","y"} else False if vv in {"0","false","no","n"} else None
-            elif v in (1,0): v = bool(v)
-            elif v is not None and not isinstance(v, bool): v = None
+            elif v in (1,0):
+                v = bool(v)
+            elif v is not None and not isinstance(v, bool):
+                v = None
             newv["asistio"] = v
         if "status_compra" in delta: newv["status_compra"] = (delta["status_compra"] or "").strip()
         if "semaforo" in delta:      newv["semaforo"]      = (delta["semaforo"] or "").strip()
@@ -3079,17 +3127,33 @@ def api_postventa_agenda_patch_insert(event_id):
         newv["event_id"]   = str(event_id)
         newv["is_deleted"] = False
 
+        # Inserta patch (con updated_at "ahora")
         _agenda_insert_patch(newv)
 
-        latest = _agenda_get_latest_any(event_id)
-        if latest:
-            latest["fecha"] = latest["fecha"].isoformat() if latest.get("fecha") else ""
-            latest["hora"]  = latest["hora"].strftime("%H:%M") if latest.get("hora") else ""
-        return jsonify({"ok": True, "row": latest}), 200
+        # === ECO INMEDIATO: devolvemos lo que acabamos de guardar, normalizado,
+        # sin depender de una lectura inmediata de BQ (evita buffering).
+        now_u = _now_iso_utc()
+        resp = {
+            "event_id": newv.get("event_id"),
+            "nombre": newv.get("nombre") or "",
+            "telefono": newv.get("telefono") or "",
+            "correo": newv.get("correo") or "",
+            "asesor": newv.get("asesor") or "",
+            "fecha": (newv.get("fecha") or "")[:10],
+            "hora":  (newv.get("hora")  or "")[:5],
+            "calificacion": newv.get("calificacion"),
+            "semaforo": newv.get("semaforo") or "",
+            "status_compra": newv.get("status_compra") or "",
+            "asistio": bool(newv.get("asistio")) if newv.get("asistio") is not None else None,
+            "notas": newv.get("notas") or "",
+            "updated_at": now_u,
+        }
+        return jsonify({"ok": True, "row": resp}), 200
 
     except Exception as e:
         app.logger.exception("PATCH/POST agenda → INSERT PATCH failed")
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["DELETE","POST"])
