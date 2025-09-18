@@ -6,8 +6,6 @@
 <style>
   #grid{height:72vh}
   .toolbar .form-control{height: calc(1.5em + .5rem + 2px); padding:.25rem .5rem; font-size:.9rem;}
-  .row-conflict { animation: blink 0.6s linear 3; }
-  @keyframes blink { 50%{ background: #fff3cd !important; } }
   .row-saving   { opacity:.6 }
   .row-saved    { animation: flash 0.6s ease-in-out 1 }
   @keyframes flash { 50% { background:#e8f5e9 } }
@@ -27,9 +25,9 @@
   <div id="grid"></div>
 
   <div class="small text-muted mt-2">
-    * Para crear una cita nueva llena <strong>Nombre, Correo, Asesor, Fecha y Hora</strong> y presiona “Crear”.<br>
-    * Para modificar una fila existente edita las celdas y luego presiona “Guardar”.<br>
-    * Quitamos el semáforo como pediste. El ID no se muestra.
+    * Crear: llena <strong>Nombre, Correo, Asesor, Fecha y Hora</strong> y presiona “Crear”.<br>
+    * Editar: cambia cualquier celda y presiona “Guardar”.<br>
+    * Se escribe en <code>DB_AGENDA_DIAGNOSTICOS_PATCH</code> y se lee desde <code>VW_AGENDA_DIAGNOSTICOS_LIVE</code>.
   </div>
 </div>
 {% endblock %}
@@ -42,11 +40,9 @@
   const isHHMM    = (s)=>/^\d{2}:\d{2}$/.test(String(s||"").trim());
   const tmpId     = ()=>"__tmp__"+(crypto?.randomUUID?.() || (Date.now()+"_"+Math.random()));
   const AJAX_URL  = "/api/postventa/agenda/grid";
-
-  // Campos editables que salvamos
   const EDITABLE_FIELDS = ["fecha","hora","nombre","telefono","correo","asesor","calificacion","status_compra","asistio","notas"];
 
-  // Normaliza una fila como la espera el grid y guarda snapshot original para detectar cambios
+  // Normaliza fila desde API y guarda snapshot original
   function snapshotOf(r){
     const o = {};
     for (const k of EDITABLE_FIELDS) o[k] = r[k] ?? "";
@@ -63,9 +59,7 @@
       asistio: asist,
       __ver: String(r.updated_at || r.__ver || "")
     };
-    row.__orig  = snapshotOf(row);
-    row.__dirty = {};                  // mapa de campos sucios
-    row.__dirtyCount = 0;
+    row.__orig = snapshotOf(row);
     return row;
   }
 
@@ -82,12 +76,10 @@
     return j;
   }
   async function deletePOSTorDELETE(eventId){
-    // usa alias POST para entornos que bloquean DELETE
     try{
       const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(eventId)}/delete`, {});
       return j;
     }catch(e){
-      // fallback real DELETE
       const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(eventId)}`, {method:"DELETE", credentials:"include"});
       const j = await r.json().catch(()=> ({}));
       if(!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
@@ -95,36 +87,60 @@
     }
   }
 
-  // -------- Acciones UI
+  // ------- Normalizadores para payload (siempre enviamos TODO)
+  function normAllForPatch(d){
+    const out = {};
+    for (const k of EDITABLE_FIELDS){
+      let v = d[k];
+      if (k==="asistio"){
+        const s = String(v??"").toLowerCase();
+        v = s==="true" ? true : s==="false" ? false : null;
+      }else if (k==="calificacion"){
+        v = (v===""||v==null) ? null : Number(v);
+        if (v!==null && Number.isNaN(v)) throw new Error("Calificación inválida");
+      }else if (k==="fecha"){
+        const s = String(v||"").slice(0,10);
+        if (s && !isISODate(s)) throw new Error("Fecha inválida (YYYY-MM-DD)");
+        v = s;
+      }else if (k==="hora"){
+        const s = String(v||"").slice(0,5);
+        if (s && !isHHMM(s)) throw new Error("Hora inválida (HH:MM 24h)");
+        v = s;
+      }else{
+        v = (v==null) ? "" : v;
+      }
+      out[k] = v;
+    }
+    if (d.__ver) out._if_version = d.__ver; // control de concurrencia
+    return out;
+  }
+
+  // -------- Acciones
   function accionesFmt(cell){
     const d = cell.getData();
     const isNew = !d.event_id || String(d.event_id).startsWith("__tmp__");
-    const dirty = d.__dirtyCount > 0;
-
     if (isNew){
       return `
         <button class="btn btn-sm btn-primary" data-act="create">Crear</button>
         <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
     }
-    // existente (con Guardar y sin Revertir)
+    // ⬅️ SIEMPRE mostramos Guardar / Revertir / Eliminar
     return `
-      ${dirty ? '<button class="btn btn-sm btn-success" data-act="save">Guardar</button>': ''}
+      <button class="btn btn-sm btn-success" data-act="save">Guardar</button>
+      <button class="btn btn-sm btn-outline-secondary" data-act="revert">Revertir</button>
       <button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`;
   }
 
-  function markCellDirty(cell, yes){
-    const el = cell.getElement();
-    if (yes) el.classList.add("cell-dirty");
-    else el.classList.remove("cell-dirty");
-  }
-
-  function markRowClean(row){
+  function paintDirty(row){
     const d = row.getData();
-    d.__orig = snapshotOf(d);
-    d.__dirty = {};
-    d.__dirtyCount = 0;
-    row.getCells().forEach(c => c.getElement().classList.remove("cell-dirty"));
-    row.update({}); // fuerza re-render de Acciones
+    const orig = d.__orig || {};
+    for (const k of EDITABLE_FIELDS){
+      const cell = row.getCell(k);
+      if (!cell) continue;
+      const now = String(d[k] ?? "");
+      const was = String(orig[k] ?? "");
+      cell.getElement().classList.toggle("cell-dirty", now!==was);
+    }
   }
 
   async function onActionClick(e, cell){
@@ -132,6 +148,14 @@
     const act = e.target?.dataset?.act;
 
     if (act==="discard"){ row.delete(); return; }
+
+    if (act==="revert"){
+      const back = {};
+      for (const k of EDITABLE_FIELDS) back[k] = (d.__orig||{})[k] ?? "";
+      row.update(back);
+      row.getTable().redraw(true);
+      return;
+    }
 
     if (act==="del"){
       if(!d.event_id) return;
@@ -167,8 +191,7 @@
       try{
         const j = await postJSON("/api/postventa/agenda", payload);
         row.update({event_id: j.id});
-        // recarga suave para traer updated_at/version correctos
-        grid.setData(AJAX_URL + "?ts=" + Date.now());
+        grid.setData(AJAX_URL + "?ts=" + Date.now()); // refresca versión y updated_at
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
       return;
@@ -176,38 +199,18 @@
 
     if (act==="save"){
       if(!d.event_id) return;
-      // arma delta SOLO con campos sucios
-      const delta = {};
-      for (const k of Object.keys(d.__dirty)){
-        let v = d[k];
-        if (k==="asistio"){
-          v = (v==="true") ? true : (v==="false" ? false : null);
-        } else if (k==="calificacion"){
-          v = (v===""||v==null) ? null : Number(v);
-          if(v!==null && Number.isNaN(v)){ alert("Calificación inválida"); return; }
-        } else if (k==="fecha" && v && !isISODate(v)){
-          alert("Fecha inválida (YYYY-MM-DD)"); return;
-        } else if (k==="hora" && v && !isHHMM(v)){
-          alert("Hora inválida (HH:MM 24h)"); return;
-        }
-        delta[k] = v;
-      }
-      if (Object.keys(delta).length===0){ markRowClean(row); return; }
-      if (d.__ver) delta._if_version = d.__ver;
-
       const el = row.getElement();
-      el.classList.add('row-saving');
-
       try{
-        // Usamos alias POST /edit (evita 405 y proxys que bloquean PATCH)
+        const delta = normAllForPatch(d);     // ⬅️ SIEMPRE TODOS LOS CAMPOS
+        el.classList.add('row-saving');
+
         const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(d.event_id)}/edit`, delta);
 
         if (j.row){
           const updated = normalizeRow(j.row);
           row.update(updated);
-          markRowClean(row);
+          row.getData().__orig = snapshotOf(updated); // nuevo snapshot
         }else{
-          // si el backend no regresa row, refrescamos
           grid.setData(AJAX_URL + "?ts=" + Date.now());
         }
         el.classList.remove('row-saving');
@@ -218,7 +221,7 @@
       }catch(err){
         el.classList.remove('row-saving');
         if (/409/.test(String(err.message))){
-          alert("Conflicto: la fila cambió. Recargamos la versión vigente.");
+          alert("Conflicto: alguien más guardó antes. Recargamos la versión vigente.");
         }else{
           alert(err.message || "Error al guardar");
         }
@@ -236,43 +239,27 @@
     index: "event_id",
     reactiveData: true,
 
-    ajaxResponse: function(url, params, resp){
-      return (resp || []).map(normalizeRow);
-    },
-
-    ajaxError: function(xhr){
-      if(xhr?.status===403) alert("No autorizado");
-    },
+    ajaxResponse: (url, params, resp)=> (resp || []).map(normalizeRow),
+    ajaxError: (xhr)=>{ if(xhr?.status===403) alert("No autorizado"); },
 
     columns: [
-      {title:"Acciones", width:240, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
+      {title:"Acciones", width:260, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
       {title:"Fecha", field:"fecha", width:110, editor:"input"},
       {title:"Hora",  field:"hora",  width:90,  editor:"input"},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
-      {title:"Teléfono", field:"telefono", width:120, editor:"input"},
-      {title:"Correo",   field:"correo",   width:240, editor:"input"},
+      {title:"Teléfono", field:"telefono", width:140, editor:"input"},
+      {title:"Correo",   field:"correo",   width:260, editor:"input"},
       {title:"Asesor",   field:"asesor",   width:200, editor:"input"},
       {title:"Calificación", field:"calificacion", width:120, editor:"input"},
       {title:"Estatus compra", field:"status_compra", width:160, editor:"input"},
-      {title:"¿Asistió?", field:"asistio", width:100, editor:"select",
+      {title:"¿Asistió?", field:"asistio", width:110, editor:"select",
         editorParams:{values:{"":"—","true":"Sí","false":"No"}}
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],
-    cellEdited: function(cell){
-      // marca sucio sólo si el valor realmente cambió contra el snapshot original
-      const row = cell.getRow(), d = row.getData();
-      const f = cell.getField();
-      if (!EDITABLE_FIELDS.includes(f)) return;
 
-      const v = cell.getValue();
-      const was = d.__orig[f] ?? "";
-      const changed = String(v ?? "") !== String(was ?? "");
-      d.__dirty[f] = changed;
-      d.__dirtyCount = Object.values(d.__dirty).filter(Boolean).length;
-      markCellDirty(cell, changed);
-      row.update({}); // para refrescar acciones (mostrar/ocultar Guardar)
-    },
+    cellEdited: (cell)=>{ paintDirty(cell.getRow()); },
+    rowUpdated: (row)=>{ paintDirty(row); },     // por si llega data nueva
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
 
@@ -289,22 +276,21 @@
     try{
       document.activeElement?.blur();
       await grid.setData(AJAX_URL + "?ts=" + Date.now());
-      console.log("[Agenda] recargado OK");
       if (window.calendar) window.calendar.refetchEvents();
     }catch(err){
       console.error("[Agenda] error al recargar:", err);
-      alert("No se pudo recargar la agenda. Revisa que el endpoint /api/postventa/agenda/grid responda 200.");
+      alert("No se pudo recargar la agenda. Revisa que /api/postventa/agenda/grid responda 200.");
     }
   };
 
-  // -------- Nueva fila (borrador local)
+  // -------- Nueva fila (con defaults del backend al render)
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
-      event_id: tmpId(),   // id temporal local
-      fecha:"", hora:"",
-      nombre:"", telefono:"", correo:"", asesor:"",
-      calificacion:"", status_compra:"", asistio:"", notas:"",
-      __ver:"", __orig:{}, __dirty:{}, __dirtyCount:0
+      event_id: tmpId(),
+      fecha: "{{ default_fecha|e }}",
+      hora:  "{{ default_hora|e }}",
+      nombre:"", telefono:"", correo:"", asesor:"{{ default_asesor|e }}",
+      calificacion:"", status_compra:"", asistio:"", notas:""
     }, true);
   };
 </script>
