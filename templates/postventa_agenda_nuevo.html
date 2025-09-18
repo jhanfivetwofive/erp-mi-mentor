@@ -6,12 +6,10 @@
 <style>
   #grid{height:72vh}
   .toolbar .form-control{height: calc(1.5em + .5rem + 2px); padding:.25rem .5rem; font-size:.9rem;}
-  .row-conflict { animation: blink 0.6s linear 3; }
-  @keyframes blink { 50%{ background: #fff3cd !important; } }
   .row-saving   { opacity:.6 }
   .row-saved    { animation: flash 0.6s ease-in-out 1 }
   @keyframes flash { 50% { background:#e8f5e9 } }
-  .cell-dirty { box-shadow: inset 0 0 0 9999px rgba(255,193,7,.18); }
+  .cell-dirty { box-shadow: inset 0 0 0 9999px rgba(255,193,7,.18); } /* amarillo suave */
 </style>
 
 <div class="container py-3">
@@ -29,7 +27,7 @@
   <div class="small text-muted mt-2">
     * Para crear una cita nueva llena <strong>Nombre, Correo, Asesor, Fecha y Hora</strong> y presiona “Crear”.<br>
     * Para modificar una fila existente edita las celdas y luego presiona “Guardar”.<br>
-    * Quitamos el semáforo como pediste. El ID no se muestra.
+    * Los cambios se guardan en <code>DB_AGENDA_DIAGNOSTICOS_PATCH</code>; el grid lee la vista <code>VW_AGENDA_DIAGNOSTICOS_LIVE</code>.
   </div>
 </div>
 {% endblock %}
@@ -45,6 +43,7 @@
 
   const EDITABLE_FIELDS = ["fecha","hora","nombre","telefono","correo","asesor","calificacion","status_compra","asistio","notas"];
 
+  // Normaliza fila que viene del API y guardamos snapshot original
   function snapshotOf(r){
     const o = {};
     for (const k of EDITABLE_FIELDS) o[k] = r[k] ?? "";
@@ -61,10 +60,11 @@
       asistio: asist,
       __ver: String(r.updated_at || r.__ver || "")
     };
-    row.__orig  = snapshotOf(row);
+    row.__orig = snapshotOf(row);
     return row;
   }
 
+  // --- Helpers de red ---
   async function postJSON(url, payload){
     const r = await fetch(url, {
       method: "POST",
@@ -78,9 +78,11 @@
   }
   async function deletePOSTorDELETE(eventId){
     try{
+      // alias POST (por si DELETE está bloqueado por proxy)
       const j = await postJSON(`/api/postventa/agenda/${encodeURIComponent(eventId)}/delete`, {});
       return j;
     }catch(e){
+      // intento DELETE real
       const r = await fetch(`/api/postventa/agenda/${encodeURIComponent(eventId)}`, {method:"DELETE", credentials:"include"});
       const j = await r.json().catch(()=> ({}));
       if(!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
@@ -88,34 +90,44 @@
     }
   }
 
-  // ---- Detección de cambios sin depender de cellEdited continuo
-  function normalizeValForCompare(k, v){
+  // ---- Detección de cambios vs snapshot original (sin matar el editor)
+  function vNorm(k, v){
     if (v == null) return "";
     if (k === "fecha") return String(v).slice(0,10);
     if (k === "hora")  return String(v).slice(0,5);
-    if (k === "asistio") return v === true || v === "true" ? "true" : v === false || v === "false" ? "false" : "";
+    if (k === "asistio") return (v===true||v==="true") ? "true" : (v===false||v==="false") ? "false" : "";
     return String(v);
   }
   function hasDiff(d){
     if (!d.__orig) return false;
-    return EDITABLE_FIELDS.some(k => normalizeValForCompare(k, d[k]) !== normalizeValForCompare(k, d.__orig[k]));
+    return EDITABLE_FIELDS.some(k => vNorm(k,d[k]) !== vNorm(k,d.__orig[k]));
   }
-  function buildDeltaFromDiff(d){
+  function applyDirtyStyles(row){
+    const d = row.getData();
+    for (const k of EDITABLE_FIELDS){
+      const cell = row.getCell(k);
+      if (!cell) continue;
+      const el = cell.getElement();
+      const changed = vNorm(k,d[k]) !== vNorm(k,(d.__orig||{})[k]);
+      el.classList.toggle("cell-dirty", changed);
+    }
+  }
+  function buildDelta(d){
     const delta = {};
     for (const k of EDITABLE_FIELDS){
-      const cur = normalizeValForCompare(k, d[k]);
-      const was = normalizeValForCompare(k, d.__orig[k]);
+      const cur = vNorm(k,d[k]);
+      const was = vNorm(k,(d.__orig||{})[k]);
       if (cur !== was){
         let v = d[k];
-        if (k === "asistio"){
-          v = (cur === "true") ? true : (cur === "false" ? false : null);
-        } else if (k === "calificacion"){
+        if (k==="asistio"){
+          v = (cur==="true") ? true : (cur==="false" ? false : null);
+        }else if (k==="calificacion"){
           v = (v===""||v==null) ? null : Number(v);
           if (v!==null && Number.isNaN(v)) throw new Error("Calificación inválida");
-        } else if (k === "fecha"){
+        }else if (k==="fecha"){
           if (!isISODate(cur)) throw new Error("Fecha inválida (YYYY-MM-DD)");
           v = cur;
-        } else if (k === "hora"){
+        }else if (k==="hora"){
           if (!isHHMM(cur)) throw new Error("Hora inválida (HH:MM 24h)");
           v = cur;
         }
@@ -124,25 +136,6 @@
     }
     if (d.__ver) delta._if_version = d.__ver;
     return delta;
-  }
-  function revertToOrig(row){
-    const d = row.getData();
-    if (!d.__orig) return;
-    const patch = {};
-    for (const k of EDITABLE_FIELDS){ patch[k] = d.__orig[k]; }
-    row.update(patch);
-  }
-  function rowDirtyFormatter(row){
-    const d = row.getData();
-    for (const k of EDITABLE_FIELDS){
-      const cell = row.getCell(k);
-      if (!cell) continue;
-      const cur = normalizeValForCompare(k, d[k]);
-      const was = normalizeValForCompare(k, (d.__orig||{})[k]);
-      const el = cell.getElement();
-      if (cur !== was) el.classList.add("cell-dirty");
-      else el.classList.remove("cell-dirty");
-    }
   }
 
   // -------- Acciones
@@ -168,6 +161,14 @@
 
     if (act==="discard"){ row.delete(); return; }
 
+    if (act==="revert"){
+      const back = {};
+      for (const k of EDITABLE_FIELDS) back[k] = (d.__orig||{})[k] ?? "";
+      row.update(back);
+      row.getTable().redraw(true);
+      return;
+    }
+
     if (act==="del"){
       if(!d.event_id) return;
       if(!confirm("¿Eliminar esta cita?")) return;
@@ -179,17 +180,9 @@
       return;
     }
 
-    if (act==="revert"){
-      revertToOrig(row);
-      row.getTable().redraw(true);
-      return;
-    }
-
     if (act==="create"){
       const req = {nombre:d.nombre, correo:d.correo, asesor:d.asesor, fecha:d.fecha, hora:d.hora};
-      for(const [k,v] of Object.entries(req)){
-        if(!String(v||"").trim()){ alert("Falta " + k); return; }
-      }
+      for(const [k,v] of Object.entries(req)){ if(!String(v||"").trim()){ alert("Falta " + k); return; } }
       if(!isISODate(d.fecha)){ alert("Fecha inválida (YYYY-MM-DD)"); return; }
       if(!isHHMM(d.hora)){ alert("Hora inválida (HH:MM 24h)"); return; }
 
@@ -208,7 +201,7 @@
       try{
         const j = await postJSON("/api/postventa/agenda", payload);
         row.update({event_id: j.id});
-        grid.setData(AJAX_URL + "?ts=" + Date.now());
+        grid.setData(AJAX_URL + "?ts=" + Date.now()); // refresca versión y updated_at
         if (window.calendar) window.calendar.refetchEvents();
       }catch(err){ alert(err.message || "Error al crear"); }
       return;
@@ -218,7 +211,7 @@
       if(!d.event_id) return;
       const el = row.getElement();
       try{
-        const delta = buildDeltaFromDiff(d);
+        const delta = buildDelta(d);
         if (Object.keys(delta).length===0){ row.getTable().redraw(true); return; }
 
         el.classList.add('row-saving');
@@ -256,33 +249,32 @@
     layout: "fitColumns",
     index: "event_id",
     reactiveData: true,
-    rowFormatter: rowDirtyFormatter,   // pinta celdas sucias en cada render
+    rowFormatter: applyDirtyStyles,
 
     ajaxResponse: function(url, params, resp){
       return (resp || []).map(normalizeRow);
     },
-
     ajaxError: function(xhr){
       if(xhr?.status===403) alert("No autorizado");
     },
 
     columns: [
-      {title:"Acciones", width:220, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
+      {title:"Acciones", width:240, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
       {title:"Fecha", field:"fecha", width:110, editor:"input"},
       {title:"Hora",  field:"hora",  width:90,  editor:"input"},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
-      {title:"Teléfono", field:"telefono", width:120, editor:"input"},
-      {title:"Correo",   field:"correo",   width:240, editor:"input"},
+      {title:"Teléfono", field:"telefono", width:140, editor:"input"},
+      {title:"Correo",   field:"correo",   width:260, editor:"input"},
       {title:"Asesor",   field:"asesor",   width:200, editor:"input"},
       {title:"Calificación", field:"calificacion", width:120, editor:"input"},
       {title:"Estatus compra", field:"status_compra", width:160, editor:"input"},
-      {title:"¿Asistió?", field:"asistio", width:100, editor:"select",
+      {title:"¿Asistió?", field:"asistio", width:110, editor:"select",
         editorParams:{values:{"":"—","true":"Sí","false":"No"}}
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],
 
-    // tras confirmar un cambio, repintamos para que salgan Guardar/Revertir
+    // tras editar una celda, repintamos la fila para pintar “sucias” y mostrar acciones
     cellEdited: function(cell){
       const row = cell.getRow();
       row.getTable().redraw(true);
@@ -290,10 +282,6 @@
 
     initialSort: [{column:"fecha", dir:"desc"}, {column:"hora", dir:"desc"}]
   });
-
-  // *** IMPORTANTE ***
-  // Quitamos los listeners globales que repintaban en keyup/change/focusout
-  // porque destruían el editor inmediatamente y no permitían escribir.
 
   // -------- Filtro rápido
   const fieldsToSearch = ["nombre","correo","asesor","notas"];
@@ -311,16 +299,17 @@
       if (window.calendar) window.calendar.refetchEvents();
     }catch(err){
       console.error("[Agenda] error al recargar:", err);
-      alert("No se pudo recargar la agenda. Revisa que /api/postventa/agenda/grid responda 200.");
+      alert("No se pudo recargar la agenda. Revisa que el endpoint /api/postventa/agenda/grid responda 200.");
     }
   };
 
-  // -------- Nueva fila (borrador local)
+  // -------- Nueva fila (borrador local con defaults del backend)
   document.getElementById("btn-add").onclick = ()=>{
     grid.addRow({
       event_id: tmpId(),
-      fecha:"", hora:"",
-      nombre:"", telefono:"", correo:"", asesor:"",
+      fecha: "{{ default_fecha|e }}",
+      hora:  "{{ default_hora|e }}",
+      nombre:"", telefono:"", correo:"", asesor:"{{ default_asesor|e }}",
       calificacion:"", status_compra:"", asistio:"", notas:""
     }, true);
   };
