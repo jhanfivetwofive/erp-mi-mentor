@@ -106,7 +106,7 @@
         <button class="btn btn-sm btn-primary" data-act="create">Crear</button>
         <button class="btn btn-sm btn-outline-secondary" data-act="discard">Descartar</button>`;
     }
-    // existente (sin "Revertir")
+    // existente (con Guardar y sin Revertir)
     return `
       ${dirty ? '<button class="btn btn-sm btn-success" data-act="save">Guardar</button>': ''}
       <button class="btn btn-sm btn-danger" data-act="del">Eliminar</button>`;
@@ -245,7 +245,7 @@
     },
 
     columns: [
-      {title:"Acciones", width:180, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
+      {title:"Acciones", width:240, headerSort:false, formatter:accionesFmt, cellClick:onActionClick},
       {title:"Fecha", field:"fecha", width:110, editor:"input"},
       {title:"Hora",  field:"hora",  width:90,  editor:"input"},
       {title:"Nombre",   field:"nombre",   width:220, editor:"input"},
