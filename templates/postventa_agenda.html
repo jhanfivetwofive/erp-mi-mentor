@@ -14,9 +14,6 @@
   /* Asistido: borde y opacidad suave */
   .evt-asistio { border:2px solid #16a34a !important; opacity:.92; }
 
-  /* Pago: lomo verde en el chip */
-  .fc-event.evt-pago { border-left: 4px solid #198754; }
-
   /* Quitar cualquier leyenda antigua si quedara en caché */
   .legend { display:none !important; }
 
@@ -75,13 +72,12 @@
       <div class="modal-body pt-0">
         <div class="card border-0 shadow-sm">
           <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start">
+            <div class="d-flex justify-content-between">
               <div>
                 <div id="evtNombre" class="fw-semibold mb-1"></div>
                 <div class="text-muted small" id="evtFecha"></div>
               </div>
-              <div class="text-end">
-                <span id="evtBadgePago" class="badge bg-secondary d-inline-block mb-1">Pendiente</span><br>
+              <div>
                 <span id="evtBadgeAsistio" class="badge bg-success d-none">Entrevistado</span>
               </div>
             </div>
@@ -217,26 +213,6 @@
       } catch (e) { failure(e); }
     },
 
-    /* ============  NUEVO: pinta badge/estilo si pago=true  ============ */
-    eventDidMount(info){
-      const pago = !!(info.event.extendedProps && info.event.extendedProps.pago);
-      if (pago) {
-        info.el.classList.add('evt-pago');
-        // badge pequeñito al lado del título si hay contenedor
-        const titleEl = info.el.querySelector('.fc-event-title, .fc-event-title-container');
-        if (titleEl) {
-          const b = document.createElement('span');
-          b.className = 'badge bg-success ms-1';
-          b.textContent = 'Pagó';
-          titleEl.appendChild(b);
-        }
-      }
-      // Mantener estilo “asistió”
-      if (info.event.extendedProps && info.event.extendedProps.asistio) {
-        info.el.classList.add('evt-asistio');
-      }
-    },
-
     eventClick: (arg) => {
       const e = arg.event, x = e.extendedProps || {};
       document.getElementById('evtNombre').textContent = e.title || '';
@@ -248,27 +224,11 @@
       document.getElementById('evtSem').textContent    = x.semaforo || '';
       document.getElementById('evtStatus').textContent = x.status_compra || '';
       document.getElementById('evtNotas').textContent  = x.notas || '';
-
-      // ---- badges del modal ----
-      const badgeAsistio = document.getElementById('evtBadgeAsistio');
-      if (x.asistio === true) badgeAsistio.classList.remove('d-none'); else badgeAsistio.classList.add('d-none');
-
-      const badgePago = document.getElementById('evtBadgePago');
-      if (x.pago === true) {
-        badgePago.textContent = 'Pagó';
-        badgePago.classList.remove('bg-secondary');
-        badgePago.classList.add('bg-success');
-      } else {
-        badgePago.textContent = 'Pendiente';
-        badgePago.classList.remove('bg-success');
-        badgePago.classList.add('bg-secondary');
-      }
-
-      // Botón WhatsApp
+      const badge = document.getElementById('evtBadgeAsistio');
+      if (x.asistio === true) badge.classList.remove('d-none'); else badge.classList.add('d-none');
       const waBtn = document.getElementById('evtWA');
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
       else { waBtn.classList.add('d-none'); waBtn.removeAttribute('href'); }
-
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
 
