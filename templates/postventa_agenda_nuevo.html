@@ -57,6 +57,7 @@
       fecha: String(r.fecha || "").slice(0,10),
       hora:  String(r.hora  || "").slice(0,5),
       asistio: asist,
+      pago: !!r.pago,
       __ver: String(r.updated_at || r.__ver || "")
     };
     row.__orig = snapshotOf(row);
@@ -254,6 +255,11 @@
       {title:"Estatus compra", field:"status_compra", width:160, editor:"input"},
       {title:"¿Asistió?", field:"asistio", width:110, editor:"select",
         editorParams:{values:{"":"—","true":"Sí","false":"No"}}
+      },
+      {title:"Pagó", field:"pago", width:80, hozAlign:"center", headerSort:false,
+        formatter:function(cell){
+          return cell.getValue() ? "✅" : "—";
+        }
       },
       {title:"Notas", field:"notas", width:320, editor:"input"},
     ],

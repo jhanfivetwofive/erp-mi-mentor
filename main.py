@@ -2668,7 +2668,7 @@ def api_postventa_agenda_grid():
           SAFE_CAST(fecha AS DATE) AS fecha,
           SAFE_CAST(hora  AS TIME) AS hora,
           calificacion, status_compra, asistio, notas,
-          updated_at
+          updated_at, pago                              
         FROM `{AGENDA_LIVE_VIEW}`
         WHERE IFNULL(is_deleted, FALSE) = FALSE
         ORDER BY fecha DESC, hora DESC
@@ -2719,6 +2719,7 @@ def api_postventa_agenda_grid():
         # Normaliza fecha/hora
         d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
         d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
+        d["pago"] = bool(d.get("pago")) if d.get("pago") is not None else False
         # ⬅️ Serializa updated_at
         u = d.get("updated_at")
         if isinstance(u, datetime):
@@ -2922,7 +2923,7 @@ def api_postventa_agenda_events():
         )
         SELECT
           event_id, nombre, telefono, correo, asesor,
-          fecha, hora, calificacion, status_compra, asistio, notas, updated_at
+          fecha, hora, calificacion, status_compra, asistio, notas, updated_at, pago
         FROM base
         {where_sql}
           AND is_deleted = FALSE
@@ -2984,6 +2985,7 @@ def api_postventa_agenda_events():
                     "wa_url": wa,
                     "version": ver,   # para control de concurrencia al mover
                     "semaforo": None  # mantenemos null por compatibilidad si el front lo consulta
+                    "pago": bool(r.get("pago"))
                 },
             })
 
