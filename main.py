@@ -93,7 +93,8 @@ IS_PROD = os.getenv("ENV", "").lower() in {"prod", "production", "live"}
 app.debug = not IS_PROD
 # En Cloud Run con HTTPS real, debe ser True
 app.config["SESSION_COOKIE_SECURE"] = (
-    os.getenv("SESSION_COOKIE_SECURE", "1" if IS_PROD else "0").lower() in {"1","true","yes"}
+    os.getenv("SESSION_COOKIE_SECURE", "1" if IS_PROD else "0").lower() in {
+        "1", "true", "yes"}
 )
 
 # Opcional: fuerza HTTPS (redirecciones) detrás de proxy si lo necesitas
@@ -106,7 +107,8 @@ app.config["SESSION_COOKIE_SECURE"] = (
 # =========================================================
 
 # --- Helpers de rol/sesión ---
-ROLES_VALIDOS = {"admin", "postventa", "comunidad", "adquisicion", "people", "invitado"}
+ROLES_VALIDOS = {"admin", "postventa", "comunidad",
+                 "adquisicion", "people", "invitado"}
 
 
 def normalize_email(s: str) -> str:
@@ -130,7 +132,8 @@ def fetch_role_from_bq(email_norm: str) -> str | None:
     LIMIT 1
     """
     cfg = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("c", "STRING", email_norm)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "c", "STRING", email_norm)]
     )
     rows = list(client.query(q, job_config=cfg).result())
     if not rows:
@@ -161,7 +164,8 @@ def login_required(f):
         if not email_allowed(u.get("correo", "")):
             session.pop("user", None)
             return redirect(
-                url_for("login_firebase_page", msg="Solo cuentas @fivetwofive.mx")
+                url_for("login_firebase_page",
+                        msg="Solo cuentas @fivetwofive.mx")
             )
         return f(*args, **kwargs)
 
@@ -202,7 +206,6 @@ def _now_iso_utc():
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-
 # --- Inicialización de Firebase (como ya la tenías) ---
 if not firebase_admin._apps:
     cred = credentials.Certificate(json.loads(get_firebase_credentials()))
@@ -222,9 +225,9 @@ COMMUNITY_VIEW = "fivetwofive-20.COMUNIDAD.VW_COMUNIDAD_CONSOLIDADO_X_ALUMNO"
 DB_USUARIO = "fivetwofive-20.INSUMOS.DB_USUARIO"
 # ---- Postventa: constantes de tablas ----
 POSTVENTA_TABLA_BASE = "fivetwofive-20.POSTVENTA.DB_DIAGNOSTICO_POSTVENTA"
-AGENDA_TABLA       = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS"
-AGENDA_PATCHES     = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS_PATCH"
-AGENDA_LIVE_VIEW   = "fivetwofive-20.INSUMOS.VW_AGENDA_DIAGNOSTICOS_LIVE"
+AGENDA_TABLA = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS"
+AGENDA_PATCHES = "fivetwofive-20.INSUMOS.DB_AGENDA_DIAGNOSTICOS_PATCH"
+AGENDA_LIVE_VIEW = "fivetwofive-20.INSUMOS.VW_AGENDA_DIAGNOSTICOS_LIVE"
 
 
 # ---- Cuestionario Diagnóstico (opciones visibles) ----
@@ -497,7 +500,8 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
         params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
     if generacion:
         wh.append("GENERACION = @gen")
-        params.append(bigquery.ScalarQueryParameter("gen", "STRING", generacion))
+        params.append(bigquery.ScalarQueryParameter(
+            "gen", "STRING", generacion))
     where_sql = "WHERE " + " AND ".join(wh)
 
     # 1) KPIs
@@ -516,7 +520,8 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
     row = next(
         iter(
             client.query(
-                q_kpis, job_config=bigquery.QueryJobConfig(query_parameters=params)
+                q_kpis, job_config=bigquery.QueryJobConfig(
+                    query_parameters=params)
             ).result()
         ),
         None,
@@ -534,17 +539,20 @@ def _postventa_insights_data(date_from=None, date_to=None, generacion=None):
             int(row["no_viable"]) if row and row["no_viable"] is not None else 0
         ),
         "avg_score": (
-            float(row["avg_score"]) if row and row["avg_score"] is not None else None
+            float(row["avg_score"]
+                  ) if row and row["avg_score"] is not None else None
         ),
         "mediana": (
             float(row["mediana"]) if row and row["mediana"] is not None else None
         ),
     }
     kpis["tasa_conversion"] = (
-        round((kpis["ventas"] / kpis["total"]) * 100, 1) if kpis["total"] else 0.0
+        round((kpis["ventas"] / kpis["total"])
+              * 100, 1) if kpis["total"] else 0.0
     )
     kpis["pct_viable"] = (
-        round((kpis["viables"] / kpis["total"]) * 100, 1) if kpis["total"] else 0.0
+        round((kpis["viables"] / kpis["total"])
+              * 100, 1) if kpis["total"] else 0.0
     )
 
     # 2) Serie temporal (por día)
@@ -709,10 +717,12 @@ def _agenda_get_latest(event_id: str):
     LIMIT 1
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", event_id)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "id", "STRING", event_id)]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
     return dict(row) if row else None
+
 
 def _agenda_get_latest_live(event_id: str):
     q = f"""
@@ -722,7 +732,8 @@ def _agenda_get_latest_live(event_id: str):
     LIMIT 1
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("id","STRING", str(event_id))]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "id", "STRING", str(event_id))]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
     return dict(row) if row else None
@@ -754,6 +765,7 @@ def _has_col(table_id: str, col: str) -> bool:
         # refresca por si añadieron columnas sin reiniciar la app
         s = _allowed_fields(table_id, refresh=True)
     return col in s
+
 
 def _select_cols_for_union(table_id: str) -> str:
     """
@@ -793,7 +805,6 @@ def _select_cols_for_union(table_id: str) -> str:
     return ",\n            ".join(parts)
 
 
-
 def _agenda_insert_version(row: dict):
     now_iso = _now_iso_utc()
     row = {**row, "updated_at": now_iso}
@@ -804,10 +815,14 @@ def _agenda_insert_version(row: dict):
     allowed = _allowed_fields(AGENDA_TABLA)
 
     def _to_bq_json(v):
-        if isinstance(v, datetime): return v.isoformat()
-        if isinstance(v, date):     return v.isoformat()
-        if isinstance(v, dtime):    return v.strftime("%H:%M:%S")
-        if isinstance(v, Decimal):  return float(v)
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if isinstance(v, date):
+            return v.isoformat()
+        if isinstance(v, dtime):
+            return v.strftime("%H:%M:%S")
+        if isinstance(v, Decimal):
+            return float(v)
         return v
 
     row.pop("rn", None)
@@ -817,8 +832,7 @@ def _agenda_insert_version(row: dict):
     if errors:
         raise RuntimeError(str(errors))
 
-    
-    
+
 def _agenda_insert_patch(row: dict):
     # Siempre pisa timestamps para que la vista elija esta versión
     now_iso = _now_iso_utc()  # "YYYY-MM-DDTHH:MM:SS.ssssssZ"
@@ -850,7 +864,8 @@ def _agenda_insert_patch(row: dict):
 def _norm_hhmm_to_time(s: str) -> str:
     s = (s or "").strip()
     m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
-    if not m: return "09:00:00"
+    if not m:
+        return "09:00:00"
     h, mm, ss = int(m.group(1)), m.group(2), m.group(3) or "00"
     return f"{h:02d}:{mm}:{ss}"
 
@@ -865,7 +880,7 @@ def _agenda_get_latest_any(event_id: str):
         app.logger.warning("LIVE view no disponible: %s", e)
 
     # 2) Fallback UNION dinámico base + patches (column-safe)
-    sel_base  = _select_cols_for_union(AGENDA_TABLA)
+    sel_base = _select_cols_for_union(AGENDA_TABLA)
     sel_patch = _select_cols_for_union(AGENDA_PATCHES)
 
     q = f"""
@@ -894,7 +909,8 @@ def _agenda_get_latest_any(event_id: str):
     """
 
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", str(event_id))]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "id", "STRING", str(event_id))]
     )
     row = next(iter(client.query(q, job_config=job).result()), None)
     return dict(row) if row else None
@@ -1022,7 +1038,8 @@ def _adq_insights_data(
 
         gid = meta["gid"]
         job = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("gid", "STRING", gid)]
+            query_parameters=[
+                bigquery.ScalarQueryParameter("gid", "STRING", gid)]
         )
 
         # 1) KPIs por generación (LEER TODO DESDE LA SÁBANA)
@@ -1061,7 +1078,8 @@ def _adq_insights_data(
         ventas = int(row["ventas"] or 0)
         ingreso = float(row["ingreso"] or 0.0)
         insc = int(row["inscripciones"] or 0)
-        diagnosticos = int(row["diagnosticos"] or 0)  # FIX: usar valores de la sábana
+        # FIX: usar valores de la sábana
+        diagnosticos = int(row["diagnosticos"] or 0)
         ventas_diag = int(row["ventas_diag"] or 0)  # FIX
         roas = (ingreso / gasto) if gasto else 0.0
 
@@ -1075,7 +1093,8 @@ def _adq_insights_data(
         series_labels, series_insc, series_leads = [], [], []
         for r in client.query(q_ser, job_config=job).result():
             d = r["d"]
-            series_labels.append(d.isoformat() if hasattr(d, "isoformat") else str(d))
+            series_labels.append(d.isoformat() if hasattr(
+                d, "isoformat") else str(d))
             series_insc.append(int(r["inscripciones"] or 0))
             series_leads.append(int(r["leads"] or 0))
 
@@ -1126,7 +1145,8 @@ def _adq_insights_data(
     dm_params, dm_where = [], []
     if date_from:
         dm_where.append("SAFE_CAST(FECHA AS DATE) >= @from")
-        dm_params.append(bigquery.ScalarQueryParameter("from", "DATE", date_from))
+        dm_params.append(bigquery.ScalarQueryParameter(
+            "from", "DATE", date_from))
     if date_to:
         dm_where.append("SAFE_CAST(FECHA AS DATE) <= @to")
         dm_params.append(bigquery.ScalarQueryParameter("to", "DATE", date_to))
@@ -1145,7 +1165,8 @@ def _adq_insights_data(
     r = next(
         iter(
             client.query(
-                q_dm, job_config=bigquery.QueryJobConfig(query_parameters=dm_params)
+                q_dm, job_config=bigquery.QueryJobConfig(
+                    query_parameters=dm_params)
             ).result()
         ),
         None,
@@ -1213,16 +1234,19 @@ def _adq_insights_data(
     series_insc = [insc_map.get(lbl, 0) for lbl in series_labels]
     series_leads = [leads_map.get(lbl, 0) for lbl in series_labels]
 
-    roas = (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0  # FIX: fuera del bucle
+    # FIX: fuera del bucle
+    roas = (dm["ingreso"] / dm["pauta"]) if dm["pauta"] else 0.0
 
     # Ranking por generación (general) desde la sábana
     rank_where, rank_params = [], []
     if date_from:
         rank_where.append("f_to   >= @rf")
-        rank_params.append(bigquery.ScalarQueryParameter("rf", "DATE", date_from))
+        rank_params.append(
+            bigquery.ScalarQueryParameter("rf", "DATE", date_from))
     if date_to:
         rank_where.append("f_from <= @rt")
-        rank_params.append(bigquery.ScalarQueryParameter("rt", "DATE", date_to))
+        rank_params.append(
+            bigquery.ScalarQueryParameter("rt", "DATE", date_to))
     rank_clip = ("WHERE " + " AND ".join(rank_where)) if rank_where else ""
 
     q_rank = f"""
@@ -1258,10 +1282,12 @@ def _adq_insights_data(
     diag_where, diag_params = [], []
     if date_from:
         diag_where.append("DATE(FECHA_ENCUESTA) >= @df")
-        diag_params.append(bigquery.ScalarQueryParameter("df", "DATE", date_from))
+        diag_params.append(
+            bigquery.ScalarQueryParameter("df", "DATE", date_from))
     if date_to:
         diag_where.append("DATE(FECHA_ENCUESTA) <= @dt")
-        diag_params.append(bigquery.ScalarQueryParameter("dt", "DATE", date_to))
+        diag_params.append(
+            bigquery.ScalarQueryParameter("dt", "DATE", date_to))
     diag_clip = ("WHERE " + " AND ".join(diag_where)) if diag_where else ""
 
     q_diag = f"""
@@ -1272,7 +1298,8 @@ def _adq_insights_data(
     drow = next(
         iter(
             client.query(
-                q_diag, job_config=bigquery.QueryJobConfig(query_parameters=diag_params)
+                q_diag, job_config=bigquery.QueryJobConfig(
+                    query_parameters=diag_params)
             ).result()
         ),
         None,
@@ -1381,7 +1408,8 @@ def _enforce_guest_readonly():
             # API → JSON
             if request.path.startswith("/api/"):
                 return (
-                    jsonify({"error": "Modo solo lectura para usuarios invitados."}),
+                    jsonify(
+                        {"error": "Modo solo lectura para usuarios invitados."}),
                     403,
                 )
             # Páginas → template
@@ -1417,7 +1445,8 @@ def _enforce_email_domain_allowlist():
         if correo and not email_allowed(correo):
             session.pop("user", None)
             return redirect(
-                url_for("login_firebase_page", msg="Solo cuentas @fivetwofive.mx")
+                url_for("login_firebase_page",
+                        msg="Solo cuentas @fivetwofive.mx")
             )
     except Exception:
         # No rompas la navegación si algo raro pasa aquí
@@ -1544,7 +1573,8 @@ def login_firebase():
 
         # 3) Guardar en sesión
         session.clear()
-        session["user"] = {"correo": email, "nombre": name, "rol": role, "uid": uid}
+        session["user"] = {"correo": email,
+                           "nombre": name, "rol": role, "uid": uid}
         session.permanent = False
 
         return jsonify({"message": "Login exitoso", "role": role}), 200
@@ -1612,7 +1642,7 @@ def alumnos_page():
 def api_alumnos():
     try:
         raw_gen = (request.args.get("generacion") or "").strip()
-        correo  = (request.args.get("correo") or "").strip().lower()
+        correo = (request.args.get("correo") or "").strip().lower()
 
         # Normaliza "G-03" si el usuario manda "g03" o "G - 03"
         gen_norm = None
@@ -1636,13 +1666,16 @@ def api_alumnos():
                 extra=(" OR UPPER(TRIM(REGEXP_EXTRACT(GENERACION_PROGRAMA, r'(G\\s*-\\s*\\d+)'))) = UPPER(TRIM(@gen_norm))"
                        if gen_norm else "")
             ))
-            params.append(bigquery.ScalarQueryParameter("gen_full", "STRING", raw_gen))
+            params.append(bigquery.ScalarQueryParameter(
+                "gen_full", "STRING", raw_gen))
             if gen_norm:
-                params.append(bigquery.ScalarQueryParameter("gen_norm", "STRING", gen_norm))
+                params.append(bigquery.ScalarQueryParameter(
+                    "gen_norm", "STRING", gen_norm))
 
         if correo:
             where.append("LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))")
-            params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
+            params.append(bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo))
 
         where_sql = "WHERE " + " AND ".join(where)
 
@@ -1711,17 +1744,18 @@ def api_alumnos():
             d = dict(r)
 
             # Normaliza strings None → ""
-            for k in ("ID_INSCRIPCION","ID_ALUMNO","NOMBRE_ALUMNO","TELEFONO","CORREO",
-                      "ID_PROGRAMA","PROGRAMA","SKU_PRODUCTO","EMBUDO",
-                      "GENERACION_PROGRAMA","FUENTE","ID_GENERACION_PROGRAMA",
-                      "FECHA_INSCRIPCION","FECHA_COMPRA","FECHA_INICIO","FECHA_FIN"):
+            for k in ("ID_INSCRIPCION", "ID_ALUMNO", "NOMBRE_ALUMNO", "TELEFONO", "CORREO",
+                      "ID_PROGRAMA", "PROGRAMA", "SKU_PRODUCTO", "EMBUDO",
+                      "GENERACION_PROGRAMA", "FUENTE", "ID_GENERACION_PROGRAMA",
+                      "FECHA_INSCRIPCION", "FECHA_COMPRA", "FECHA_INICIO", "FECHA_FIN"):
                 v = d.get(k)
                 d[k] = (v if isinstance(v, str) else (v or ""))
 
             # Floats seguros (sin NaN en JSON)
-            for k in ("PRECIO_GENERACION","GASTO","INGRESO"):
+            for k in ("PRECIO_GENERACION", "GASTO", "INGRESO"):
                 v = d.get(k)
-                d[k] = (float(v) if v is not None and not (isinstance(v, float) and (v != v)) else None)
+                d[k] = (float(v) if v is not None and not (
+                    isinstance(v, float) and (v != v)) else None)
 
             out.append(d)
 
@@ -1813,7 +1847,8 @@ def api_generaciones():
 
         for col in ["FECHA_INICIO", "FECHA_FIN"]:
             df[col] = pd.to_datetime(df[col], errors="coerce")
-            df[col] = df[col].dt.date.astype("string")  # ISO 'YYYY-MM-DD' o <NA>
+            df[col] = df[col].dt.date.astype(
+                "string")  # ISO 'YYYY-MM-DD' o <NA>
 
         for col in df.select_dtypes(include=["object", "string"]).columns:
             df[col] = df[col].fillna("")
@@ -1835,7 +1870,8 @@ def nuevo_alumno():
         telefono = request.form.get("telefono")
         programa = request.form.get("programa")
         generacion = request.form.get("generacion")
-        print("Alumno recibido:", nombre, correo, telefono, programa, generacion)
+        print("Alumno recibido:", nombre, correo,
+              telefono, programa, generacion)
         return redirect(url_for("alumnos_page"))
     return render_template("nuevo_alumno.html")
 
@@ -1847,7 +1883,8 @@ def get_alumno_info(correo):
         rol = current_user_role()  # ← rol del usuario en sesión
 
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo)]
         )
 
         # ---- 1) Info del alumno (se muestra a todos) ----
@@ -1886,7 +1923,8 @@ def get_alumno_info(correo):
                     GROUP BY ID_ALUMNO, CORREO
         """
 
-        result_alumno = client.query(query_alumno, job_config=job_config).result()
+        result_alumno = client.query(
+            query_alumno, job_config=job_config).result()
 
         alumno_info = None
         for row in result_alumno:
@@ -1951,7 +1989,8 @@ def get_alumno_info(correo):
                 FROM base
                 ORDER BY UPDATED_AT DESC
             """
-            result_cursos = client.query(query_cursos, job_config=job_config).result()
+            result_cursos = client.query(
+                query_cursos, job_config=job_config).result()
 
             for row in result_cursos:
                 cursos_info.append(
@@ -1979,7 +2018,8 @@ def get_alumno_info(correo):
                     if len(nombre) > 38:
                         nombre = nombre[:35] + "…"
                     chart_labels.append(nombre or "Curso")
-                    chart_values.append(float(r.get("PERCENTAGE_COMPLETED") or 0))
+                    chart_values.append(
+                        float(r.get("PERCENTAGE_COMPLETED") or 0))
             except Exception as e:
                 print("WARN chart data:", e, flush=True)
 
@@ -2042,7 +2082,8 @@ def get_alumno_info(correo):
         try:
             # Normaliza correo para el cruce (minúsculas + sin espacios)
             correo_norm = re.sub(
-                r"\s+", "", (alumno_info.get("CORREO") or correo or "").strip().lower()
+                r"\s+", "", (alumno_info.get("CORREO")
+                             or correo or "").strip().lower()
             )
 
             q_diag = """
@@ -2140,7 +2181,8 @@ def get_alumno_info(correo):
                 WHERE LOWER(TRIM(CORREO)) = LOWER(TRIM(@correo))
                 ORDER BY FECHA DESC
             """
-            result_seg = client.query(query_seg, job_config=job_config).result()
+            result_seg = client.query(
+                query_seg, job_config=job_config).result()
             for row in result_seg:
                 seguimientos.append(
                     {
@@ -2163,7 +2205,8 @@ def get_alumno_info(correo):
 
         # Preferimos un teléfono “oficial” si existe en postventa; si no, el del alumno
         if isinstance(postventa, dict):
-            phone_raw = postventa.get("TELEFONO_OFICIAL") or postventa.get("TELEFONO")
+            phone_raw = postventa.get(
+                "TELEFONO_OFICIAL") or postventa.get("TELEFONO")
 
         if not phone_raw and isinstance(alumno_info, dict):
             phone_raw = alumno_info.get("TELEFONO")
@@ -2176,7 +2219,8 @@ def get_alumno_info(correo):
                 else ""
             ) or ""
             msg = f"Hola {alumno_nombre}, te saluda el equipo de Mi Mentor de Inversión. ¿Tienes 2 minutos?"
-            whatsapp_url = f"https://wa.me/{e164}?text=" + urllib.parse.quote(msg)
+            whatsapp_url = f"https://wa.me/{e164}?text=" + \
+                urllib.parse.quote(msg)
 
         # ... después de calcular whatsapp_url:
         if (rol or "").lower() == "invitado":
@@ -2227,7 +2271,8 @@ def get_alumno_info(correo):
                         break
                 if raw:
                     parts = re.split(r"\s*\|\s*|\s*,\s*", raw)
-                    webinar_topics = [p.strip() for p in parts if p and p.strip()]
+                    webinar_topics = [p.strip()
+                                      for p in parts if p and p.strip()]
 
             # Fallback de topics solo si rol permite comunidad
             if not webinar_topics and webinars:
@@ -2372,7 +2417,8 @@ def api_mover_seguimiento(seg_id):
         LIMIT 1
         """
         job_ctx = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", seg_id)]
+            query_parameters=[
+                bigquery.ScalarQueryParameter("id", "STRING", seg_id)]
         )
         correo = None
         id_alumno = None
@@ -2426,7 +2472,8 @@ def api_listar_seguimientos():
     ORDER BY FECHA DESC
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "correo", "STRING", correo)]
     )
     rows = client.query(q, job_config=job).result()
 
@@ -2476,7 +2523,8 @@ def postventa_diagnostico():
             errors.append("Ingresa el correo.")
         else:
             if "," in correo_raw:
-                errors.append("El correo contiene coma ',' — cámbiala por punto '.'.")
+                errors.append(
+                    "El correo contiene coma ',' — cámbiala por punto '.'.")
             # Regex sencilla de e-mail
             if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo_norm):
                 errors.append(
@@ -2678,7 +2726,7 @@ def api_postventa_agenda_grid():
     except Exception as e:
         app.logger.warning("FALLBACK agenda grid (sin LIVE view): %s", e)
 
-        sel_base  = _select_cols_for_union(AGENDA_TABLA)
+        sel_base = _select_cols_for_union(AGENDA_TABLA)
         sel_patch = _select_cols_for_union(AGENDA_PATCHES)
 
         q = f"""
@@ -2712,13 +2760,12 @@ def api_postventa_agenda_grid():
         """
         rows = client.query(q).result()
 
-
     out = []
     for r in rows:
         d = dict(r)
         # Normaliza fecha/hora
         d["fecha"] = d.get("fecha").isoformat() if d.get("fecha") else ""
-        d["hora"]  = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
+        d["hora"] = d.get("hora").strftime("%H:%M") if d.get("hora") else ""
         d["pago"] = bool(d.get("pago")) if d.get("pago") is not None else False
         # ⬅️ Serializa updated_at
         u = d.get("updated_at")
@@ -2783,39 +2830,49 @@ def api_postventa_agenda_create():
         correo = _normalize_email(data.get("correo") or "")
         asesor = (data.get("asesor") or "").strip()
         fecha = (data.get("fecha") or "").strip()
-        hora  = (data.get("hora")  or "").strip()
-        calificacion  = data.get("calificacion")
-        semaforo      = (data.get("semaforo") or "").strip()
+        hora = (data.get("hora") or "").strip()
+        calificacion = data.get("calificacion")
+        semaforo = (data.get("semaforo") or "").strip()
         status_compra = (data.get("status_compra") or "").strip()
-        asistio       = data.get("asistio", None)
-        notas         = (data.get("notas") or "").strip()
+        asistio = data.get("asistio", None)
+        notas = (data.get("notas") or "").strip()
 
         errors = []
-        if not nombre: errors.append("Falta el nombre.")
-        if not correo: errors.append("Falta el correo.")
-        if not asesor: errors.append("Falta el asesor.")
-        if not fecha:  errors.append("Falta la fecha (YYYY-MM-DD).")
-        if not hora:   errors.append("Falta la hora (HH:MM).")
+        if not nombre:
+            errors.append("Falta el nombre.")
+        if not correo:
+            errors.append("Falta el correo.")
+        if not asesor:
+            errors.append("Falta el asesor.")
+        if not fecha:
+            errors.append("Falta la fecha (YYYY-MM-DD).")
+        if not hora:
+            errors.append("Falta la hora (HH:MM).")
         if errors:
             return jsonify({"error": " | ".join(errors)}), 400
 
         numero = _normalize_phone(numero_raw)
         try:
-            calificacion = int(calificacion) if calificacion not in (None, "") else None
+            calificacion = int(calificacion) if calificacion not in (
+                None, "") else None
         except Exception:
             calificacion = None
         if isinstance(asistio, str):
-            asistio = asistio.strip().lower() in {"1","true","si","sí","yes","y"}
+            asistio = asistio.strip().lower() in {
+                "1", "true", "si", "sí", "yes", "y"}
 
-        hora_norm = hora if len(hora) == 8 else (hora + ":00" if len(hora) == 5 else "09:00:00")
+        hora_norm = hora if len(hora) == 8 else (
+            hora + ":00" if len(hora) == 5 else "09:00:00")
         try:
             dow_idx = datetime.strptime(fecha, "%Y-%m-%d").weekday()
-            dow_es = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"][dow_idx]
+            dow_es = ["Lunes", "Martes", "Miércoles", "Jueves",
+                      "Viernes", "Sábado", "Domingo"][dow_idx]
         except Exception:
             dow_es = None
 
         event_id = str(uuid.uuid4())
-        natural_key = hashlib.md5(f"{correo}|{fecha}|{hora_norm}".encode()).hexdigest()
+        natural_key = hashlib.md5(
+            f"{correo}|{fecha}|{hora_norm}".encode()).hexdigest()
         now_iso = _now_iso_utc()
 
         row = {
@@ -2855,7 +2912,8 @@ def api_postventa_agenda_events():
             return jsonify([]), 200
 
         def _to_date(x: str | None):
-            if not x: return None
+            if not x:
+                return None
             s = x.replace("Z", "")
             try:
                 return datetime.fromisoformat(s).date()
@@ -2866,18 +2924,23 @@ def api_postventa_agenda_events():
         d2 = _to_date(request.args.get("end"))
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip().lower() in {"1","true","si","sí"}
+        mine = (request.args.get("mine") or "").strip(
+        ).lower() in {"1", "true", "si", "sí"}
 
         user = get_user_from_session()
         raw_nombre = (user.get("nombre") or "").strip()
         raw_correo = (user.get("correo") or "").strip().lower()
 
         first_name = (raw_nombre.split()[0] if raw_nombre else "")
-        email_user = (raw_correo.split("@")[0] if "@" in raw_correo else raw_correo)
+        email_user = (raw_correo.split(
+            "@")[0] if "@" in raw_correo else raw_correo)
 
-        import unicodedata, re
+        import unicodedata
+        import re
+
         def _norm_py(s: str):
-            if not s: return ""
+            if not s:
+                return ""
             s = unicodedata.normalize("NFD", s)
             s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
             s = s.lower()
@@ -2898,11 +2961,14 @@ def api_postventa_agenda_events():
 
         if mine and (needle_name or needle_user):
             where.append("(asesor_norm = @n1 OR asesor_norm = @n2)")
-            params.append(bigquery.ScalarQueryParameter("n1", "STRING", needle_name))
-            params.append(bigquery.ScalarQueryParameter("n2", "STRING", needle_user))
+            params.append(bigquery.ScalarQueryParameter(
+                "n1", "STRING", needle_name))
+            params.append(bigquery.ScalarQueryParameter(
+                "n2", "STRING", needle_user))
         elif asesor_filtro:
             where.append("LOWER(asesor) = LOWER(@a2)")
-            params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
+            params.append(bigquery.ScalarQueryParameter(
+                "a2", "STRING", asesor_filtro))
 
         where_sql = "WHERE " + " AND ".join(where)
 
@@ -2930,21 +2996,29 @@ def api_postventa_agenda_events():
         ORDER BY fecha, hora
         """
 
-        rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
+        rows = client.query(q, job_config=bigquery.QueryJobConfig(
+            query_parameters=params)).result()
 
         def truthy(v):
-            if isinstance(v, bool): return v
-            if v is None: return None
-            if isinstance(v, (int, float)): return bool(v)
+            if isinstance(v, bool):
+                return v
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                return bool(v)
             s = str(v).strip().lower()
-            if s in {"1","true","si","sí","yes","y"}: return True
-            if s in {"0","false","no","n"}: return False
+            if s in {"1", "true", "si", "sí", "yes", "y"}:
+                return True
+            if s in {"0", "false", "no", "n"}:
+                return False
             return None
 
         out = []
         for r in rows:
-            f = r["fecha"]; h = r["hora"]
-            if not f or not h: continue
+            f = r["fecha"]
+            h = r["hora"]
+            if not f or not h:
+                continue
 
             start_dt = datetime.combine(f, h)
             end_dt = start_dt + timedelta(minutes=60)
@@ -2954,14 +3028,16 @@ def api_postventa_agenda_events():
             wa = ""
             try:
                 e164 = to_whatsapp_e164(r["telefono"] or "")
-                if e164: wa = f"https://wa.me/{e164}"
+                if e164:
+                    wa = f"https://wa.me/{e164}"
             except Exception:
                 pass
 
             ver = None
             try:
                 u = r.get("updated_at")
-                ver = u.isoformat() if u is not None and hasattr(u, "isoformat") else (str(u) if u is not None else None)
+                ver = u.isoformat() if u is not None and hasattr(
+                    u, "isoformat") else (str(u) if u is not None else None)
             except Exception:
                 ver = None
 
@@ -2984,7 +3060,7 @@ def api_postventa_agenda_events():
                     "notas": r["notas"],
                     "wa_url": wa,
                     "version": ver,   # para control de concurrencia al mover
-                    "semaforo": None  # mantenemos null por compatibilidad si el front lo consulta
+                    "semaforo": None,  # mantenemos null por compatibilidad si el front lo consulta
                     "pago": bool(r.get("pago"))
                 },
             })
@@ -2994,7 +3070,6 @@ def api_postventa_agenda_events():
     except Exception as e:
         app.logger.exception("Error en /api/postventa/agenda/events")
         return jsonify({"error": "query_failed", "detail": str(e)}), 500
-
 
 
 @app.route("/api/postventa/agenda/<event_id>", methods=["GET"])
@@ -3039,7 +3114,7 @@ def api_postventa_agenda_get(event_id):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/postventa/agenda/<event_id>", methods=["PATCH","POST"])
+@app.route("/api/postventa/agenda/<event_id>", methods=["PATCH", "POST"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_patch_insert(event_id):
     try:
@@ -3097,27 +3172,36 @@ def api_postventa_agenda_patch_insert(event_id):
             v = delta["asistio"]
             if isinstance(v, str):
                 vv = v.strip().lower()
-                v = True if vv in {"1","true","sí","si","yes","y"} else False if vv in {"0","false","no","n"} else None
-            elif v in (1,0):
+                v = True if vv in {"1", "true", "sí", "si", "yes", "y"} else False if vv in {
+                    "0", "false", "no", "n"} else None
+            elif v in (1, 0):
                 v = bool(v)
             elif v is not None and not isinstance(v, bool):
                 v = None
             newv["asistio"] = v
-        if "status_compra" in delta: newv["status_compra"] = (delta["status_compra"] or "").strip()
-        if "semaforo" in delta:      newv["semaforo"]      = (delta["semaforo"] or "").strip()
-        if "notas" in delta:         newv["notas"]         = delta["notas"]
-        if "nombre" in delta:        newv["nombre"]        = (delta["nombre"] or "").strip()
-        if "telefono" in delta:      newv["telefono"]      = _normalize_phone(delta["telefono"] or "")
-        if "correo" in delta:        newv["correo"]        = _normalize_email(delta["correo"] or "")
-        if "asesor" in delta:        newv["asesor"]        = (delta["asesor"] or "").strip()
+        if "status_compra" in delta:
+            newv["status_compra"] = (delta["status_compra"] or "").strip()
+        if "semaforo" in delta:
+            newv["semaforo"] = (delta["semaforo"] or "").strip()
+        if "notas" in delta:
+            newv["notas"] = delta["notas"]
+        if "nombre" in delta:
+            newv["nombre"] = (delta["nombre"] or "").strip()
+        if "telefono" in delta:
+            newv["telefono"] = _normalize_phone(delta["telefono"] or "")
+        if "correo" in delta:
+            newv["correo"] = _normalize_email(delta["correo"] or "")
+        if "asesor" in delta:
+            newv["asesor"] = (delta["asesor"] or "").strip()
         if "calificacion" in delta:
             try:
                 cv = delta["calificacion"]
-                newv["calificacion"] = int(cv) if cv not in ("", None) else None
+                newv["calificacion"] = int(
+                    cv) if cv not in ("", None) else None
             except (ValueError, TypeError):
                 newv["calificacion"] = None
 
-        newv["event_id"]   = str(event_id)
+        newv["event_id"] = str(event_id)
         newv["is_deleted"] = False
 
         # Inserta patch (con updated_at "ahora")
@@ -3133,7 +3217,7 @@ def api_postventa_agenda_patch_insert(event_id):
             "correo": newv.get("correo") or "",
             "asesor": newv.get("asesor") or "",
             "fecha": (newv.get("fecha") or "")[:10],
-            "hora":  (newv.get("hora")  or "")[:5],
+            "hora":  (newv.get("hora") or "")[:5],
             "calificacion": newv.get("calificacion"),
             "semaforo": newv.get("semaforo") or "",
             "status_compra": newv.get("status_compra") or "",
@@ -3148,8 +3232,7 @@ def api_postventa_agenda_patch_insert(event_id):
         return jsonify({"error": str(e)}), 500
 
 
-
-@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE","POST"])
+@app.route("/api/postventa/agenda/<event_id>", methods=["DELETE", "POST"])
 @role_required("postventa", "admin")
 def api_postventa_agenda_delete(event_id):
     try:
@@ -3164,7 +3247,7 @@ def api_postventa_agenda_delete(event_id):
             return jsonify({"error": "No existe el evento"}), 404
 
         patch = {**cur}
-        patch["event_id"]   = str(event_id)
+        patch["event_id"] = str(event_id)
         patch["is_deleted"] = True
 
         _agenda_insert_patch(patch)
@@ -3213,7 +3296,8 @@ def api_comunidad():
         """
         params = []
         if correo:
-            params.append(bigquery.ScalarQueryParameter("correo", "STRING", correo))
+            params.append(bigquery.ScalarQueryParameter(
+                "correo", "STRING", correo))
         job = bigquery.QueryJobConfig(query_parameters=params)
 
         df = client.query(q, job_config=job).to_dataframe()
@@ -3235,7 +3319,8 @@ def api_comunidad():
         ]
         for c in float_cols:
             if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Float64").round(2)
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype(
+                    "Float64").round(2)
 
         int_cols = ["TOTAL_CURSOS", "TOTAL_ASISTENCIA_WEBINAR"]
         for c in int_cols:
@@ -3284,7 +3369,8 @@ def comunidad_panel(correo):
     LIMIT 1
     """
     job = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("correo", "STRING", correo)]
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "correo", "STRING", correo)]
     )
     row = None
     for r in client.query(q, job_config=job).result():
