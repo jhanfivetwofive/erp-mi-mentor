@@ -77,7 +77,9 @@
                 <div id="evtNombre" class="fw-semibold mb-1"></div>
                 <div class="text-muted small" id="evtFecha"></div>
               </div>
-              <div>
+              <div class="text-end">
+                <!-- NUEVO: badge de pago -->
+                <span id="evtBadgePago" class="badge bg-secondary d-none me-1">Pendiente</span>
                 <span id="evtBadgeAsistio" class="badge bg-success d-none">Entrevistado</span>
               </div>
             </div>
@@ -208,9 +210,21 @@
       try {
         const p = currentFilterParams(info);
         const url = '/api/postventa/agenda/events?' + p.toString();
-        const r = await fetch(url);
-        success(await r.json());
-      } catch (e) { failure(e); }
+        const r = await fetch(url, { headers: { 'Accept': 'application/json' }});
+        if (!r.ok) {
+          // si el backend devuelve error, no rompas UI
+          console.warn('Eventos: respuesta no OK', r.status);
+          return success([]);
+        }
+        const data = await r.json();
+        // FullCalendar espera un array; si el servidor envía {error:...}, devuelve []
+        if (Array.isArray(data)) return success(data);
+        console.warn('Eventos: payload inesperado', data);
+        return success([]);
+      } catch (e) {
+        console.error('Eventos: fetch falló', e);
+        return success([]); // fallback silencioso
+      }
     },
 
     eventClick: (arg) => {
@@ -224,11 +238,29 @@
       document.getElementById('evtSem').textContent    = x.semaforo || '';
       document.getElementById('evtStatus').textContent = x.status_compra || '';
       document.getElementById('evtNotas').textContent  = x.notas || '';
-      const badge = document.getElementById('evtBadgeAsistio');
-      if (x.asistio === true) badge.classList.remove('d-none'); else badge.classList.add('d-none');
+
+      // Badge de asistió
+      const badgeAsistio = document.getElementById('evtBadgeAsistio');
+      if (x.asistio === true) badgeAsistio.classList.remove('d-none'); else badgeAsistio.classList.add('d-none');
+
+      // NUEVO: badge de pago
+      const badgePago = document.getElementById('evtBadgePago');
+      const pago = !!x.pago; // si viene undefined/NULL, será false
+      if (pago) {
+        badgePago.textContent = 'Pagó';
+        badgePago.classList.remove('d-none', 'bg-secondary');
+        badgePago.classList.add('bg-success');
+      } else {
+        badgePago.textContent = 'Pendiente';
+        badgePago.classList.remove('d-none', 'bg-success');
+        badgePago.classList.add('bg-secondary');
+      }
+
+      // WhatsApp
       const waBtn = document.getElementById('evtWA');
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
       else { waBtn.classList.add('d-none'); waBtn.removeAttribute('href'); }
+
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
 
