@@ -2975,27 +2975,30 @@ def api_postventa_agenda_events():
         # ⬇️ AHORA LEEMOS DE LA VISTA LIVE
         q = f"""
         WITH base AS (
-          SELECT
+        SELECT
             CAST(event_id AS STRING) AS event_id,
             nombre, telefono, correo, asesor,
             fecha, hora, calificacion, status_compra, asistio, notas,
             IFNULL(is_deleted, FALSE) AS is_deleted,
+            -- normalización simple del asesor para el filtro "mine"
             REGEXP_REPLACE(
-                TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
-                '[^a-z0-9]+',''
-                ) AS asesor_norm,
-            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
-            IFNULL(CAST(pago AS BOOL), FALSE) AS pago
-          FROM `{AGENDA_LIVE_VIEW}`
+            TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+            '[^a-z0-9]+',''
+            ) AS asesor_norm,
+            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at,
+            pago
+        FROM `{AGENDA_LIVE_VIEW}`
         )
         SELECT
-          event_id, nombre, telefono, correo, asesor,
-          fecha, hora, calificacion, status_compra, asistio, notas, updated_at, pago
+        event_id, nombre, telefono, correo, asesor,
+        fecha, hora, calificacion, status_compra, asistio, notas,
+        updated_at, pago
         FROM base
         {where_sql}
-          AND is_deleted = FALSE
+        AND is_deleted = FALSE
         ORDER BY fecha, hora
         """
+
 
         rows = client.query(q, job_config=bigquery.QueryJobConfig(
             query_parameters=params)).result()
@@ -3016,6 +3019,7 @@ def api_postventa_agenda_events():
 
         out = []
         for r in rows:
+            d = dict(r)  # ✅ convierte Row -> dict
             f = r["fecha"]
             h = r["hora"]
             if not f or not h:
@@ -3062,7 +3066,7 @@ def api_postventa_agenda_events():
                     "wa_url": wa,
                     "version": ver,   # para control de concurrencia al mover
                     "semaforo": None,  # mantenemos null por compatibilidad si el front lo consulta
-                    "pago": bool(r.get("pago"))
+                    "pago": bool(d.get("pago")) if d.get("pago") is not None else False
                 },
             })
 
