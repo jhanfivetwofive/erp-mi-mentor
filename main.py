@@ -2924,23 +2924,18 @@ def api_postventa_agenda_events():
         d2 = _to_date(request.args.get("end"))
 
         asesor_filtro = (request.args.get("asesor") or "").strip()
-        mine = (request.args.get("mine") or "").strip(
-        ).lower() in {"1", "true", "si", "sí"}
+        mine = (request.args.get("mine") or "").strip().lower() in {"1", "true", "si", "sí"}
 
         user = get_user_from_session()
         raw_nombre = (user.get("nombre") or "").strip()
         raw_correo = (user.get("correo") or "").strip().lower()
 
         first_name = (raw_nombre.split()[0] if raw_nombre else "")
-        email_user = (raw_correo.split(
-            "@")[0] if "@" in raw_correo else raw_correo)
+        email_user = (raw_correo.split("@")[0] if "@" in raw_correo else raw_correo)
 
-        import unicodedata
-        import re
-
+        import unicodedata, re
         def _norm_py(s: str):
-            if not s:
-                return ""
+            if not s: return ""
             s = unicodedata.normalize("NFD", s)
             s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
             s = s.lower()
@@ -2951,7 +2946,6 @@ def api_postventa_agenda_events():
 
         where = ["1=1"]
         params = []
-
         if d1:
             where.append("fecha >= @d1")
             params.append(bigquery.ScalarQueryParameter("d1", "DATE", d1))
@@ -2961,112 +2955,104 @@ def api_postventa_agenda_events():
 
         if mine and (needle_name or needle_user):
             where.append("(asesor_norm = @n1 OR asesor_norm = @n2)")
-            params.append(bigquery.ScalarQueryParameter(
-                "n1", "STRING", needle_name))
-            params.append(bigquery.ScalarQueryParameter(
-                "n2", "STRING", needle_user))
+            params.append(bigquery.ScalarQueryParameter("n1", "STRING", needle_name))
+            params.append(bigquery.ScalarQueryParameter("n2", "STRING", needle_user))
         elif asesor_filtro:
             where.append("LOWER(asesor) = LOWER(@a2)")
-            params.append(bigquery.ScalarQueryParameter(
-                "a2", "STRING", asesor_filtro))
+            params.append(bigquery.ScalarQueryParameter("a2", "STRING", asesor_filtro))
 
         where_sql = "WHERE " + " AND ".join(where)
 
-        # ⬇️ AHORA LEEMOS DE LA VISTA LIVE
+        # ✅ Solo selecciona `pago` si existe en la vista
+        try:
+            include_pago = _has_col(AGENDA_LIVE_VIEW, "pago")
+        except Exception:
+            include_pago = False
+        pago_sel = ", pago" if include_pago else ""
+
         q = f"""
         WITH base AS (
-        SELECT
+          SELECT
             CAST(event_id AS STRING) AS event_id,
             nombre, telefono, correo, asesor,
             fecha, hora, calificacion, status_compra, asistio, notas,
             IFNULL(is_deleted, FALSE) AS is_deleted,
-            -- normalización simple del asesor para el filtro "mine"
             REGEXP_REPLACE(
-            TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
-            '[^a-z0-9]+',''
+              TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+              r'[^a-z0-9]+',''
             ) AS asesor_norm,
-            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at,
-            pago
-        FROM `{AGENDA_LIVE_VIEW}`
+            SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
+            {pago_sel}
+          FROM `{AGENDA_LIVE_VIEW}`
         )
         SELECT
-        event_id, nombre, telefono, correo, asesor,
-        fecha, hora, calificacion, status_compra, asistio, notas,
-        updated_at, pago
+          event_id, nombre, telefono, correo, asesor,
+          fecha, hora, calificacion, status_compra, asistio, notas,
+          updated_at
+          {pago_sel}
         FROM base
         {where_sql}
-        AND is_deleted = FALSE
+          AND is_deleted = FALSE
         ORDER BY fecha, hora
         """
 
-
-        rows = client.query(q, job_config=bigquery.QueryJobConfig(
-            query_parameters=params)).result()
+        rows = client.query(q, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
 
         def truthy(v):
-            if isinstance(v, bool):
-                return v
-            if v is None:
-                return None
-            if isinstance(v, (int, float)):
-                return bool(v)
+            if isinstance(v, bool): return v
+            if v is None: return None
+            if isinstance(v, (int, float)): return bool(v)
             s = str(v).strip().lower()
-            if s in {"1", "true", "si", "sí", "yes", "y"}:
-                return True
-            if s in {"0", "false", "no", "n"}:
-                return False
+            if s in {"1","true","si","sí","yes","y"}: return True
+            if s in {"0","false","no","n"}: return False
             return None
 
         out = []
         for r in rows:
-            d = dict(r)  # ✅ convierte Row -> dict
-            f = r["fecha"]
-            h = r["hora"]
+            d = dict(r)  # ✅ Row -> dict
+
+            f = d.get("fecha")
+            h = d.get("hora")
             if not f or not h:
                 continue
 
             start_dt = datetime.combine(f, h)
             end_dt = start_dt + timedelta(minutes=60)
 
-            color = _color_for_asesor(r["asesor"] or "")
+            color = _color_for_asesor(d.get("asesor") or "")
 
             wa = ""
             try:
-                e164 = to_whatsapp_e164(r["telefono"] or "")
+                e164 = to_whatsapp_e164(d.get("telefono") or "")
                 if e164:
                     wa = f"https://wa.me/{e164}"
             except Exception:
                 pass
 
-            ver = None
-            try:
-                u = r.get("updated_at")
-                ver = u.isoformat() if u is not None and hasattr(
-                    u, "isoformat") else (str(u) if u is not None else None)
-            except Exception:
-                ver = None
+            u = d.get("updated_at")
+            ver = u.isoformat() if (u is not None and hasattr(u, "isoformat")) else (str(u) if u is not None else None)
 
             out.append({
-                "id":    r["event_id"] or str(uuid.uuid4()),
-                "title": r["nombre"] or "",
+                "id":    d.get("event_id") or str(uuid.uuid4()),
+                "title": d.get("nombre") or "",
                 "start": start_dt.isoformat(),
                 "end":   end_dt.isoformat(),
                 "allDay": False,
                 "backgroundColor": color,
                 "borderColor": color,
-                "classNames": ["evt-asistio"] if truthy(r["asistio"]) else [],
+                "classNames": ["evt-asistio"] if truthy(d.get("asistio")) else [],
                 "extendedProps": {
-                    "asesor": r["asesor"],
-                    "correo": r["correo"],
-                    "numero": r["telefono"],
-                    "calificacion": r["calificacion"],
-                    "status_compra": r["status_compra"],
-                    "asistio": truthy(r["asistio"]),
-                    "notas": r["notas"],
+                    "asesor": d.get("asesor"),
+                    "correo": d.get("correo"),
+                    "numero": d.get("telefono"),
+                    "calificacion": d.get("calificacion"),
+                    "status_compra": d.get("status_compra"),
+                    "asistio": truthy(d.get("asistio")),
+                    "notas": d.get("notas"),
                     "wa_url": wa,
-                    "version": ver,   # para control de concurrencia al mover
-                    "semaforo": None,  # mantenemos null por compatibilidad si el front lo consulta
-                    "pago": bool(d.get("pago")) if d.get("pago") is not None else False
+                    "version": ver,
+                    "semaforo": None,
+                    "pago": bool(d.get("pago")) if ("pago" in d and d.get("pago") is not None) else False  # ✅ seguro si no existe
                 },
             })
 
