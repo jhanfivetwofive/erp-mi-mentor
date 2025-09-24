@@ -2981,9 +2981,9 @@ def api_postventa_agenda_events():
             fecha, hora, calificacion, status_compra, asistio, notas,
             IFNULL(is_deleted, FALSE) AS is_deleted,
             REGEXP_REPLACE(
-              TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
-              r'[^a-z0-9]+',''
-            ) AS asesor_norm,
+                TRANSLATE(LOWER(asesor), 'áéíóúüäëïöàèìòùñç', 'aeiouuaeioaeiounc'),
+                '[^a-z0-9]+',''
+                ) AS asesor_norm,
             SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
             IFNULL(CAST(pago AS BOOL), FALSE) AS pago
           FROM `{AGENDA_LIVE_VIEW}`
