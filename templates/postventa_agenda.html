@@ -116,10 +116,12 @@
 <script>
   // -------- utilidades --------
   function fmtFechaHora(d){
-    return new Intl.DateTimeFormat('es-MX',{
-      weekday:'long', year:'numeric', month:'long', day:'numeric',
-      hour:'2-digit', minute:'2-digit', hour12:false
-    }).format(d);
+    try{
+      return new Intl.DateTimeFormat('es-MX',{
+        weekday:'long', year:'numeric', month:'long', day:'numeric',
+        hour:'2-digit', minute:'2-digit', hour12:false
+      }).format(d);
+    }catch(_){ return ''; }
   }
   function pad2(n){ return String(n).padStart(2,'0'); }
 
@@ -206,24 +208,60 @@
     titleFormat: { year:'numeric', month:'long' },
     slotLabelFormat: { hour:'2-digit', minute:'2-digit', hour12:false },
 
+    // ---- CARGA DE EVENTOS con diagnóstico y protección de errores ----
     events: async (info, success, failure) => {
+      const p = currentFilterParams(info);
+      const url = '/api/postventa/agenda/events?' + p.toString();
       try {
-        const p = currentFilterParams(info);
-        const url = '/api/postventa/agenda/events?' + p.toString();
         const r = await fetch(url, { headers: { 'Accept': 'application/json' }});
         if (!r.ok) {
-          // si el backend devuelve error, no rompas UI
-          console.warn('Eventos: respuesta no OK', r.status);
-          return success([]);
+          const txt = await r.text().catch(()=> '');
+          console.warn('⚠️ /api/postventa/agenda/events HTTP', r.status, txt.slice(0,500));
+          failure(new Error('HTTP ' + r.status));
+          return;
         }
-        const data = await r.json();
-        // FullCalendar espera un array; si el servidor envía {error:...}, devuelve []
-        if (Array.isArray(data)) return success(data);
-        console.warn('Eventos: payload inesperado', data);
-        return success([]);
+        let data = null;
+        try {
+          data = await r.json();
+        } catch (e) {
+          const txt = await r.text().catch(()=> '');
+          console.warn('⚠️ Respuesta no-JSON:', txt.slice(0,500));
+          failure(new Error('Respuesta no válida (no JSON)'));
+          return;
+        }
+        if (!Array.isArray(data)) {
+          console.warn('⚠️ La API devolvió algo que no es array:', data);
+          failure(new Error('Formato inválido'));
+          return;
+        }
+        // sanea campos mínimos para que FullCalendar no se caiga
+        const safe = data.map(ev => ({
+          id: ev.id ?? crypto.randomUUID?.() ?? String(Math.random()),
+          title: ev.title ?? '',
+          start: ev.start ?? null,
+          end: ev.end ?? null,
+          allDay: !!ev.allDay,
+          backgroundColor: ev.backgroundColor || ev.color || undefined,
+          borderColor: ev.borderColor || ev.color || undefined,
+          classNames: Array.isArray(ev.classNames) ? ev.classNames : [],
+          extendedProps: {
+            asesor: ev.extendedProps?.asesor ?? '',
+            correo: ev.extendedProps?.correo ?? '',
+            numero: ev.extendedProps?.numero ?? '',
+            calificacion: ev.extendedProps?.calificacion ?? '',
+            status_compra: ev.extendedProps?.status_compra ?? '',
+            asistio: !!ev.extendedProps?.asistio,
+            notas: ev.extendedProps?.notas ?? '',
+            wa_url: ev.extendedProps?.wa_url ?? '',
+            version: ev.extendedProps?.version ?? '',
+            semaforo: ev.extendedProps?.semaforo ?? '',
+            pago: !!ev.extendedProps?.pago
+          }
+        }));
+        success(safe);
       } catch (e) {
-        console.error('Eventos: fetch falló', e);
-        return success([]); // fallback silencioso
+        console.error('❌ Error fetch eventos:', e);
+        failure(e);
       }
     },
 
@@ -239,14 +277,19 @@
       document.getElementById('evtStatus').textContent = x.status_compra || '';
       document.getElementById('evtNotas').textContent  = x.notas || '';
 
-      // Badge de asistió
-      const badgeAsistio = document.getElementById('evtBadgeAsistio');
-      if (x.asistio === true) badgeAsistio.classList.remove('d-none'); else badgeAsistio.classList.add('d-none');
+      // Badge asistió
+      const badgeAs = document.getElementById('evtBadgeAsistio');
+      if (x.asistio === true) badgeAs.classList.remove('d-none'); else badgeAs.classList.add('d-none');
 
-      // NUEVO: badge de pago
-      const badgePago = document.getElementById('evtBadgePago');
-      const pago = !!x.pago; // si viene undefined/NULL, será false
-      if (pago) {
+      // Badge pago (lo insertamos junto al badge existente para no tocar tu HTML)
+      let badgePago = document.getElementById('evtBadgePago');
+      if (!badgePago) {
+        badgePago = document.createElement('span');
+        badgePago.id = 'evtBadgePago';
+        badgePago.className = 'badge ms-2';
+        badgeAs.parentElement.appendChild(badgePago);
+      }
+      if (x.pago === true) {
         badgePago.textContent = 'Pagó';
         badgePago.classList.remove('d-none', 'bg-secondary');
         badgePago.classList.add('bg-success');
@@ -277,8 +320,10 @@
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify(payload)
         });
-        const j = await res.json().catch(()=>({}));
-        if (!res.ok || j.error) throw new Error(j.error || 'Error');
+        const txt = await res.text();
+        let j = {};
+        try { j = JSON.parse(txt); } catch(_){ /* no-op */ }
+        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status} ${txt.slice(0,200)}`);
       } catch (e) {
         info.revert();
         alert('No se pudo reagendar: ' + e.message);
