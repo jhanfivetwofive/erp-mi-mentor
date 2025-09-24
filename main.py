@@ -2716,7 +2716,7 @@ def api_postventa_agenda_grid():
           SAFE_CAST(fecha AS DATE) AS fecha,
           SAFE_CAST(hora  AS TIME) AS hora,
           calificacion, status_compra, asistio, notas,
-          updated_at, pago                              
+          updated_at, IFNULL(CAST(pago AS BOOL), FALSE) AS pago                            
         FROM `{AGENDA_LIVE_VIEW}`
         WHERE IFNULL(is_deleted, FALSE) = FALSE
         ORDER BY fecha DESC, hora DESC
@@ -2985,6 +2985,7 @@ def api_postventa_agenda_events():
               r'[^a-z0-9]+',''
             ) AS asesor_norm,
             SAFE_CAST(updated_at AS TIMESTAMP) AS updated_at
+            IFNULL(CAST(pago AS BOOL), FALSE) AS pago
           FROM `{AGENDA_LIVE_VIEW}`
         )
         SELECT
