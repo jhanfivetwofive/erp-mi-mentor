@@ -104,6 +104,11 @@
           <i class="bi bi-whatsapp me-1"></i> WhatsApp
         </a>
 
+          <!-- NUEVO: botón Panel -->
+        <a id="evtPanel" href="#" class="btn btn-outline-secondary btn-sm d-none">
+          Panel
+        </a>
+
         <!-- NUEVO: dos opciones -->
         <a id="evtDiagGo" href="#" class="btn btn-primary btn-sm d-none">Ir al diagnóstico</a>
         <a id="evtDiagNew" href="#" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm d-none">
@@ -337,6 +342,18 @@
         goBtn.removeAttribute('onclick');
         newBtn.removeAttribute('href');
       }
+
+      // Botón Panel (abre en la MISMA pestaña)
+      const panelBtn = document.getElementById('evtPanel');
+      if (x.correo) {
+        const correoTrim = String(x.correo || '').trim().toLowerCase();
+        panelBtn.href = `/alumno/${encodeURIComponent(correoTrim)}`;
+        panelBtn.classList.remove('d-none');
+      } else {
+        panelBtn.classList.add('d-none');
+        panelBtn.removeAttribute('href');
+      }
+
 
       // Abre el modal (solo una vez)
       new bootstrap.Modal(document.getElementById('evtModal')).show();
