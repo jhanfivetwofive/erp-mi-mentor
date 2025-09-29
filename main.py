@@ -2558,13 +2558,6 @@ def postventa_diagnostico():
 
         # Si hay errores, re-render con feedback y valores previos
         if errors:
-            prefill = {
-                "nombre":    request.args.get("nombre", ""),
-                "telefono":  request.args.get("telefono", ""),
-                "correo":    request.args.get("correo", ""),
-                "generacion": request.args.get("generacion", ""),
-                "estatus_venta": request.args.get("estatus_venta", ""),
-            }
             return (
                 render_template(
                     "postventa_diagnostico_form.html",
@@ -2604,7 +2597,7 @@ def postventa_diagnostico():
                     "postventa_diagnostico_form.html",
                     preguntas=PREGUNTAS_DEF,
                     errors=[f"Error al guardar en BigQuery: {errors_bq}"],
-                     form=prefill,
+                    form=request.form,
                 ),
                 500,
             )
@@ -2612,9 +2605,20 @@ def postventa_diagnostico():
         return redirect(url_for("postventa_diagnostico_list"))
 
     # GET
+    prefill = {
+        "nombre":        request.args.get("nombre", ""),
+        "telefono":      request.args.get("telefono", ""),
+        "correo":        request.args.get("correo", ""),
+        "generacion":    request.args.get("generacion", ""),
+        "estatus_venta": request.args.get("estatus_venta", ""),
+    }
     return render_template(
-        "postventa_diagnostico_form.html", preguntas=PREGUNTAS_DEF, errors=[], form=None
+        "postventa_diagnostico_form.html",
+        preguntas=PREGUNTAS_DEF,
+        errors=[],
+        form=prefill,   # ⬅️ clave
     )
+    
 
 
 @app.route("/postventa/diagnostico/list")
