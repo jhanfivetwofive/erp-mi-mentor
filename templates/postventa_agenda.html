@@ -103,8 +103,15 @@
         <a id="evtWA" href="#" target="_blank" class="btn btn-success btn-sm d-none">
           <i class="bi bi-whatsapp me-1"></i> WhatsApp
         </a>
-        <a id="evtDiag" href="#" target="_blank" class="btn btn-primary btn-sm d-none">Abrir diagnóstico</a>
+
+        <!-- NUEVO: dos opciones -->
+        <a id="evtDiagGo" href="#" class="btn btn-primary btn-sm d-none">Ir al diagnóstico</a>
+        <a id="evtDiagNew" href="#" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm d-none">
+          Abrir en nueva pestaña
+        </a>
+
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+
       </div>
     </div>
   </div>
@@ -283,14 +290,8 @@
       const badgeAs = document.getElementById('evtBadgeAsistio');
       if (x.asistio === true) badgeAs.classList.remove('d-none'); else badgeAs.classList.add('d-none');
 
-      // Badge pago (lo insertamos junto al badge existente para no tocar tu HTML)
-      let badgePago = document.getElementById('evtBadgePago');
-      if (!badgePago) {
-        badgePago = document.createElement('span');
-        badgePago.id = 'evtBadgePago';
-        badgePago.className = 'badge ms-2';
-        badgeAs.parentElement.appendChild(badgePago);
-      }
+      // Badge pago
+      const badgePago = document.getElementById('evtBadgePago');
       if (x.pago === true) {
         badgePago.textContent = 'Pagó';
         badgePago.classList.remove('d-none', 'bg-secondary');
@@ -306,18 +307,38 @@
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
       else { waBtn.classList.add('d-none'); waBtn.removeAttribute('href'); }
 
-      new bootstrap.Modal(document.getElementById('evtModal')).show();
-      
-      // AbrirDiagnostico
-      const btnDiag = document.getElementById('evtDiag');
+      // Botones de diagnóstico
+      const goBtn  = document.getElementById('evtDiagGo');   // misma pestaña
+      const newBtn = document.getElementById('evtDiagNew');  // nueva pestaña
+
       if (x.diag_url) {
-        btnDiag.href = x.diag_url;
-        btnDiag.classList.remove('d-none');
+        // Mostrar ambos
+        goBtn.classList.remove('d-none');
+        newBtn.classList.remove('d-none');
+
+        // Limpia handlers previos
+        goBtn.onclick = null;
+
+        // MISMA PESTAÑA → cierra modal y navega
+        goBtn.onclick = (ev) => {
+          ev.preventDefault();
+          const m = bootstrap.Modal.getInstance(document.getElementById('evtModal'));
+          m?.hide();
+          // Evita el “freeze” cerrando el modal antes de navegar
+          setTimeout(() => { location.assign(x.diag_url); }, 0);
+        };
+
+        // NUEVA PESTAÑA (ya tiene target _blank + rel noopener)
+        newBtn.href = x.diag_url;
+
       } else {
-        btnDiag.classList.add('d-none');
-        btnDiag.removeAttribute('href');
+        goBtn.classList.add('d-none');
+        newBtn.classList.add('d-none');
+        goBtn.removeAttribute('onclick');
+        newBtn.removeAttribute('href');
       }
 
+      // Abre el modal (solo una vez)
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
 
