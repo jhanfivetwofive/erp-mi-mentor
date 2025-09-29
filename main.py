@@ -2635,6 +2635,39 @@ def postventa_diagnostico_list():
         "postventa_diagnostico_list.html", data=data, preguntas=PREGUNTAS_DEF
     )
 
+@app.route("/postventa/diagnostico/from-event/<event_id>")
+@role_required("postventa", "admin")
+def diag_from_event(event_id):
+    # 1) Trae el evento (última versión)
+    ev = _agenda_get_latest_any(event_id)
+    if not ev:
+        flash("Evento no encontrado", "warning")
+        return redirect(url_for("postventa_agenda_page"))
+
+    # 2) Busca si ya hay diagnóstico ligado a este evento (por event_id)
+    #    O por correo+fecha como fallback si así lo prefieres
+    diag = _diagnostico_get_by_event_id(event_id)  # <- implementa este helper
+    if not diag:
+        # 3) Si no existe, crea “borrador” con datos base
+        payload = {
+            "event_id": str(event_id),
+            "nombre": (ev.get("nombre") or "").strip(),
+            "telefono": (ev.get("telefono") or "").strip(),
+            "correo": (ev.get("correo") or "").strip(),
+            "asesor": (ev.get("asesor") or "").strip(),
+            "fecha_cita": ev.get("fecha"),  # DATE
+            "hora_cita": ev.get("hora"),    # TIME
+            # ... agrega campos del cuestionario que puedas prellenar
+            "estatus": "borrador",
+        }
+        diag_id = _diagnostico_insert_or_upsert(payload)  # <- inserta en DM_ENCUESTA_DIAGNOSTICO_POSTVENTA
+    else:
+        diag_id = diag["id"]
+
+    # 4) Redirige al editor del diagnóstico
+    return redirect(url_for("diagnostico_edit_page", diag_id=diag_id))
+
+
 
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
@@ -3032,6 +3065,8 @@ def api_postventa_agenda_events():
             u = d.get("updated_at")
             ver = u.isoformat() if (u is not None and hasattr(u, "isoformat")) else (str(u) if u is not None else None)
 
+            diag_url = url_for("diag_from_event", event_id=d.get("event_id"), _external=False)
+
             out.append({
                 "id":    d.get("event_id") or str(uuid.uuid4()),
                 "title": d.get("nombre") or "",
@@ -3052,7 +3087,9 @@ def api_postventa_agenda_events():
                     "wa_url": wa,
                     "version": ver,
                     "semaforo": None,
-                    "pago": bool(d.get("pago")) if ("pago" in d and d.get("pago") is not None) else False  # ✅ seguro si no existe
+                    "pago": bool(d.get("pago")) if ("pago" in d and d.get("pago") is not None) else False,  # ✅ seguro si no existe
+                    "diag_url": diag_url
+
                 },
             })
 

@@ -103,6 +103,7 @@
         <a id="evtWA" href="#" target="_blank" class="btn btn-success btn-sm d-none">
           <i class="bi bi-whatsapp me-1"></i> WhatsApp
         </a>
+        <a id="evtDiag" href="#" target="_blank" class="btn btn-primary btn-sm d-none">Abrir diagnóstico</a>
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
       </div>
     </div>
@@ -255,7 +256,8 @@
             wa_url: ev.extendedProps?.wa_url ?? '',
             version: ev.extendedProps?.version ?? '',
             semaforo: ev.extendedProps?.semaforo ?? '',
-            pago: !!ev.extendedProps?.pago
+            pago: !!ev.extendedProps?.pago,
+            diag_url: ev.extendedProps?.diag_url ?? ''
           }
         }));
         success(safe);
@@ -303,6 +305,18 @@
       const waBtn = document.getElementById('evtWA');
       if (x.wa_url) { waBtn.classList.remove('d-none'); waBtn.href = x.wa_url; }
       else { waBtn.classList.add('d-none'); waBtn.removeAttribute('href'); }
+
+      new bootstrap.Modal(document.getElementById('evtModal')).show();
+      
+      // AbrirDiagnostico
+      const btnDiag = document.getElementById('evtDiag');
+      if (x.diag_url) {
+        btnDiag.href = x.diag_url;
+        btnDiag.classList.remove('d-none');
+      } else {
+        btnDiag.classList.add('d-none');
+        btnDiag.removeAttribute('href');
+      }
 
       new bootstrap.Modal(document.getElementById('evtModal')).show();
     },
