@@ -7,6 +7,7 @@ from flask import (
     redirect,
     url_for,
     abort,
+    flash,
 )
 from google.cloud import bigquery
 import os
@@ -2557,6 +2558,13 @@ def postventa_diagnostico():
 
         # Si hay errores, re-render con feedback y valores previos
         if errors:
+            prefill = {
+                "nombre":    request.args.get("nombre", ""),
+                "telefono":  request.args.get("telefono", ""),
+                "correo":    request.args.get("correo", ""),
+                "generacion": request.args.get("generacion", ""),
+                "estatus_venta": request.args.get("estatus_venta", ""),
+            }
             return (
                 render_template(
                     "postventa_diagnostico_form.html",
@@ -2596,7 +2604,7 @@ def postventa_diagnostico():
                     "postventa_diagnostico_form.html",
                     preguntas=PREGUNTAS_DEF,
                     errors=[f"Error al guardar en BigQuery: {errors_bq}"],
-                    form=request.form,
+                     form=prefill,
                 ),
                 500,
             )
@@ -2638,36 +2646,23 @@ def postventa_diagnostico_list():
 @app.route("/postventa/diagnostico/from-event/<event_id>")
 @role_required("postventa", "admin")
 def diag_from_event(event_id):
-    # 1) Trae el evento (última versión)
+    # Trae la última versión del evento
     ev = _agenda_get_latest_any(event_id)
     if not ev:
         flash("Evento no encontrado", "warning")
         return redirect(url_for("postventa_agenda_page"))
 
-    # 2) Busca si ya hay diagnóstico ligado a este evento (por event_id)
-    #    O por correo+fecha como fallback si así lo prefieres
-    diag = _diagnostico_get_by_event_id(event_id)  # <- implementa este helper
-    if not diag:
-        # 3) Si no existe, crea “borrador” con datos base
-        payload = {
-            "event_id": str(event_id),
-            "nombre": (ev.get("nombre") or "").strip(),
-            "telefono": (ev.get("telefono") or "").strip(),
-            "correo": (ev.get("correo") or "").strip(),
-            "asesor": (ev.get("asesor") or "").strip(),
-            "fecha_cita": ev.get("fecha"),  # DATE
-            "hora_cita": ev.get("hora"),    # TIME
-            # ... agrega campos del cuestionario que puedas prellenar
-            "estatus": "borrador",
-        }
-        diag_id = _diagnostico_insert_or_upsert(payload)  # <- inserta en DM_ENCUESTA_DIAGNOSTICO_POSTVENTA
-    else:
-        diag_id = diag["id"]
-
-    # 4) Redirige al editor del diagnóstico
-    return redirect(url_for("diagnostico_edit_page", diag_id=diag_id))
-
-
+    # Redirige al formulario de diagnóstico con prefill por querystring
+    params = dict(
+        from_event=event_id,
+        nombre=(ev.get("nombre") or "").strip(),
+        telefono=(ev.get("telefono") or "").strip(),
+        correo=(ev.get("correo") or "").strip(),
+        # si tienes estos campos en tu cuestionario, puedes mandarlos también:
+        # generacion="",
+        # estatus_venta="0",
+    )
+    return redirect(url_for("postventa_diagnostico", **params))
 
 @app.route("/postventa/insights")
 @role_required("postventa", "admin")
